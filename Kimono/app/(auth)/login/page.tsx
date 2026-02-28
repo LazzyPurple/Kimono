@@ -31,15 +31,15 @@ export default function LoginPage() {
         redirect: false,
       });
 
-      if (result?.error) {
+      if (result?.error || !result?.ok) {
         setError("Mot de passe incorrect.");
         setLoading(false);
         return;
       }
 
       // Vérifier si le TOTP est requis
-      const res = await fetch("/api/auth/session");
-      const session = await res.json();
+      const sessionRes = await fetch("/api/auth/session");
+      const session = await sessionRes.json();
 
       if (session?.needsTotp) {
         setUserId(session.user?.id || "");
@@ -49,7 +49,7 @@ export default function LoginPage() {
       }
 
       // Pas de TOTP — connexion directe
-      router.push("/");
+      router.push("/search");
       router.refresh();
     } catch {
       setError("Une erreur est survenue.");
@@ -76,7 +76,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/");
+      router.push("/search");
       router.refresh();
     } catch {
       setError("Une erreur est survenue.");
