@@ -11,41 +11,59 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Mot de passe", type: "password" },
       },
       async authorize(credentials) {
-        const password = credentials?.password as string;
+        // Log complet des credentials pour voir exactement la structure reçue
+        console.log("[AUTH] Credentials reçus:", JSON.stringify(credentials));
 
-        if (!password) return null;
-
-        // Vérifier le mot de passe maître
-        const adminPassword = process.env.ADMIN_PASSWORD;
-        if (!adminPassword || password !== adminPassword) {
+        const password = credentials?.password || credentials?.["password"];
+        
+        if (!password) {
+          console.log("[AUTH] Pas de mot de passe trouvé dans l'objet");
           return null;
         }
 
-        // Récupérer ou créer l'utilisateur unique admin
-        let user = await prisma.user.findFirst();
+        const passwordStr = String(password).trim();
+        const adminPassword = process.env.ADMIN_PASSWORD?.trim();
 
-        if (!user) {
-          user = await prisma.user.create({
-            data: {
-              email: "admin@kimono.local",
-            },
-          });
+        if (!adminPassword || passwordStr !== adminPassword) {
+          console.log("[AUTH] Erreur correspondance mot de passe");
+          return null;
         }
 
-        // Si le TOTP est activé, on ne connecte pas encore —
-        // on renvoie l'user avec un flag indiquant qu'il faut vérifier le TOTP
-        if (user.totpEnabled) {
+        console.log("[AUTH] Mot de passe OK, vérification de l'utilisateur en base...");
+
+        try {
+          // Récupérer ou créer l'utilisateur unique admin
+          let user = await prisma.user.findFirst();
+
+          if (!user) {
+            console.log("[AUTH] Création du premier utilisateur admin...");
+            user = await prisma.user.create({
+              data: {
+                email: "admin@kimono.local",
+              },
+            });
+          }
+
+          console.log("[AUTH] Utilisateur trouvé/créé:", user.email);
+
+          // Si le TOTP est activé, on ne connecte pas encore —
+          // on renvoie l'user avec un flag indiquant qu'il faut vérifier le TOTP
+          if (user.totpEnabled) {
+            return {
+              id: user.id,
+              email: user.email,
+              needsTotp: true,
+            } as any;
+          }
+
           return {
             id: user.id,
             email: user.email,
-            needsTotp: true,
-          } as any;
+          };
+        } catch (error) {
+          console.error("[AUTH] Erreur base de données:", error);
+          return null;
         }
-
-        return {
-          id: user.id,
-          email: user.email,
-        };
       },
     }),
     Credentials({
@@ -104,4 +122,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/login",
   },
   trustHost: true,
+  debug: true,
 });

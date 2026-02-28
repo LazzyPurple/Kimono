@@ -7,7 +7,7 @@ import { getToken } from "next-auth/jwt";
  * Ne charge PAS auth.ts pour éviter les imports Node.js en Edge.
  * Vérifie simplement l'existence d'un token JWT valide.
  */
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const token = await getToken({
     req: request,
     secret: process.env.AUTH_SECRET,
