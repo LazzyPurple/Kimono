@@ -1,0 +1,44 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model User {
+  id          String    @id @default(cuid())
+  email       String    @unique
+  totpSecret  String?
+  totpEnabled Boolean   @default(false)
+  passkeys    Passkey[]
+  sessions    Session[]
+  createdAt   DateTime  @default(now())
+}
+
+model Passkey {
+  id           String   @id @default(cuid())
+  userId       String
+  credentialId String   @unique
+  publicKey    String
+  counter      BigInt
+  deviceName   String?
+  user         User     @relation(fields: [userId], references: [id])
+  createdAt    DateTime @default(now())
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model KimonoSession {
+  id       String   @id @default(cuid())
+  site     String
+  cookie   String
+  username String
+  savedAt  DateTime @default(now())
+}
