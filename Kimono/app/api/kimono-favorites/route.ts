@@ -16,6 +16,9 @@ export async function GET(request: NextRequest) {
     orderBy: { savedAt: "desc" },
   });
 
+  console.log("[FAV] Session found:", !!session);
+  console.log("[FAV] Cookie stored:", session?.cookie?.substring(0, 100));
+
   if (!session) {
     return NextResponse.json({ loggedIn: false, favorites: [] });
   }

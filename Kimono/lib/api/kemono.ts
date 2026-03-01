@@ -38,7 +38,9 @@ export interface Post {
 const client: AxiosInstance = axios.create({
   baseURL: "https://kemono.cr/api",
   headers: {
-    Accept: "application/json",
+    Accept: "text/css",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://kemono.cr/",
   },
   timeout: 15000,
 });
@@ -77,21 +79,45 @@ export async function fetchCreatorProfile(
 
 /**
  * Recherche des créateurs par nom (filtre client-side depuis /v1/creators.txt)
- */
-/**
- * Recherche des créateurs par nom (filtre client-side depuis /v1/creators.txt)
  * Utilise un cache mémoire valide 10 minutes pour éviter les requêtes répétées.
  */
 export async function searchCreators(query: string): Promise<Creator[]> {
   const now = Date.now();
+  console.log("[SEARCH/kemono] Cache status - has cache:", !!creatorsCache,
+    "| age (s):", Math.round((now - creatorsCacheTime) / 1000));
+
   if (!creatorsCache || now - creatorsCacheTime > CACHE_TTL_MS) {
-    const { data } = await client.get<Creator[]>("/v1/creators.txt");
-    creatorsCache = data;
-    creatorsCacheTime = now;
+    try {
+      const { data } = await client.get("/v1/creators.txt", {
+        headers: { Accept: "application/json, text/plain, */*" },
+      });
+      console.log("[SEARCH/kemono] creators.txt response type:", typeof data,
+        "| isArray:", Array.isArray(data), "| length:", data?.length);
+
+      // creators.txt peut renvoyer du texte brut qu'il faut parser
+      const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
+
+      if (!Array.isArray(creators) || creators.length === 0) {
+        throw new Error(`Unexpected creators data: ${JSON.stringify(creators).slice(0, 200)}`);
+      }
+
+      creatorsCache = creators;
+      creatorsCacheTime = now;
+      console.log("[SEARCH/kemono] Fetched creators count:", creators.length);
+    } catch (err) {
+      console.log("[SEARCH/kemono] fetch error:", err);
+      // Retourner le cache périmé si disponible plutôt qu'une liste vide
+      if (creatorsCache) return creatorsCache.filter((c) =>
+        c.name.toLowerCase().includes(query.toLowerCase()));
+      return [];
+    }
   }
+
   if (!query.trim()) return [];
   const lower = query.toLowerCase();
-  return creatorsCache.filter((c) => c.name.toLowerCase().includes(lower));
+  const result = creatorsCache!.filter((c) => c.name.toLowerCase().includes(lower));
+  console.log("[SEARCH/kemono] Results for query", query, ":", result.length, "matches");
+  return result;
 }
 
 /**
