@@ -22,7 +22,7 @@ export default function CreatorCard({
   updated,
 }: CreatorCardProps) {
   return (
-    <a href={`/creator/${service}/${id}`}>
+    <a href={`/creator/${site}/${service}/${id}`}>
       <Card className="bg-[#12121a] border-[#1e1e2e] group hover:border-[#7c3aed]/50 transition-all duration-300 cursor-pointer">
         <CardContent className="p-4 flex items-center gap-4">
           {/* Avatar */}
