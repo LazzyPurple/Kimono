@@ -21,18 +21,32 @@ export async function POST(request: NextRequest) {
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
 
   try {
+    const params = new URLSearchParams();
+    params.append("username", username);
+    params.append("password", password);
+
     const res = await axios.post(
       `${baseUrl}/api/v1/authentication/login`,
-      { username, password },
+      params,
       {
-        maxRedirects: 0,
-        validateStatus: (s) => s < 400,
+        headers: {
+          Accept: "text/css",
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Referer": baseUrl + "/",
+        },
+        maxRedirects: 5,
+        validateStatus: (s: number) => s < 500,
         withCredentials: true,
       }
     );
 
+    console.log("[LOGIN] status:", res.status);
+    console.log("[LOGIN] set-cookie:", res.headers["set-cookie"]);
+
     const rawCookies = res.headers["set-cookie"];
     if (!rawCookies || rawCookies.length === 0) {
+      console.log("[LOGIN] No cookies received - response body:", JSON.stringify(res.data));
       return NextResponse.json(
         { error: "Identifiants incorrects" },
         { status: 401 }
@@ -43,6 +57,8 @@ export async function POST(request: NextRequest) {
     const cookie = rawCookies
       .map((c) => c.split(";")[0].trim())
       .join("; ");
+
+    console.log("[LOGIN] Cookie extracted:", cookie);
 
     // Supprimer l'ancienne session et créer la nouvelle
     await prisma.kimonoSession.deleteMany({ where: { site } });
