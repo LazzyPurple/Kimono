@@ -10,14 +10,15 @@ const client: AxiosInstance = axios.create({
   baseURL: "https://coomer.st/api",
   headers: {
     Accept: "text/css",
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Referer": "https://coomer.st/",
   },
   timeout: 15000,
 });
 
 /**
  * Récupère les posts d'un créateur
+ * NOTE: Coomer a changé son API en août 2025 :
+ *   ancien : /v1/{service}/user/{id}?o=
+ *   nouveau: /v1/{service}/user/{id}/posts?o=
  */
 export async function fetchCreatorPosts(
   service: string,
@@ -25,7 +26,7 @@ export async function fetchCreatorPosts(
   offset: number = 0
 ): Promise<Post[]> {
   const { data } = await client.get<Post[]>(
-    `/v1/${service}/user/${creatorId}`,
+    `/v1/${service}/user/${creatorId}/posts`,
     { params: { o: offset } }
   );
   return data;
@@ -49,7 +50,11 @@ export async function fetchCreatorProfile(
 }
 
 /**
- * Recherche des créateurs par nom (filtre client-side depuis /v1/creators.txt)
+ * Recherche des créateurs par nom.
+ * Coomer n'a PAS d'endpoint /v1/creators.txt (contrairement à Kemono).
+ * On essaie plusieurs endpoints en fallback.
+ * Si aucun ne fonctionne, on retourne un tableau vide silencieusement
+ * (la recherche fonctionnera toujours via Kemono dans unified.ts).
  */
 export async function searchCreators(query: string): Promise<Creator[]> {
   const now = Date.now();
@@ -57,28 +62,31 @@ export async function searchCreators(query: string): Promise<Creator[]> {
     "| age (s):", Math.round((now - creatorsCacheTime) / 1000));
 
   if (!creatorsCache || now - creatorsCacheTime > CACHE_TTL_MS) {
-    try {
-      const { data } = await client.get("/v1/creators.txt", {
-        headers: { Accept: "application/json, text/plain, */*" },
-      });
-      console.log("[SEARCH/coomer] creators.txt response type:", typeof data,
-        "| isArray:", Array.isArray(data), "| length:", data?.length);
+    const endpoints = ["/v1/creators.txt", "/v1/creators"];
 
-      // creators.txt peut renvoyer du texte brut qu'il faut parser
-      const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
+    for (const endpoint of endpoints) {
+      try {
+        console.log("[SEARCH/coomer] Trying endpoint:", endpoint);
+        const { data } = await client.get(endpoint);
+        console.log("[SEARCH/coomer] response type:", typeof data,
+          "| isArray:", Array.isArray(data), "| length:", data?.length);
 
-      if (!Array.isArray(creators) || creators.length === 0) {
-        throw new Error(`Unexpected creators data: ${JSON.stringify(creators).slice(0, 200)}`);
+        const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
+
+        if (Array.isArray(creators) && creators.length > 0) {
+          creatorsCache = creators;
+          creatorsCacheTime = now;
+          console.log("[SEARCH/coomer] Fetched creators count:", creators.length, "from", endpoint);
+          break;
+        }
+      } catch (err: any) {
+        console.log(`[SEARCH/coomer] ${endpoint} failed:`, err?.response?.status || err?.message);
+        continue;
       }
+    }
 
-      creatorsCache = creators;
-      creatorsCacheTime = now;
-      console.log("[SEARCH/coomer] Fetched creators count:", creators.length);
-    } catch (err) {
-      console.log("[SEARCH/coomer] fetch error:", err);
-      // Retourner le cache périmé si disponible plutôt qu'une liste vide
-      if (creatorsCache) return creatorsCache.filter((c) =>
-        c.name.toLowerCase().includes(query.toLowerCase()));
+    if (!creatorsCache) {
+      console.log("[SEARCH/coomer] No creators endpoint available — coomer search disabled");
       return [];
     }
   }
@@ -105,7 +113,7 @@ export async function fetchRecentPosts(offset: number = 0): Promise<Post[]> {
  */
 export async function fetchFavorites(cookie: string): Promise<Creator[]> {
   const { data } = await client.get<Creator[]>("/v1/account/favorites", {
-    headers: { Cookie: cookie },
+    headers: { Accept: "text/css", Cookie: cookie },
     params: { type: "artist" },
   });
   return data;
