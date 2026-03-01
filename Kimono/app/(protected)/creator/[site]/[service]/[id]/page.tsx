@@ -56,7 +56,9 @@ export default function CreatorPage() {
         const res = await fetch(
           `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`
         );
-        const data: UnifiedPost[] = await res.json();
+        const raw = await res.json();
+        // Guard: s'assurer qu'on a toujours un tableau
+        const data: UnifiedPost[] = Array.isArray(raw) ? raw : [];
 
         if (currentOffset === 0) {
           setPosts(data);

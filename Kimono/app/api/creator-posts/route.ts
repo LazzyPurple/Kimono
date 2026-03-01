@@ -15,12 +15,14 @@ export async function GET(request: NextRequest) {
 
   try {
     const posts = await fetchCreatorPostsBySite(site, service, id, offset);
-    return NextResponse.json(posts);
+    // Guard: s'assurer qu'on retourne toujours un tableau
+    const safePosts = Array.isArray(posts) ? posts : [];
+    if (!Array.isArray(posts)) {
+      console.error("creator-posts: unexpected response (not an array):", posts);
+    }
+    return NextResponse.json(safePosts);
   } catch (err) {
     console.error("creator-posts error:", err);
-    return NextResponse.json(
-      { error: "Impossible de récupérer les posts" },
-      { status: 500 }
-    );
+    return NextResponse.json([], { status: 200 }); // retourner [] plutôt qu'une erreur JSON
   }
 }

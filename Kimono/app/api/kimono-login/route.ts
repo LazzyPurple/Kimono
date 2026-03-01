@@ -21,28 +21,31 @@ export async function POST(request: NextRequest) {
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
 
   try {
-    const params = new URLSearchParams();
-    params.append("username", username);
-    params.append("password", password);
-
+    // JSON body (comme KemonoSnap), pas URLSearchParams
     const res = await axios.post(
       `${baseUrl}/api/v1/authentication/login`,
-      params,
+      { username, password },
       {
         headers: {
           Accept: "text/css",
-          "Content-Type": "application/x-www-form-urlencoded",
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Referer": baseUrl + "/",
+          "Content-Type": "application/json",
         },
-        maxRedirects: 5,
-        validateStatus: (s: number) => s < 500,
-        withCredentials: true,
+        // Gérer tous les status manuellement (ne pas throw sur 401, etc.)
+        validateStatus: () => true,
       }
     );
 
     console.log("[LOGIN] status:", res.status);
     console.log("[LOGIN] set-cookie:", res.headers["set-cookie"]);
+
+    // Vérifier explicitement le status avant de chercher les cookies
+    if (res.status !== 200) {
+      console.log("[LOGIN] Non-200 response:", res.status, "body:", JSON.stringify(res.data));
+      return NextResponse.json(
+        { error: res.data?.error || `Connexion échouée (${res.status})` },
+        { status: 401 }
+      );
+    }
 
     const rawCookies = res.headers["set-cookie"];
     if (!rawCookies || rawCookies.length === 0) {
@@ -53,10 +56,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Extraire les paires nom=valeur des cookies (sans les attributs)
-    const cookie = rawCookies
-      .map((c) => c.split(";")[0].trim())
-      .join("; ");
+    // Extraire spécifiquement le cookie session= (comme KemonoSnap)
+    const sessionMatch = rawCookies.find((c) => c.startsWith("session="));
+    const cookie = sessionMatch
+      ? sessionMatch.split(";")[0]
+      : rawCookies.map((c) => c.split(";")[0].trim()).join("; ");
 
     console.log("[LOGIN] Cookie extracted:", cookie);
 
