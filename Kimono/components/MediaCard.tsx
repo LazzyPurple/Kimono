@@ -30,6 +30,7 @@ export default function MediaCard({
   onClick,
 }: MediaCardProps) {
   const [hovered, setHovered] = useState(false);
+  const [imgError, setImgError] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
@@ -47,6 +48,7 @@ export default function MediaCard({
   }, []);
 
   const previewSrc = videoUrl || thumbnailUrl;
+  const showImg = (thumbnailUrl && !imgError);
 
   return (
     <Card
@@ -67,16 +69,20 @@ export default function MediaCard({
             playsInline
             className="w-full h-full object-cover"
           />
-        ) : hovered && type === "image" && thumbnailUrl ? (
+        ) : hovered && type === "image" && showImg ? (
           <img
             src={thumbnailUrl}
             alt={title}
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
             className="w-full h-full object-contain transition-all duration-300"
           />
-        ) : thumbnailUrl ? (
+        ) : showImg ? (
           <img
             src={thumbnailUrl}
             alt={title}
+            referrerPolicy="no-referrer"
+            onError={() => setImgError(true)}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
