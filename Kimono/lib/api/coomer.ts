@@ -23,11 +23,15 @@ const client: AxiosInstance = axios.create({
 export async function fetchCreatorPosts(
   service: string,
   creatorId: string,
-  offset: number = 0
+  offset: number = 0,
+  cookie?: string
 ): Promise<Post[]> {
   const { data } = await client.get<Post[]>(
     `/v1/${service}/user/${creatorId}/posts`,
-    { params: { o: offset } }
+    {
+      params: { o: offset },
+      ...(cookie ? { headers: { Cookie: cookie } } : {}),
+    }
   );
   return data;
 }
@@ -93,7 +97,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
 
   if (!query.trim()) return [];
   const lower = query.toLowerCase();
-  const result = creatorsCache!.filter((c) => c.name.toLowerCase().includes(lower));
+  const result = creatorsCache!.filter((c) => c.name.toLowerCase().includes(lower)).slice(0, 50);
   console.log("[SEARCH/coomer] Results for query", query, ":", result.length, "matches");
   return result;
 }

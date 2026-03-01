@@ -48,7 +48,7 @@ export default function DetailPanel({ post, open, onClose }: DetailPanelProps) {
     (a) => getMediaType(a.name || a.path) !== null
   );
   const firstMediaType = firstMedia ? getMediaType(firstMedia.name || firstMedia.path) : null;
-  const firstMediaUrl = firstMedia ? `${baseUrl}/data${firstMedia.path}` : null;
+  const firstMediaUrl = firstMedia ? encodeURI(`${baseUrl}/data${firstMedia.path}`) : null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -154,7 +154,7 @@ export default function DetailPanel({ post, open, onClose }: DetailPanelProps) {
               </h3>
               <div className="space-y-1.5">
                 {allAttachments.map((att, i) => {
-                  const fileUrl = `${baseUrl}/data${att.path}`;
+                  const fileUrl = encodeURI(`${baseUrl}/data${att.path}`);
                   const mtype = getMediaType(att.name || att.path);
                   const icon = mtype === "video" ? "🎬" : mtype === "image" ? "🖼" : "📄";
                   return (

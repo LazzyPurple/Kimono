@@ -24,9 +24,10 @@ export async function fetchCreatorPostsBySite(
   site: Site,
   service: string,
   creatorId: string,
-  offset: number = 0
+  offset: number = 0,
+  cookie?: string
 ): Promise<UnifiedPost[]> {
-  const posts = await siteApi(site).fetchCreatorPosts(service, creatorId, offset);
+  const posts = await siteApi(site).fetchCreatorPosts(service, creatorId, offset, cookie);
   return posts.map((p) => ({ ...p, site }));
 }
 
@@ -108,9 +109,13 @@ export async function fetchRecentPosts(
 
   if (results[0].status === "fulfilled") {
     posts.push(...results[0].value.map((p) => ({ ...p, site: "kemono" as Site })));
+  } else {
+    console.error("[RECENT] kemono fetchRecentPosts failed:", results[0].reason?.message || results[0].reason);
   }
   if (results[1].status === "fulfilled") {
     posts.push(...results[1].value.map((p) => ({ ...p, site: "coomer" as Site })));
+  } else {
+    console.error("[RECENT] coomer fetchRecentPosts failed:", results[1].reason?.message || results[1].reason);
   }
 
   return deduplicatePosts(posts);
@@ -146,13 +151,14 @@ function deduplicateCreators(creators: UnifiedCreator[]): UnifiedCreator[] {
  * Construit l'URL d'une miniature depuis un post
  */
 export function getPostThumbnail(post: UnifiedPost): string | undefined {
-  const baseUrl =
-    post.site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
-  if (post.file?.path) return `${baseUrl}/data${post.file.path}`;
+  // Utiliser les serveurs d'images CDN optimisés pour les thumbnails
+  const imgCdn =
+    post.site === "kemono" ? "https://img.kemono.cr/thumbnail" : "https://img.coomer.st/thumbnail";
+  if (post.file?.path) return `${imgCdn}/data${post.file.path}`;
   const imgAttachment = post.attachments?.find((a) =>
-    /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name)
+    /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name || a.path)
   );
-  if (imgAttachment) return `${baseUrl}/data${imgAttachment.path}`;
+  if (imgAttachment) return `${imgCdn}/data${imgAttachment.path}`;
   return undefined;
 }
 

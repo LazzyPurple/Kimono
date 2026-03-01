@@ -19,6 +19,10 @@ export default function CreatorPage() {
   const service = params.service;
   const id = params.id;
 
+  // Fix #6: Validation des paramètres
+  const isValidSite = site === "kemono" || site === "coomer";
+  const isValid = isValidSite && service && id;
+
   const [profile, setProfile] = useState<(Creator & { site: Site }) | null>(null);
   const [posts, setPosts] = useState<UnifiedPost[]>([]);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -93,6 +97,17 @@ export default function CreatorPage() {
 
   const displayName =
     profile?.name ?? (loadingProfile ? "…" : `Créateur ${id}`);
+
+  if (!isValid) {
+    return (
+      <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center space-y-2">
+        <p className="text-red-400 text-lg font-medium">Paramètres invalides</p>
+        <p className="text-[#6b7280] text-sm">
+          Le site doit être « kemono » ou « coomer », et le service/ID ne peuvent pas être vides.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

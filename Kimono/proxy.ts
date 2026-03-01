@@ -35,9 +35,18 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
+    // Pages protégées
     "/home/:path*",
     "/favorites/:path*",
     "/search/:path*",
     "/creator/:path*",
+    // Routes API protégées (sauf /api/auth/* qui doit rester public)
+    "/api/search-creators",
+    "/api/recent-posts",
+    "/api/creator-posts",
+    "/api/creator-profile",
+    "/api/kimono-favorites",
+    "/api/kimono-login",
+    "/api/kimono-session-status",
   ],
 };
