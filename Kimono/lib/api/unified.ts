@@ -13,6 +13,36 @@ export interface UnifiedCreator extends Creator {
   site: Site;
 }
 
+function siteApi(site: Site) {
+  return site === "kemono" ? kemono : coomer;
+}
+
+/**
+ * Récupère les posts d'un créateur depuis un site spécifique
+ */
+export async function fetchCreatorPostsBySite(
+  site: Site,
+  service: string,
+  creatorId: string,
+  offset: number = 0
+): Promise<UnifiedPost[]> {
+  const posts = await siteApi(site).fetchCreatorPosts(service, creatorId, offset);
+  return posts.map((p) => ({ ...p, site }));
+}
+
+/**
+ * Récupère le profil d'un créateur depuis un site spécifique
+ */
+export async function fetchCreatorProfileBySite(
+  site: Site,
+  service: string,
+  creatorId: string
+): Promise<(Creator & { site: Site }) | null> {
+  const profile = await siteApi(site).fetchCreatorProfile(service, creatorId);
+  if (!profile) return null;
+  return { ...profile, site };
+}
+
 /**
  * Récupère les posts d'un créateur depuis les deux sites en parallèle
  */
@@ -92,7 +122,7 @@ export async function fetchRecentPosts(
 function deduplicatePosts(posts: UnifiedPost[]): UnifiedPost[] {
   const seen = new Set<string>();
   return posts.filter((post) => {
-    const key = `${post.service}-${post.id}`;
+    const key = `${post.site}-${post.service}-${post.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -100,14 +130,45 @@ function deduplicatePosts(posts: UnifiedPost[]): UnifiedPost[] {
 }
 
 /**
- * Déduplique les créateurs par ID + service
+ * Déduplique les créateurs par ID + service + site
  */
 function deduplicateCreators(creators: UnifiedCreator[]): UnifiedCreator[] {
   const seen = new Set<string>();
   return creators.filter((creator) => {
-    const key = `${creator.service}-${creator.id}`;
+    const key = `${creator.site}-${creator.service}-${creator.id}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
   });
+}
+
+/**
+ * Construit l'URL d'une miniature depuis un post
+ */
+export function getPostThumbnail(post: UnifiedPost): string | undefined {
+  const baseUrl =
+    post.site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+  if (post.file?.path) return `${baseUrl}/data${post.file.path}`;
+  const imgAttachment = post.attachments?.find((a) =>
+    /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name)
+  );
+  if (imgAttachment) return `${baseUrl}/data${imgAttachment.path}`;
+  return undefined;
+}
+
+/**
+ * Détermine le type de média d'un post
+ */
+export function getPostType(post: UnifiedPost): "image" | "video" | "text" {
+  const hasVideo = post.attachments?.some((a) =>
+    /\.(mp4|webm|mov|avi)$/i.test(a.name)
+  );
+  if (hasVideo) return "video";
+  const hasImage =
+    post.file?.path ||
+    post.attachments?.some((a) =>
+      /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name)
+    );
+  if (hasImage) return "image";
+  return "text";
 }

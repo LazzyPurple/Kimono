@@ -39,7 +39,7 @@ export default function ProtectedLayout({
           </a>
           <div className="flex items-center gap-4">
             <a
-              href="/"
+              href="/home"
               className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors"
             >
               Accueil

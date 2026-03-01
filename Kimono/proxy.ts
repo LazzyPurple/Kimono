@@ -35,6 +35,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
+    "/home/:path*",
     "/favorites/:path*",
     "/search/:path*",
     "/creator/:path*",
