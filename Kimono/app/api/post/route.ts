@@ -34,6 +34,7 @@ export async function GET(request: NextRequest) {
       }
     );
 
+    console.log("[POST API] data keys:", Object.keys(data), "| type:", typeof data);
     return NextResponse.json(data);
   } catch (err) {
     console.error("post route error:", err);
