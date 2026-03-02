@@ -1,9 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 
-// Cache mémoire pour la liste des créateurs (TTL 10 minutes)
-let creatorsCache: Creator[] | null = null;
-let creatorsCacheTime = 0;
-const CACHE_TTL_MS = 10 * 60 * 1000;
+import { getCachedCreators, setCachedCreators } from "@/lib/api/creators-cache";
 
 // Types pour l'API Kemono
 export interface Creator {
@@ -85,11 +82,9 @@ export async function fetchCreatorProfile(
  * car l'endpoint peut changer selon les versions de l'API.
  */
 export async function searchCreators(query: string): Promise<Creator[]> {
-  const now = Date.now();
-  console.log("[SEARCH/kemono] Cache status - has cache:", !!creatorsCache,
-    "| age (s):", Math.round((now - creatorsCacheTime) / 1000));
+  let allCreators = await getCachedCreators("kemono");
 
-  if (!creatorsCache || now - creatorsCacheTime > CACHE_TTL_MS) {
+  if (!allCreators) {
     const endpoints = ["/v1/creators.txt", "/v1/creators"];
 
     for (const endpoint of endpoints) {
@@ -102,8 +97,8 @@ export async function searchCreators(query: string): Promise<Creator[]> {
         const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
 
         if (Array.isArray(creators) && creators.length > 0) {
-          creatorsCache = creators;
-          creatorsCacheTime = now;
+          allCreators = creators;
+          await setCachedCreators("kemono", allCreators);
           console.log("[SEARCH/kemono] Fetched creators count:", creators.length, "from", endpoint);
           break;
         }
@@ -113,7 +108,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
       }
     }
 
-    if (!creatorsCache) {
+    if (!allCreators) {
       console.log("[SEARCH/kemono] No creators endpoint available");
       return [];
     }
@@ -121,7 +116,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
 
   if (!query.trim()) return [];
   const lower = query.toLowerCase();
-  const result = creatorsCache!.filter((c) => c.name.toLowerCase().includes(lower)).slice(0, 50);
+  const result = allCreators.filter((c: Creator) => c.name.toLowerCase().includes(lower)).slice(0, 50);
   console.log("[SEARCH/kemono] Results for query", query, ":", result.length, "matches");
   return result;
 }

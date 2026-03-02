@@ -1,11 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import type { Creator, Post } from "./kemono";
 
-// Cache mémoire pour la liste des créateurs (TTL 10 minutes)
-let creatorsCache: Creator[] | null = null;
-let creatorsCacheTime = 0;
-const CACHE_TTL_MS = 10 * 60 * 1000;
-
+import { getCachedCreators, setCachedCreators } from "@/lib/api/creators-cache";
 const client: AxiosInstance = axios.create({
   baseURL: "https://coomer.st/api",
   headers: {
@@ -61,11 +57,9 @@ export async function fetchCreatorProfile(
  * (la recherche fonctionnera toujours via Kemono dans unified.ts).
  */
 export async function searchCreators(query: string): Promise<Creator[]> {
-  const now = Date.now();
-  console.log("[SEARCH/coomer] Cache status - has cache:", !!creatorsCache,
-    "| age (s):", Math.round((now - creatorsCacheTime) / 1000));
+  let allCreators = await getCachedCreators("coomer");
 
-  if (!creatorsCache || now - creatorsCacheTime > CACHE_TTL_MS) {
+  if (!allCreators) {
     const endpoints = ["/v1/creators.txt", "/v1/creators"];
 
     for (const endpoint of endpoints) {
@@ -78,8 +72,8 @@ export async function searchCreators(query: string): Promise<Creator[]> {
         const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
 
         if (Array.isArray(creators) && creators.length > 0) {
-          creatorsCache = creators;
-          creatorsCacheTime = now;
+          allCreators = creators;
+          await setCachedCreators("coomer", allCreators);
           console.log("[SEARCH/coomer] Fetched creators count:", creators.length, "from", endpoint);
           break;
         }
@@ -89,7 +83,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
       }
     }
 
-    if (!creatorsCache) {
+    if (!allCreators) {
       console.log("[SEARCH/coomer] No creators endpoint available — coomer search disabled");
       return [];
     }
@@ -97,7 +91,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
 
   if (!query.trim()) return [];
   const lower = query.toLowerCase();
-  const result = creatorsCache!.filter((c) => c.name.toLowerCase().includes(lower)).slice(0, 50);
+  const result = allCreators.filter((c: Creator) => c.name.toLowerCase().includes(lower)).slice(0, 50);
   console.log("[SEARCH/coomer] Results for query", query, ":", result.length, "matches");
   return result;
 }
