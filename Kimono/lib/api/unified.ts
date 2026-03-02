@@ -147,18 +147,34 @@ function deduplicateCreators(creators: UnifiedCreator[]): UnifiedCreator[] {
   });
 }
 
+function isVideo(p: string): boolean {
+  return /\.(mp4|webm|mov|avi)$/i.test(p);
+}
+function isImage(p: string): boolean {
+  return /\.(jpg|jpeg|png|gif|webp)$/i.test(p);
+}
+
 /**
  * Construit l'URL d'une miniature depuis un post
  */
 export function getPostThumbnail(post: UnifiedPost): string | undefined {
-  // Utiliser les serveurs d'images CDN optimisés pour les thumbnails
   const imgCdn =
     post.site === "kemono" ? "https://img.kemono.cr/thumbnail" : "https://img.coomer.st/thumbnail";
-  if (post.file?.path) return `${imgCdn}/data${post.file.path}`;
-  const imgAttachment = post.attachments?.find((a) =>
-    /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name || a.path)
-  );
+
+  const imgAttachment = post.attachments?.find((a) => isImage(a.name || a.path));
   if (imgAttachment) return `${imgCdn}/data${imgAttachment.path}`;
+
+  if (post.file?.path && isImage(post.file.path)) {
+    return `${imgCdn}/data${post.file.path}`;
+  }
+
+  if (post.file?.path && isVideo(post.file.path)) {
+    return `${imgCdn}/data${post.file.path}`;
+  }
+
+  const vidAttachment = post.attachments?.find((a) => isVideo(a.name || a.path));
+  if (vidAttachment) return `${imgCdn}/data${vidAttachment.path}`;
+
   return undefined;
 }
 
@@ -166,15 +182,17 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
  * Détermine le type de média d'un post
  */
 export function getPostType(post: UnifiedPost): "image" | "video" | "text" {
-  const hasVideo = post.attachments?.some((a) =>
-    /\.(mp4|webm|mov|avi)$/i.test(a.name)
-  );
+  const hasVideo = 
+    post.attachments?.some((a) => isVideo(a.name || a.path)) || 
+    isVideo(post.file?.path ?? "");
+    
   if (hasVideo) return "video";
-  const hasImage =
-    post.file?.path ||
-    post.attachments?.some((a) =>
-      /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name)
-    );
+
+  const hasImage = 
+    (post.file?.path && !isVideo(post.file.path)) || 
+    post.attachments?.some((a) => isImage(a.name || a.path));
+    
   if (hasImage) return "image";
+
   return "text";
 }
