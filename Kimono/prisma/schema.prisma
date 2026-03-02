@@ -42,3 +42,9 @@ model KimonoSession {
   username String
   savedAt  DateTime @default(now())
 }
+
+model CreatorsCache {
+  site      String   @id
+  data      String
+  updatedAt DateTime @updatedAt
+}
