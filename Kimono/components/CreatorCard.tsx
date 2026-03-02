@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { User } from "lucide-react";
@@ -21,13 +24,27 @@ export default function CreatorCard({
   favorited,
   updated,
 }: CreatorCardProps) {
+  const [imgError, setImgError] = useState(false);
+  const imgCdn = site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
+  const iconUrl = `${imgCdn}/icons/${service}/${id}`;
+
   return (
     <a href={`/creator/${site}/${service}/${id}`}>
       <Card className="bg-[#12121a] border-[#1e1e2e] group hover:border-[#7c3aed]/50 transition-all duration-300 cursor-pointer">
         <CardContent className="p-4 flex items-center gap-4">
           {/* Avatar */}
-          <div className="h-12 w-12 rounded-full bg-[#7c3aed]/20 flex items-center justify-center shrink-0 group-hover:bg-[#7c3aed]/30 transition-colors">
-            <User className="h-6 w-6 text-[#7c3aed]" />
+          <div className="h-12 w-12 rounded-full bg-[#7c3aed]/20 flex items-center justify-center shrink-0 group-hover:bg-[#7c3aed]/30 transition-colors overflow-hidden">
+            {!imgError ? (
+              <img
+                src={iconUrl}
+                alt={name}
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <User className="h-6 w-6 text-[#7c3aed]" />
+            )}
           </div>
 
           {/* Infos */}
