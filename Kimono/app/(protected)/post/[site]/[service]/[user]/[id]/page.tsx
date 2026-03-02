@@ -43,8 +43,9 @@ export default function PostPage() {
           `/api/post?site=${site}&service=${service}&user=${user}&id=${id}`
         );
         if (!res.ok) throw new Error("Erreur lors du chargement du post");
-        const data = await res.json();
-        setPost({ ...data, site });
+        const raw = await res.json();
+        const postData = raw?.post ?? raw;
+        setPost({ ...postData, site });
       } catch (err: any) {
         setError(err.message || "Erreur inconnue");
       } finally {
@@ -96,6 +97,8 @@ export default function PostPage() {
     ...(post.file?.path ? [post.file] : []),
     ...(post.attachments || []),
   ].filter(Boolean);
+
+  console.log("[POST PAGE] allMedia:", allMedia);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -149,7 +152,7 @@ export default function PostPage() {
           {allMedia.map((item, index) => {
             const filePath = item.path;
             const fileName = item.name || filePath;
-            const mediaUrl = encodeURI(`${baseUrl}/data${filePath}`);
+            const mediaUrl = `${baseUrl}/data${filePath.split('/').map(s => encodeURIComponent(s)).join('/')}`;
 
             if (isImage(fileName) || isImage(filePath)) {
               return (

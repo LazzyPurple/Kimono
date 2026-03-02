@@ -26,9 +26,9 @@ export default function CreatorPage() {
   const [posts, setPosts] = useState<UnifiedPost[]>([]);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
+  const [avatarError, setAvatarError] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [hasNextPage, setHasNextPage] = useState(false);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
 
   const siteBaseUrl =
@@ -50,31 +50,24 @@ export default function CreatorPage() {
   }, [site, service, id]);
 
   const fetchPosts = useCallback(
-    async (currentOffset: number) => {
-      if (currentOffset === 0) setLoadingPosts(true);
-      else setLoadingMore(true);
+    async (page: number) => {
+      setLoadingPosts(true);
 
       try {
+        const currentOffset = (page - 1) * 50;
         const res = await fetch(
           `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`
         );
         const raw = await res.json();
-        // Guard: s'assurer qu'on a toujours un tableau
         const data: UnifiedPost[] = Array.isArray(raw) ? raw : [];
 
-        if (currentOffset === 0) {
-          setPosts(data);
-        } else {
-          setPosts((prev) => [...prev, ...data]);
-        }
-
-        setHasMore(data.length >= 50);
-        setOffset(currentOffset + 50);
+        setPosts(data);
+        setHasNextPage(data.length >= 50);
+        setCurrentPage(page);
       } catch (err) {
         console.error(err);
       } finally {
         setLoadingPosts(false);
-        setLoadingMore(false);
       }
     },
     [site, service, id]
@@ -82,7 +75,7 @@ export default function CreatorPage() {
 
   useEffect(() => {
     fetchProfile();
-    fetchPosts(0);
+    fetchPosts(1);
   }, [fetchProfile, fetchPosts]);
 
   const filteredPosts = posts.filter((post) => {
@@ -107,14 +100,77 @@ export default function CreatorPage() {
     );
   }
 
+  const goToPage = (page: number) => {
+    fetchPosts(page);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  function Pagination() {
+    const pages = [];
+    if (currentPage > 3) {
+      pages.push(1, "...");
+    } else {
+      for (let i = 1; i < currentPage; i++) pages.push(i);
+    }
+    pages.push(currentPage);
+    if (hasNextPage) pages.push(currentPage + 1);
+
+    return (
+      <div className="flex items-center justify-center gap-1 pt-4 flex-wrap">
+        {currentPage > 1 && (
+          <button onClick={() => goToPage(1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer">
+            «
+          </button>
+        )}
+        {currentPage > 1 && (
+          <button onClick={() => goToPage(currentPage - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer">
+            ‹
+          </button>
+        )}
+        {pages.map((p, i) =>
+          p === "..." ? (
+            <span key={`dots-${i}`} className="px-2 text-[#6b7280]">
+              …
+            </span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => goToPage(p as number)}
+              className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer ${
+                p === currentPage
+                  ? "bg-[#7c3aed] text-white"
+                  : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+              }`}
+            >
+              {p}
+            </button>
+          )
+        )}
+        {hasNextPage && (
+          <button onClick={() => goToPage(currentPage + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer">
+            ›
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* En-tête créateur */}
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-6">
         <div className="flex items-start gap-4">
-          <div className="h-16 w-16 rounded-full bg-[#7c3aed]/20 flex items-center justify-center shrink-0">
+          <div className="h-16 w-16 rounded-full bg-[#7c3aed]/20 flex items-center justify-center shrink-0 overflow-hidden">
             {loadingProfile ? (
               <Loader2 className="h-7 w-7 animate-spin text-[#7c3aed]" />
+            ) : !avatarError ? (
+              <img
+                src={`${site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st"}/icons/${service}/${id}`}
+                alt={displayName}
+                referrerPolicy="no-referrer"
+                onError={() => setAvatarError(true)}
+                className="h-full w-full object-cover"
+              />
             ) : (
               <User className="h-8 w-8 text-[#7c3aed]" />
             )}
@@ -154,15 +210,15 @@ export default function CreatorPage() {
               </a>
             </div>
 
-            {profile && (
+            {profile && (profile.favorited !== undefined || profile.updated !== undefined || profile.indexed !== undefined) && (
               <div className="flex gap-4 text-xs text-[#6b7280]">
                 {profile.favorited !== undefined && (
                   <span>❤ {profile.favorited.toLocaleString()} favoris</span>
                 )}
-                {profile.updated !== undefined && (
+                {(profile.updated !== undefined || profile.indexed !== undefined) && (
                   <span>
                     Mis à jour le{" "}
-                    {new Date(profile.updated * 1000).toLocaleDateString(
+                    {new Date((profile.updated ?? profile.indexed ?? 0) * 1000).toLocaleDateString(
                       "fr-FR"
                     )}
                   </span>
@@ -224,24 +280,7 @@ export default function CreatorPage() {
             ))}
           </div>
 
-          {hasMore && (
-            <div className="flex justify-center pt-2">
-              <Button
-                onClick={() => fetchPosts(offset)}
-                disabled={loadingMore}
-                className="bg-[#7c3aed] hover:bg-[#6d28d9] text-white cursor-pointer"
-              >
-                {loadingMore ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Chargement…
-                  </>
-                ) : (
-                  "Charger plus"
-                )}
-              </Button>
-            </div>
-          )}
+          <Pagination />
         </>
       )}
 
