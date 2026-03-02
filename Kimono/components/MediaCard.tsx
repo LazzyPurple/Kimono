@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Image, Film, FileText, Play } from "lucide-react";
@@ -14,9 +15,10 @@ interface MediaCardProps {
   type?: "image" | "video" | "text";
   site: Site;
   service: string;
+  postId: string;
+  user: string;
   creatorName?: string;
   publishedAt?: string;
-  onClick?: () => void;
 }
 
 export default function MediaCard({
@@ -26,10 +28,12 @@ export default function MediaCard({
   type = "image",
   site,
   service,
+  postId,
+  user,
   creatorName,
   publishedAt,
-  onClick,
 }: MediaCardProps) {
+  const router = useRouter();
   const [hovered, setHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -60,7 +64,7 @@ export default function MediaCard({
   return (
     <Card
       className="bg-[#12121a] border-[#1e1e2e] overflow-hidden group hover:border-[#7c3aed]/50 transition-all duration-300 cursor-pointer"
-      onClick={onClick}
+      onClick={() => router.push(`/post/${site}/${service}/${user}/${postId}`)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >

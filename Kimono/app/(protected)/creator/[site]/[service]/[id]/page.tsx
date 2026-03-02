@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import MediaCard from "@/components/MediaCard";
-import DetailPanel from "@/components/DetailPanel";
 import { User, ExternalLink, Loader2 } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
@@ -31,7 +30,6 @@ export default function CreatorPage() {
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
-  const [selectedPost, setSelectedPost] = useState<UnifiedPost | null>(null);
 
   const siteBaseUrl =
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
@@ -219,8 +217,9 @@ export default function CreatorPage() {
                 type={getPostType(post)}
                 site={post.site}
                 service={post.service}
+                postId={post.id}
+                user={post.user}
                 publishedAt={post.published}
-                onClick={() => setSelectedPost(post)}
               />
             ))}
           </div>
@@ -246,12 +245,6 @@ export default function CreatorPage() {
         </>
       )}
 
-      {/* Detail Panel Dialog */}
-      <DetailPanel
-        post={selectedPost}
-        open={!!selectedPost}
-        onClose={() => setSelectedPost(null)}
-      />
     </div>
   );
 }

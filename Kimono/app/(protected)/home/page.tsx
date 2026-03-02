@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import MediaCard from "@/components/MediaCard";
-import DetailPanel from "@/components/DetailPanel";
 import { Loader2 } from "lucide-react";
 import type { UnifiedPost } from "@/lib/api/unified";
 import { getPostThumbnail, getPostType } from "@/lib/api/unified";
@@ -31,7 +30,6 @@ export default function HomePage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
-  const [selectedPost, setSelectedPost] = useState<UnifiedPost | null>(null);
 
   const fetchPosts = useCallback(async (currentOffset: number) => {
     if (currentOffset === 0) setLoading(true);
@@ -42,12 +40,12 @@ export default function HomePage() {
       const data: UnifiedPost[] = await res.json();
 
       if (currentOffset === 0) {
-        setPosts(data.slice(0, 20)); // On limite à 20 au départ
+        setPosts(data);
       } else {
         setPosts((prev) => [...prev, ...data]);
       }
 
-      setHasMore(data.length > 0);
+      setHasMore(data.length >= 50);
       setOffset(currentOffset + 50);
     } catch (err) {
       console.error(err);
@@ -87,8 +85,9 @@ export default function HomePage() {
                 type={getPostType(post)}
                 site={post.site}
                 service={post.service}
+                postId={post.id}
+                user={post.user}
                 publishedAt={post.published}
-                onClick={() => setSelectedPost(post)}
               />
             ))}
           </div>
@@ -114,11 +113,6 @@ export default function HomePage() {
         </>
       )}
 
-      <DetailPanel
-        post={selectedPost}
-        open={!!selectedPost}
-        onClose={() => setSelectedPost(null)}
-      />
     </div>
   );
 }
