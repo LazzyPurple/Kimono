@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Image, Film, FileText, Play } from "lucide-react";
 import type { Site } from "@/lib/api/unified";
+import { useVideoThumbnail } from "@/hooks/useVideoThumbnail";
 
 interface MediaCardProps {
   title: string;
@@ -33,6 +34,12 @@ export default function MediaCard({
   const [imgError, setImgError] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const { thumbnailDataUrl } = useVideoThumbnail(
+    type === "video" && !thumbnailUrl ? (videoUrl ?? undefined) : undefined
+  );
+
+  const effectiveThumbnail = thumbnailUrl || thumbnailDataUrl || undefined;
+
   const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
 
   const handleMouseEnter = useCallback(() => {
@@ -47,8 +54,8 @@ export default function MediaCard({
     setHovered(false);
   }, []);
 
-  const previewSrc = videoUrl || thumbnailUrl;
-  const showImg = (thumbnailUrl && !imgError);
+  const previewSrc = videoUrl || effectiveThumbnail;
+  const showImg = !!effectiveThumbnail && !imgError;
 
   return (
     <Card
@@ -71,7 +78,7 @@ export default function MediaCard({
           />
         ) : hovered && type === "image" && showImg ? (
           <img
-            src={thumbnailUrl}
+            src={effectiveThumbnail}
             alt={title}
             referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
@@ -79,7 +86,7 @@ export default function MediaCard({
           />
         ) : showImg ? (
           <img
-            src={thumbnailUrl}
+            src={effectiveThumbnail}
             alt={title}
             referrerPolicy="no-referrer"
             onError={() => setImgError(true)}
