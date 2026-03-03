@@ -90,8 +90,9 @@ export default function CreatorPage() {
 
     async function prefetchNextPages() {
       let currentCheckPage = knownMaxPage;
+      const targetMaxPage = currentPage + 9;
       
-      while (currentCheckPage < 10 && !isCancelled) {
+      while (currentCheckPage < targetMaxPage && !isCancelled) {
         try {
           const checkOffset = currentCheckPage * 50;
           const res = await fetch(
@@ -118,14 +119,14 @@ export default function CreatorPage() {
       }
     }
 
-    if (hasNextPage && knownMaxPage < 10) {
+    if (hasNextPage && knownMaxPage < currentPage + 9) {
       prefetchNextPages();
     }
 
     return () => {
       isCancelled = true;
     };
-  }, [hasNextPage, knownMaxPage, site, service, id, isValid]);
+  }, [hasNextPage, knownMaxPage, currentPage, site, service, id, isValid]);
 
   const filteredPosts = posts.filter((post) => {
     if (mediaFilter === "tout") return true;
