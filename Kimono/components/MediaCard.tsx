@@ -85,6 +85,7 @@ export default function MediaCard({
             src={effectiveThumbnail}
             alt={title}
             referrerPolicy="no-referrer"
+            loading="lazy"
             onError={() => setImgError(true)}
             className="w-full h-full object-contain transition-all duration-300"
           />
@@ -93,6 +94,7 @@ export default function MediaCard({
             src={effectiveThumbnail}
             alt={title}
             referrerPolicy="no-referrer"
+            loading="lazy"
             onError={() => setImgError(true)}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
           />

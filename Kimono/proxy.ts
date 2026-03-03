@@ -44,7 +44,6 @@ export const config = {
     "/api/search-creators",
     "/api/recent-posts",
     "/api/creator-posts",
-    "/api/creator-all-posts",
     "/api/creator-profile",
     "/api/kimono-favorites",
     "/api/kimono-login",

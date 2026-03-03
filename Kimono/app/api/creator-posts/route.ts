@@ -9,6 +9,7 @@ export async function GET(request: NextRequest) {
   const service = searchParams.get("service") ?? "";
   const id = searchParams.get("id") ?? "";
   const offset = Number(searchParams.get("offset") ?? 0);
+  const query = searchParams.get("q") || undefined;
 
   if (!site || !service || !id) {
     return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
       orderBy: { savedAt: "desc" },
     });
 
-    const posts = await fetchCreatorPostsBySite(site, service, id, offset, session?.cookie);
+    const posts = await fetchCreatorPostsBySite(site, service, id, offset, session?.cookie, query);
     // Guard: s'assurer qu'on retourne toujours un tableau
     const safePosts = Array.isArray(posts) ? posts : [];
     if (!Array.isArray(posts)) {

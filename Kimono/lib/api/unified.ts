@@ -25,9 +25,10 @@ export async function fetchCreatorPostsBySite(
   service: string,
   creatorId: string,
   offset: number = 0,
-  cookie?: string
+  cookie?: string,
+  query?: string
 ): Promise<UnifiedPost[]> {
-  const posts = await siteApi(site).fetchCreatorPosts(service, creatorId, offset, cookie);
+  const posts = await siteApi(site).fetchCreatorPosts(service, creatorId, offset, cookie, query);
   return posts.map((p) => ({ ...p, site }));
 }
 
@@ -163,6 +164,22 @@ function isImage(p: string): boolean {
 }
 
 /**
+ * Construit une URL de thumbnail pour un chemin de fichier
+ */
+export function getThumbnailUrl(site: Site, path: string): string {
+  const base = site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
+  return `${base}/thumbnail/data${encodeURI(path)}`;
+}
+
+/**
+ * Construit une URL full-res pour un chemin de fichier
+ */
+export function getFullImageUrl(site: Site, path: string): string {
+  const base = site === "kemono" ? "https://kemono.su" : "https://coomer.su";
+  return `${base}/data${encodeURI(path)}`;
+}
+
+/**
  * Construit l'URL d'une miniature depuis un post
  */
 export function getPostThumbnail(post: UnifiedPost): string | undefined {
@@ -170,18 +187,18 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
     post.site === "kemono" ? "https://img.kemono.cr/thumbnail" : "https://img.coomer.st/thumbnail";
 
   const imgAttachment = post.attachments?.find((a) => isImage(a.name || a.path));
-  if (imgAttachment) return `${imgCdn}/data${imgAttachment.path}`;
+  if (imgAttachment) return `${imgCdn}/data${encodeURI(imgAttachment.path)}`;
 
   if (post.file?.path && isImage(post.file.path)) {
-    return `${imgCdn}/data${post.file.path}`;
+    return `${imgCdn}/data${encodeURI(post.file.path)}`;
   }
 
   if (post.file?.path && isVideo(post.file.path)) {
-    return `${imgCdn}/data${post.file.path}`;
+    return `${imgCdn}/data${encodeURI(post.file.path)}`;
   }
 
   const vidAttachment = post.attachments?.find((a) => isVideo(a.name || a.path));
-  if (vidAttachment) return `${imgCdn}/data${vidAttachment.path}`;
+  if (vidAttachment) return `${imgCdn}/data${encodeURI(vidAttachment.path)}`;
 
   return undefined;
 }

@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosError } from "axios";
 
 import { getCachedCreators, setCachedCreators } from "@/lib/api/creators-cache";
 
@@ -10,6 +10,13 @@ export interface Creator {
   indexed: number;
   updated: number;
   favorited: number;
+  public_id?: string | null;
+  relation_id?: number | null;
+  has_chats?: boolean;
+  post_count?: number;
+  dm_count?: number;
+  share_count?: number;
+  chat_count?: number;
 }
 
 export interface Post {
@@ -40,6 +47,23 @@ const client: AxiosInstance = axios.create({
   timeout: 15000,
 });
 
+// Retry interceptor: 2 retries avec backoff sur 429/5xx
+const RETRY_DELAYS = [1000, 3000];
+client.interceptors.response.use(undefined, async (error: AxiosError) => {
+  const config = error.config as any;
+  if (!config) throw error;
+  config.__retryCount = config.__retryCount || 0;
+  const status = error.response?.status ?? 0;
+  if ((status === 429 || status >= 500) && config.__retryCount < RETRY_DELAYS.length) {
+    const delay = RETRY_DELAYS[config.__retryCount];
+    config.__retryCount++;
+    console.log(`[KEMONO] Retry ${config.__retryCount} after ${delay}ms (status ${status})`);
+    await new Promise(r => setTimeout(r, delay));
+    return client(config);
+  }
+  throw error;
+});
+
 /**
  * Récupère les posts d'un créateur
  */
@@ -47,12 +71,18 @@ export async function fetchCreatorPosts(
   service: string,
   creatorId: string,
   offset: number = 0,
-  cookie?: string
+  cookie?: string,
+  query?: string,
+  tags?: string[]
 ): Promise<Post[]> {
+  const params: Record<string, string | string[]> = { o: String(offset) };
+  if (query) params.q = query;
+  if (tags && tags.length) params.tag = tags;
+
   const { data } = await client.get<Post[]>(
     `/v1/${service}/user/${creatorId}/posts`,
     {
-      params: { o: offset },
+      params,
       ...(cookie ? { headers: { Cookie: cookie } } : {}),
     }
   );

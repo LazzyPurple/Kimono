@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,8 +33,10 @@ export default function CreatorPage() {
   const [knownMaxPage, setKnownMaxPage] = useState(1);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
   const [postQuery, setPostQuery] = useState("");
-  const [allPosts, setAllPosts] = useState<UnifiedPost[] | null>(null);
-  const [loadingAllPosts, setLoadingAllPosts] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
+  const [loadingSearch, setLoadingSearch] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const siteBaseUrl =
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
@@ -132,45 +134,71 @@ export default function CreatorPage() {
     };
   }, [hasNextPage, knownMaxPage, currentPage, site, service, id, isValid]);
 
+  // Debounce de la recherche
   useEffect(() => {
-    if (postQuery.trim() && allPosts === null && !loadingAllPosts) {
-      let isCancelled = false;
-      async function fetchAllPosts() {
-        setLoadingAllPosts(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!postQuery.trim()) {
+      setDebouncedQuery("");
+      setSearchResults([]);
+      return;
+    }
+    debounceRef.current = setTimeout(() => {
+      setDebouncedQuery(postQuery.trim());
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [postQuery]);
+
+  // Recherche server-side via ?q=
+  useEffect(() => {
+    if (!debouncedQuery) return;
+    let cancelled = false;
+    setLoadingSearch(true);
+    setCurrentPage(1);
+
+    (async () => {
+      const all: UnifiedPost[] = [];
+      let offset = 0;
+      while (true) {
         try {
-          const res = await fetch(`/api/creator-all-posts?site=${site}&service=${service}&id=${id}`);
+          const res = await fetch(
+            `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}&q=${encodeURIComponent(debouncedQuery)}`
+          );
           const data = await res.json();
-          if (!isCancelled) setAllPosts(Array.isArray(data) ? data : []);
-        } catch (err) {
-          console.error("Error fetching all posts", err);
-          if (!isCancelled) setAllPosts([]);
-        } finally {
-          if (!isCancelled) setLoadingAllPosts(false);
+          if (cancelled) return;
+          if (!Array.isArray(data) || data.length === 0) break;
+          all.push(...data);
+          if (data.length < 50) break;
+          offset += 50;
+        } catch {
+          break;
         }
       }
-      fetchAllPosts();
-      return () => { isCancelled = true; };
-    }
-  }, [postQuery, allPosts, loadingAllPosts, site, service, id]);
+      if (!cancelled) {
+        setSearchResults(all);
+        setLoadingSearch(false);
+      }
+    })();
 
-  const basePosts = postQuery.trim() && allPosts !== null ? allPosts : posts;
+    return () => { cancelled = true; };
+  }, [debouncedQuery, site, service, id]);
+
+  // Reset recherche quand on change de créateur
+  useEffect(() => {
+    setPostQuery("");
+    setDebouncedQuery("");
+    setSearchResults([]);
+  }, [site, service, id]);
+
+  const isSearching = postQuery.trim().length > 0;
+  const basePosts = isSearching ? searchResults : posts;
 
   const filteredPosts = basePosts.filter((post) => {
     if (mediaFilter === "images" && getPostType(post) !== "image") return false;
     if (mediaFilter === "videos" && getPostType(post) !== "video") return false;
-    if (postQuery.trim()) {
-      const q = postQuery.trim().toLowerCase();
-      const titleMatch = (post.title || "").toLowerCase().includes(q);
-      const contentMatch = (post.content || "").toLowerCase().includes(q);
-      if (!titleMatch && !contentMatch) return false;
-    }
     return true;
   });
-
-  // Reset page when postQuery changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [postQuery]);
 
   const displayName =
     profile?.name ?? (loadingProfile ? "…" : `Créateur ${id}`);
@@ -318,8 +346,11 @@ export default function CreatorPage() {
               </a>
             </div>
 
-            {profile && (profile.favorited !== undefined || profile.updated !== undefined || profile.indexed !== undefined) && (
+            {profile && (
               <div className="flex gap-4 text-xs text-[#6b7280]">
+                {profile.post_count !== undefined && (
+                  <span>📝 {profile.post_count.toLocaleString()} posts</span>
+                )}
                 {profile.favorited !== undefined && (
                   <span>❤ {profile.favorited.toLocaleString()} favoris</span>
                 )}
@@ -367,16 +398,12 @@ export default function CreatorPage() {
             className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
           />
         </div>
-        {loadingAllPosts ? (
+        {loadingSearch ? (
           <div className="flex items-center text-xs text-[#7c3aed]">
             <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-            Chargement de tous les posts…
+            Recherche en cours…
           </div>
-        ) : postQuery.trim() && allPosts !== null ? (
-          <p className="text-xs text-[#6b7280]">
-            {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé{filteredPosts.length > 1 ? "s" : ""} sur {allPosts.length} au total
-          </p>
-        ) : postQuery.trim() ? (
+        ) : isSearching ? (
           <p className="text-xs text-[#6b7280]">
             {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé{filteredPosts.length > 1 ? "s" : ""}
           </p>
@@ -384,7 +411,7 @@ export default function CreatorPage() {
       </div>
 
       {/* Grille de posts */}
-      {loadingPosts && !postQuery.trim() ? (
+      {(loadingPosts && !isSearching) ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {Array.from({ length: 12 }).map((_, i) => (
             <div
@@ -393,13 +420,13 @@ export default function CreatorPage() {
             />
           ))}
         </div>
-      ) : filteredPosts.length === 0 && !loadingAllPosts ? (
+      ) : filteredPosts.length === 0 && !loadingSearch ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
           <p className="text-[#6b7280] text-lg">Aucun post disponible.</p>
         </div>
       ) : (
         <>
-          {!postQuery.trim() && (
+          {!isSearching && (
             <div className="pb-4">
               <Pagination />
             </div>
@@ -421,7 +448,7 @@ export default function CreatorPage() {
             ))}
           </div>
 
-          {!postQuery.trim() && <Pagination />}
+          {!isSearching && <Pagination />}
         </>
       )}
 
