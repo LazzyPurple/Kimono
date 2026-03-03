@@ -69,7 +69,7 @@ export default function MediaCard({
       onMouseLeave={handleMouseLeave}
     >
       {/* Aperçu */}
-      <div className="relative aspect-video bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
+      <div className="relative aspect-[4/5] bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
         {/* Prévisualisation hover vidéo */}
         {hovered && type === "video" && previewSrc ? (
           <video
@@ -87,7 +87,7 @@ export default function MediaCard({
             referrerPolicy="no-referrer"
             loading="lazy"
             onError={() => setImgError(true)}
-            className="w-full h-full object-contain transition-all duration-300"
+            className="w-full h-full object-cover object-center transition-all duration-300"
           />
         ) : showImg ? (
           <img
@@ -96,7 +96,7 @@ export default function MediaCard({
             referrerPolicy="no-referrer"
             loading="lazy"
             onError={() => setImgError(true)}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
           />
         ) : (
           <TypeIcon className="h-12 w-12 text-[#6b7280]" />

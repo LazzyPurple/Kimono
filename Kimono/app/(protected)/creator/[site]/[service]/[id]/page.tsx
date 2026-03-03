@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,12 +28,19 @@ export default function CreatorPage() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [avatarError, setAvatarError] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const initialQuery = searchParams.get("q") || "";
+  const initialPage = parseInt(searchParams.get("page") || "1", 10);
+
+  const [currentPage, setCurrentPage] = useState(initialPage > 0 ? initialPage : 1);
   const [hasNextPage, setHasNextPage] = useState(false);
-  const [knownMaxPage, setKnownMaxPage] = useState(1);
+  const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, initialPage));
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
-  const [postQuery, setPostQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [postQuery, setPostQuery] = useState(initialQuery);
+  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -85,8 +92,10 @@ export default function CreatorPage() {
 
   useEffect(() => {
     fetchProfile();
-    fetchPosts(1);
-  }, [fetchProfile, fetchPosts]);
+    // Fetch initial page only on mount
+    fetchPosts(initialPage > 0 ? initialPage : 1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [site, service, id]);
 
   // Prefetching to find the max page (up to 10)
   useEffect(() => {
@@ -142,7 +151,11 @@ export default function CreatorPage() {
       return;
     }
     debounceRef.current = setTimeout(() => {
-      setDebouncedQuery(postQuery.trim());
+      setDebouncedQuery((prev) => {
+        const next = postQuery.trim();
+        if (prev !== next) setCurrentPage(1); // Reset page on new search
+        return next;
+      });
     }, 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -185,6 +198,33 @@ export default function CreatorPage() {
 
     return () => { cancelled = true; };
   }, [debouncedQuery, site, service, id]);
+
+  // Sync URL Params
+  useEffect(() => {
+    const params = new URLSearchParams(Array.from(searchParams.entries()));
+    let changed = false;
+
+    if (debouncedQuery && params.get("q") !== debouncedQuery) {
+      params.set("q", debouncedQuery);
+      changed = true;
+    } else if (!debouncedQuery && params.has("q")) {
+      params.delete("q");
+      changed = true;
+    }
+
+    if (currentPage > 1 && params.get("page") !== String(currentPage)) {
+      params.set("page", String(currentPage));
+      changed = true;
+    } else if (currentPage <= 1 && params.has("page")) {
+      params.delete("page");
+      changed = true;
+    }
+
+    if (changed) {
+      const newURL = params.size > 0 ? `${pathname}?${params.toString()}` : pathname;
+      router.replace(newURL, { scroll: false });
+    }
+  }, [debouncedQuery, currentPage, pathname, router, searchParams]);
 
   // Reset recherche quand on change de créateur
   useEffect(() => {
@@ -429,7 +469,7 @@ export default function CreatorPage() {
           {Array.from({ length: 12 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-video animate-pulse"
+              className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-[4/5] animate-pulse"
             />
           ))}
         </div>
