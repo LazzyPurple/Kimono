@@ -80,7 +80,7 @@ export default function CreatorPage() {
         setLoadingPosts(false);
       }
     },
-    [site, service, id]
+    [site, service, id, knownMaxPage]
   );
 
   useEffect(() => {
@@ -139,7 +139,6 @@ export default function CreatorPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (!postQuery.trim()) {
       setDebouncedQuery("");
-      setSearchResults([]);
       return;
     }
     debounceRef.current = setTimeout(() => {
@@ -150,12 +149,15 @@ export default function CreatorPage() {
     };
   }, [postQuery]);
 
-  // Recherche server-side via ?q=
+  // Recherche server-side via ?q= (loop complet)
   useEffect(() => {
-    if (!debouncedQuery) return;
+    if (!debouncedQuery) {
+      setSearchResults([]);
+      return;
+    }
     let cancelled = false;
     setLoadingSearch(true);
-    setCurrentPage(1);
+    setCurrentPage(1); // Reset page visual
 
     (async () => {
       const all: UnifiedPost[] = [];
@@ -191,12 +193,23 @@ export default function CreatorPage() {
     setSearchResults([]);
   }, [site, service, id]);
 
-  const isSearching = postQuery.trim().length > 0;
+  const isSearching = debouncedQuery.length > 0;
   const basePosts = isSearching ? searchResults : posts;
 
+  // Si l'API renvoie des résultats non filtrés, ou juste pour être sûr,
+  // on applique aussi un filtre local supplémentaire sur les résultats paginés
+  // (Coomer a parfois du mal avec ?q=)
   const filteredPosts = basePosts.filter((post) => {
     if (mediaFilter === "images" && getPostType(post) !== "image") return false;
     if (mediaFilter === "videos" && getPostType(post) !== "video") return false;
+    
+    // Fallback filter if API ignores ?q=
+    if (isSearching) {
+      const q = debouncedQuery.toLowerCase();
+      if (!((post.title || "").toLowerCase().includes(q) || (post.content || "").toLowerCase().includes(q))) {
+        return false;
+      }
+    }
     return true;
   });
 
@@ -357,7 +370,7 @@ export default function CreatorPage() {
                 {(profile.updated !== undefined || profile.indexed !== undefined) && (
                   <span>
                     Mis à jour le{" "}
-                    {new Date((profile.updated ?? profile.indexed ?? 0) * 1000).toLocaleDateString(
+                    {new Date(profile.updated ?? profile.indexed ?? 0).toLocaleDateString(
                       "fr-FR"
                     )}
                   </span>
@@ -398,7 +411,7 @@ export default function CreatorPage() {
             className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
           />
         </div>
-        {loadingSearch ? (
+        {loadingPosts && isSearching ? (
           <div className="flex items-center text-xs text-[#7c3aed]">
             <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
             Recherche en cours…
@@ -420,17 +433,15 @@ export default function CreatorPage() {
             />
           ))}
         </div>
-      ) : filteredPosts.length === 0 && !loadingSearch ? (
+      ) : filteredPosts.length === 0 && !loadingPosts ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
           <p className="text-[#6b7280] text-lg">Aucun post disponible.</p>
         </div>
       ) : (
         <>
-          {!isSearching && (
-            <div className="pb-4">
-              <Pagination />
-            </div>
-          )}
+          <div className="pb-4">
+            <Pagination />
+          </div>
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredPosts.map((post) => (
@@ -448,7 +459,7 @@ export default function CreatorPage() {
             ))}
           </div>
 
-          {!isSearching && <Pagination />}
+          <Pagination />
         </>
       )}
 
