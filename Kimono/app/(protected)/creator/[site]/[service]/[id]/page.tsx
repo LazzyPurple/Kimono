@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams, useSearchParams, useRouter, usePathname } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,18 +32,34 @@ export default function CreatorPage() {
   const router = useRouter();
   const pathname = usePathname();
 
-  const initialQuery = searchParams.get("q") || "";
-  const initialPage = parseInt(searchParams.get("page") || "1", 10);
+  const query = searchParams.get("q") ?? "";
+  const page = Number(searchParams.get("page") ?? "1");
 
-  const [currentPage, setCurrentPage] = useState(initialPage > 0 ? initialPage : 1);
-  const [hasNextPage, setHasNextPage] = useState(false);
-  const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, initialPage));
+  const [inputValue, setInputValue] = useState(query);
+  const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, page));
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
-  const [postQuery, setPostQuery] = useState(initialQuery);
-  const [debouncedQuery, setDebouncedQuery] = useState(initialQuery);
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [hasNextPage, setHasNextPage] = useState(false);
+
+  const updateURL = useMemo(() => {
+    let timeout: ReturnType<typeof setTimeout>;
+    return (q: string, p: number) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        const params = new URLSearchParams(searchParams.toString());
+        if (q) params.set("q", q);
+        else params.delete("q");
+        if (p > 1) params.set("page", String(p));
+        else params.delete("page");
+        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      }, 300);
+    };
+  }, [pathname, router, searchParams]);
+
+  useEffect(() => {
+    setInputValue(query);
+  }, [query]);
 
   const siteBaseUrl =
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
@@ -64,11 +80,11 @@ export default function CreatorPage() {
   }, [site, service, id]);
 
   const fetchPosts = useCallback(
-    async (page: number) => {
+    async (p: number) => {
       setLoadingPosts(true);
 
       try {
-        const currentOffset = (page - 1) * 50;
+        const currentOffset = (p - 1) * 50;
         const res = await fetch(
           `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`
         );
@@ -78,9 +94,8 @@ export default function CreatorPage() {
         setPosts(data);
         const hasNext = data.length >= 50;
         setHasNextPage(hasNext);
-        setCurrentPage(page);
-        if (page > knownMaxPage) setKnownMaxPage(page);
-        if (hasNext && page >= knownMaxPage) setKnownMaxPage(page + 1);
+        if (p > knownMaxPage) setKnownMaxPage(p);
+        if (hasNext && p >= knownMaxPage) setKnownMaxPage(p + 1);
       } catch (err) {
         console.error(err);
       } finally {
@@ -92,10 +107,13 @@ export default function CreatorPage() {
 
   useEffect(() => {
     fetchProfile();
-    // Fetch initial page only on mount
-    fetchPosts(initialPage > 0 ? initialPage : 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [site, service, id]);
+  }, [fetchProfile]);
+  
+  useEffect(() => {
+    if (!query) {
+      fetchPosts(page);
+    }
+  }, [fetchPosts, page, query]);
 
   // Prefetching to find the max page (up to 10)
   useEffect(() => {
@@ -105,7 +123,7 @@ export default function CreatorPage() {
 
     async function prefetchNextPages() {
       let currentCheckPage = knownMaxPage;
-      const targetMaxPage = currentPage + 4;
+      const targetMaxPage = page + 4;
       
       while (currentCheckPage < targetMaxPage && !isCancelled) {
         try {
@@ -134,43 +152,23 @@ export default function CreatorPage() {
       }
     }
 
-    if (hasNextPage && knownMaxPage < currentPage + 4) {
+    if (hasNextPage && knownMaxPage < page + 4) {
       prefetchNextPages();
     }
 
     return () => {
       isCancelled = true;
     };
-  }, [hasNextPage, knownMaxPage, currentPage, site, service, id, isValid]);
-
-  // Debounce de la recherche
-  useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (!postQuery.trim()) {
-      setDebouncedQuery("");
-      return;
-    }
-    debounceRef.current = setTimeout(() => {
-      setDebouncedQuery((prev) => {
-        const next = postQuery.trim();
-        if (prev !== next) setCurrentPage(1); // Reset page on new search
-        return next;
-      });
-    }, 300);
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [postQuery]);
+  }, [hasNextPage, knownMaxPage, page, site, service, id, isValid]);
 
   // Recherche server-side via ?q= (loop complet)
   useEffect(() => {
-    if (!debouncedQuery) {
+    if (!query) {
       setSearchResults([]);
       return;
     }
     let cancelled = false;
     setLoadingSearch(true);
-    setCurrentPage(1); // Reset page visual
 
     (async () => {
       const all: UnifiedPost[] = [];
@@ -178,7 +176,7 @@ export default function CreatorPage() {
       while (true) {
         try {
           const res = await fetch(
-            `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}&q=${encodeURIComponent(debouncedQuery)}`
+            `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}&q=${encodeURIComponent(query)}`
           );
           const data = await res.json();
           if (cancelled) return;
@@ -197,43 +195,14 @@ export default function CreatorPage() {
     })();
 
     return () => { cancelled = true; };
-  }, [debouncedQuery, site, service, id]);
-
-  // Sync URL Params
-  useEffect(() => {
-    const params = new URLSearchParams(Array.from(searchParams.entries()));
-    let changed = false;
-
-    if (debouncedQuery && params.get("q") !== debouncedQuery) {
-      params.set("q", debouncedQuery);
-      changed = true;
-    } else if (!debouncedQuery && params.has("q")) {
-      params.delete("q");
-      changed = true;
-    }
-
-    if (currentPage > 1 && params.get("page") !== String(currentPage)) {
-      params.set("page", String(currentPage));
-      changed = true;
-    } else if (currentPage <= 1 && params.has("page")) {
-      params.delete("page");
-      changed = true;
-    }
-
-    if (changed) {
-      const newURL = params.size > 0 ? `${pathname}?${params.toString()}` : pathname;
-      router.replace(newURL, { scroll: false });
-    }
-  }, [debouncedQuery, currentPage, pathname, router, searchParams]);
+  }, [query, site, service, id]);
 
   // Reset recherche quand on change de créateur
   useEffect(() => {
-    setPostQuery("");
-    setDebouncedQuery("");
     setSearchResults([]);
   }, [site, service, id]);
 
-  const isSearching = debouncedQuery.length > 0;
+  const isSearching = query.length > 0;
   const basePosts = isSearching ? searchResults : posts;
 
   // Si l'API renvoie des résultats non filtrés, ou juste pour être sûr,
@@ -245,8 +214,8 @@ export default function CreatorPage() {
     
     // Fallback filter if API ignores ?q=
     if (isSearching) {
-      const q = debouncedQuery.toLowerCase();
-      if (!((post.title || "").toLowerCase().includes(q) || (post.content || "").toLowerCase().includes(q))) {
+      const qText = query.toLowerCase();
+      if (!((post.title || "").toLowerCase().includes(qText) || (post.content || "").toLowerCase().includes(qText))) {
         return false;
       }
     }
@@ -267,35 +236,35 @@ export default function CreatorPage() {
     );
   }
 
-  const goToPage = (page: number) => {
-    fetchPosts(page);
+  const goToPage = (newPage: number) => {
+    updateURL(query, newPage);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   function Pagination() {
     const pages = [];
-    const maxVisiblePage = Math.max(currentPage, knownMaxPage);
+    const maxVisiblePage = Math.max(page, knownMaxPage);
 
     // Always show 1
     pages.push(1);
 
-    // Show dots or pages between 1 and currentPage-1
-    if (currentPage > 3) {
+    // Show dots or pages between 1 and page-1
+    if (page > 3) {
       pages.push("...");
-      pages.push(currentPage - 1);
-    } else if (currentPage > 2) {
+      pages.push(page - 1);
+    } else if (page > 2) {
       pages.push(2);
     }
 
-    // Show currentPage (if > 1)
-    if (currentPage > 1) {
-      pages.push(currentPage);
+    // Show page (if > 1)
+    if (page > 1) {
+      pages.push(page);
     }
 
     // Show pages up to maxVisiblePage
-    let nextP = currentPage + 1;
+    let nextP = page + 1;
     while (nextP <= maxVisiblePage) {
-      if (nextP === maxVisiblePage && maxVisiblePage > currentPage + 2) {
+      if (nextP === maxVisiblePage && maxVisiblePage > page + 2) {
         pages.push("...");
         pages.push(maxVisiblePage);
         break;
@@ -306,13 +275,13 @@ export default function CreatorPage() {
 
     return (
       <div className="flex items-center justify-center gap-1 pt-4 flex-wrap">
-        {currentPage > 1 && (
+        {page > 1 && (
           <button onClick={() => goToPage(1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
             «
           </button>
         )}
-        {currentPage > 1 && (
-          <button onClick={() => goToPage(currentPage - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
+        {page > 1 && (
+          <button onClick={() => goToPage(page - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
             ‹
           </button>
         )}
@@ -323,10 +292,10 @@ export default function CreatorPage() {
             </span>
           ) : (
             <button
-              key={p}
+              key={`page-${p}`}
               onClick={() => goToPage(p as number)}
               className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer flex items-center justify-center ${
-                p === currentPage
+                p === page
                   ? "bg-[#7c3aed] text-white"
                   : "border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
               }`}
@@ -336,7 +305,7 @@ export default function CreatorPage() {
           )
         )}
         {hasNextPage && (
-          <button onClick={() => goToPage(currentPage + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
+          <button onClick={() => goToPage(page + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
             ›
           </button>
         )}
@@ -445,8 +414,12 @@ export default function CreatorPage() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
           <Input
-            value={postQuery}
-            onChange={(e) => setPostQuery(e.target.value)}
+            value={inputValue}
+            onChange={(e) => {
+              const val = e.target.value;
+              setInputValue(val);
+              updateURL(val, 1);
+            }}
             placeholder="Chercher dans les posts…"
             className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
           />

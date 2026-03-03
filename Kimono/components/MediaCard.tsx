@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Image, Film, FileText, Play } from "lucide-react";
 import type { Site } from "@/lib/api/unified";
@@ -62,8 +61,8 @@ export default function MediaCard({
   const showImg = !!effectiveThumbnail && !imgError;
 
   return (
-    <Card
-      className="bg-[#12121a] border-[#1e1e2e] overflow-hidden group hover:border-[#7c3aed]/50 transition-all duration-300 cursor-pointer"
+    <div
+      className="bg-[#12121a] border-[#1e1e2e] rounded-xl overflow-hidden group hover:border-[#7c3aed]/50 transition-all duration-300 cursor-pointer"
       onClick={() => router.push(`/post/${site}/${service}/${user}/${postId}`)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -132,7 +131,7 @@ export default function MediaCard({
         )}
       </div>
 
-      <CardContent className="p-3 space-y-1">
+      <div className="p-3 space-y-1">
         <h3 className="text-sm font-medium text-[#f0f0f5] line-clamp-2">
           {title || "Sans titre"}
         </h3>
@@ -147,7 +146,7 @@ export default function MediaCard({
             {new Date(publishedAt).toLocaleDateString("fr-FR")}
           </p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
