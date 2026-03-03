@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import ffmpeg from "fluent-ffmpeg";
-import ffmpegStatic from "ffmpeg-static";
-import { PassThrough } from "stream";
 
-// Force le runtime Node.js (FFMPEG a besoin de child_process, incompatible avec l'Edge runtime)
+// Runtime Node.js pour accéder aux APIs réseau complètes
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Assigne le binaire statique à fluent-ffmpeg
-// ffmpegStatic retourne le chemin absolu vers le .exe sur Windows
-const ffmpegPath = ffmpegStatic as string;
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
-}
-
+/**
+ * Proxy de thumbnail — contourne le blocage CORS côté client pour img.coomer.st / img.kemono.cr
+ * Accepte ?url=<encoded-thumbnail-cdn-url>
+ * Retourne l'image directement avec les bons headers CORS
+ */
 export async function GET(req: NextRequest) {
   const rawUrl = req.nextUrl.searchParams.get("url");
 
@@ -21,107 +16,62 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No URL provided" }, { status: 400 });
   }
 
-  // Valide que c'est bien une URL HTTP(S) valide
-  let url: URL;
+  let parsedUrl: URL;
   try {
-    url = new URL(rawUrl);
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      throw new Error("Invalid protocol");
+    parsedUrl = new URL(rawUrl);
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      throw new Error("Bad protocol");
+    }
+    // Whitelist : uniquement les CDN connus de Kemono/Coomer
+    const allowed = ["img.kemono.cr", "img.coomer.st", "img.kemono.su", "img.coomer.su"];
+    if (!allowed.some((h) => parsedUrl.hostname === h)) {
+      return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
     }
   } catch {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
 
   try {
-    // Timeout global de 15s pour les serveurs lents
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 10000);
 
     let response: Response;
     try {
-      response = await fetch(url.toString(), {
+      response = await fetch(parsedUrl.toString(), {
         signal: controller.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 (compatible; KimonoApp/1.0)",
-          Accept: "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.5",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          Accept: "image/webp,image/avif,image/*,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: `https://${parsedUrl.hostname.replace("img.", "")}/`,
         },
       });
     } finally {
       clearTimeout(timeout);
     }
 
-    if (!response.ok || !response.body) {
+    if (!response.ok) {
       return NextResponse.json(
-        { error: `Failed to fetch video: HTTP ${response.status}` },
-        { status: 400 }
+        { error: `CDN returned ${response.status}` },
+        { status: response.status === 404 ? 404 : 502 }
       );
     }
 
-    // Limite la quantité de données lues à 20MB pour éviter de saturer la RAM
-    const MAX_BYTES = 20 * 1024 * 1024;
-    let byteCount = 0;
+    const buffer = await response.arrayBuffer();
+    const contentType = response.headers.get("content-type") ?? "image/jpeg";
 
-    // Convertit le Web ReadableStream en Node.js PassThrough stream (requis par fluent-ffmpeg)
-    const nodeStream = new PassThrough();
-    const reader = response.body.getReader();
-
-    // Pompe les chunks en arrière-plan — FFMPEG consomme de l'autre côté
-    (async () => {
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            nodeStream.end();
-            break;
-          }
-          if (value) {
-            byteCount += value.byteLength;
-            if (byteCount > MAX_BYTES) {
-              // Stop le download si on dépasse la limite
-              nodeStream.end();
-              await reader.cancel("size limit exceeded");
-              break;
-            }
-            nodeStream.write(Buffer.from(value));
-          }
-        }
-      } catch (err) {
-        nodeStream.destroy(err instanceof Error ? err : new Error(String(err)));
-      }
-    })();
-
-    // Extrait 1 frame à t=2s (2s évite le fade-in noir des vidéos) et la renvoie en JPEG
-    const buffer = await new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      const imageStream = new PassThrough();
-
-      imageStream.on("data", (chunk: Buffer) => chunks.push(chunk));
-      imageStream.on("end", () => resolve(Buffer.concat(chunks)));
-      imageStream.on("error", reject);
-
-      ffmpeg(nodeStream)
-        .inputOption("-ss 2")   // seek à 2s en input (plus rapide que seekInput post-decode)
-        .frames(1)
-        .format("image2")
-        .videoCodec("mjpeg")
-        .outputOptions(["-q:v 5"]) // qualité JPEG 1-31, 5 = bon compromis
-        .on("error", (err: Error) => reject(err))
-        .pipe(imageStream, { end: true });
-    });
-
-    return new NextResponse(new Uint8Array(buffer), {
+    return new NextResponse(buffer, {
       status: 200,
       headers: {
-        "Content-Type": "image/jpeg",
-        // Cache 7 jours côté navigateur + CDN — les thumbnails ne changent pas
+        "Content-Type": contentType,
+        // Cache 7 jours — les thumbnails CDN sont immutables
         "Cache-Control": "public, max-age=604800, immutable",
       },
     });
   } catch (error) {
-    console.error("[thumbnail] Error:", error instanceof Error ? error.message : error);
-    return NextResponse.json(
-      { error: "Failed to generate thumbnail" },
-      { status: 500 }
-    );
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[thumbnail-proxy] Error:", msg);
+    return NextResponse.json({ error: "Proxy failed", detail: msg }, { status: 500 });
   }
 }
