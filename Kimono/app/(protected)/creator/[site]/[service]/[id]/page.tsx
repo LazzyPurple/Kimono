@@ -9,7 +9,7 @@ import MediaCard from "@/components/MediaCard";
 import { User, ExternalLink, Loader2, Search } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
-import { getPostThumbnail, getPostType } from "@/lib/api/unified";
+import { getPostThumbnail, getPostType, getPostVideoUrl } from "@/lib/api/unified";
 
 type MediaFilter = "tout" | "images" | "videos";
 
@@ -462,6 +462,7 @@ export default function CreatorPage() {
                 key={`${post.site}-${post.service}-${post.id}`}
                 title={post.title}
                 thumbnailUrl={getPostThumbnail(post)}
+                videoUrl={getPostVideoUrl(post)}
                 type={getPostType(post)}
                 site={post.site}
                 service={post.service}
