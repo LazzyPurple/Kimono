@@ -1,64 +1,85 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search as SearchIcon, Loader2 } from "lucide-react";
 import CreatorCard from "@/components/CreatorCard";
+import Pagination from "@/components/Pagination";
+import { useLikes } from "@/contexts/LikesContext";
 import type { UnifiedCreator } from "@/lib/api/unified";
 
-type Filter = "tous" | "kemono" | "coomer";
+type Filter = "tous" | "kemono" | "coomer" | "liked";
+
+const PER_PAGE = 50;
 
 export default function SearchPage() {
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<UnifiedCreator[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [searched, setSearched] = useState(false);
+  const [allCreators, setAllCreators] = useState<UnifiedCreator[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("tous");
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const { isCreatorLiked } = useLikes();
 
+  /* Fetch all creators on mount */
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-
-    if (!query.trim()) {
-      setResults([]);
-      setSearched(false);
-      setLoading(false);
-      return;
-    }
-
-    debounceRef.current = setTimeout(async () => {
+    async function loadAll() {
       setLoading(true);
-      setSearched(true);
       try {
-        const res = await fetch(
-          `/api/search-creators?q=${encodeURIComponent(query.trim())}`
-        );
+        const res = await fetch("/api/search-creators?q=");
         const data: UnifiedCreator[] = await res.json();
-        setResults(data);
-      } catch (err) {
-        console.error(err);
-        setResults([]);
+        // Sort by favorited DESC
+        data.sort((a, b) => (b.favorited ?? 0) - (a.favorited ?? 0));
+        setAllCreators(data);
+      } catch {
+        setAllCreators([]);
       } finally {
         setLoading(false);
       }
-    }, 400);
+    }
+    loadAll();
+  }, []);
 
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [query]);
+  /* Reset page on filter or query change */
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, query]);
 
-  const displayed =
-    filter === "tous"
-      ? results
-      : results.filter((c) => c.site === filter);
+  /* Client-side filtering */
+  const displayed = useMemo(() => {
+    let list = allCreators;
+
+    // Text filter
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      list = list.filter((c) => c.name.toLowerCase().includes(q));
+    }
+
+    // Site / liked filter
+    if (filter === "kemono") list = list.filter((c) => c.site === "kemono");
+    else if (filter === "coomer") list = list.filter((c) => c.site === "coomer");
+    else if (filter === "liked")
+      list = list.filter((c) => isCreatorLiked(c.site, c.service, c.id));
+
+    return list;
+  }, [allCreators, query, filter, isCreatorLiked]);
+
+  const totalPages = Math.max(1, Math.ceil(displayed.length / PER_PAGE));
+  const paginated = displayed.slice(
+    (currentPage - 1) * PER_PAGE,
+    currentPage * PER_PAGE
+  );
+
+  const goToPage = (p: number) => {
+    setCurrentPage(p);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-[#f0f0f5]">Recherche</h1>
+      <h1 className="text-2xl font-bold text-[#f0f0f5]">Accueil</h1>
 
-      {/* Barre de recherche */}
+      {/* Search bar */}
       <div className="flex gap-2">
         <div className="relative flex-1">
           <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
@@ -69,16 +90,11 @@ export default function SearchPage() {
             className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
           />
         </div>
-        {loading && (
-          <div className="flex items-center px-2">
-            <Loader2 className="h-5 w-5 animate-spin text-[#7c3aed]" />
-          </div>
-        )}
       </div>
 
-      {/* Filtres */}
-      <div className="flex gap-2">
-        {(["tous", "kemono", "coomer"] as Filter[]).map((f) => (
+      {/* Filters */}
+      <div className="flex gap-2 flex-wrap">
+        {(["tous", "kemono", "coomer", "liked"] as Filter[]).map((f) => (
           <Button
             key={f}
             variant="outline"
@@ -86,26 +102,27 @@ export default function SearchPage() {
             onClick={() => setFilter(f)}
             className={`border-[#1e1e2e] cursor-pointer transition-colors ${
               filter === f
-                ? "bg-[#7c3aed] border-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                ? f === "liked"
+                  ? "bg-red-500 border-red-500 text-white hover:bg-red-600"
+                  : "bg-[#7c3aed] border-[#7c3aed] text-white hover:bg-[#6d28d9]"
                 : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
             }`}
           >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
+            {f === "liked" ? "❤ Likés" : f.charAt(0).toUpperCase() + f.slice(1)}
           </Button>
         ))}
       </div>
 
-      {/* Contenu */}
-      {!searched && !loading ? (
-        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
-          <SearchIcon className="h-12 w-12 text-[#6b7280] mx-auto mb-4" />
-          <p className="text-[#6b7280] text-lg">
-            Tapez un nom de créateur pour lancer la recherche.
-          </p>
-        </div>
-      ) : loading ? (
-        <div className="flex items-center justify-center py-20">
-          <Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" />
+      {/* Content */}
+      {loading ? (
+        <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-2xl bg-[#12121a] border border-[#1e1e2e] animate-pulse"
+              style={{ aspectRatio: "16/20" }}
+            />
+          ))}
         </div>
       ) : displayed.length === 0 ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
@@ -119,11 +136,29 @@ export default function SearchPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <p className="text-sm text-[#6b7280]">
-            {displayed.length} résultat{displayed.length > 1 ? "s" : ""}
-          </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {displayed.map((creator) => (
+          {/* Counter + top pagination */}
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-sm text-[#6b7280]">
+              {displayed.length} résultat{displayed.length > 1 ? "s" : ""}
+              {totalPages > 1 && (
+                <span className="ml-2 text-[#4b5563]">
+                  — page {currentPage}/{totalPages}
+                </span>
+              )}
+            </p>
+          </div>
+
+          {totalPages > 1 && (
+            <Pagination
+              current={currentPage}
+              total={totalPages}
+              onChange={goToPage}
+            />
+          )}
+
+          {/* Grid */}
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            {paginated.map((creator) => (
               <CreatorCard
                 key={`${creator.site}-${creator.service}-${creator.id}`}
                 id={creator.id}
@@ -135,6 +170,15 @@ export default function SearchPage() {
               />
             ))}
           </div>
+
+          {/* Bottom pagination */}
+          {totalPages > 1 && (
+            <Pagination
+              current={currentPage}
+              total={totalPages}
+              onChange={goToPage}
+            />
+          )}
         </div>
       )}
     </div>

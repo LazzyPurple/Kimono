@@ -4,8 +4,9 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import MediaCard from "@/components/MediaCard";
-import { User, ExternalLink, Loader2 } from "lucide-react";
+import { User, ExternalLink, Loader2, Search } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
 import { getPostThumbnail, getPostType } from "@/lib/api/unified";
@@ -31,6 +32,7 @@ export default function CreatorPage() {
   const [hasNextPage, setHasNextPage] = useState(false);
   const [knownMaxPage, setKnownMaxPage] = useState(1);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
+  const [postQuery, setPostQuery] = useState("");
 
   const siteBaseUrl =
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
@@ -129,12 +131,21 @@ export default function CreatorPage() {
   }, [hasNextPage, knownMaxPage, currentPage, site, service, id, isValid]);
 
   const filteredPosts = posts.filter((post) => {
-    if (mediaFilter === "tout") return true;
-    const type = getPostType(post);
-    if (mediaFilter === "images") return type === "image";
-    if (mediaFilter === "videos") return type === "video";
+    if (mediaFilter === "images" && getPostType(post) !== "image") return false;
+    if (mediaFilter === "videos" && getPostType(post) !== "video") return false;
+    if (postQuery.trim()) {
+      const q = postQuery.trim().toLowerCase();
+      const titleMatch = (post.title || "").toLowerCase().includes(q);
+      const contentMatch = (post.content || "").toLowerCase().includes(q);
+      if (!titleMatch && !contentMatch) return false;
+    }
     return true;
   });
+
+  // Reset page when postQuery changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [postQuery]);
 
   const displayName =
     profile?.name ?? (loadingProfile ? "…" : `Créateur ${id}`);
@@ -318,6 +329,24 @@ export default function CreatorPage() {
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </Button>
         ))}
+      </div>
+
+      {/* Recherche dans les posts */}
+      <div className="space-y-2">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
+          <Input
+            value={postQuery}
+            onChange={(e) => setPostQuery(e.target.value)}
+            placeholder="Chercher dans les posts…"
+            className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
+          />
+        </div>
+        {postQuery.trim() && (
+          <p className="text-xs text-[#6b7280]">
+            {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé{filteredPosts.length > 1 ? "s" : ""}
+          </p>
+        )}
       </div>
 
       {/* Grille de posts */}
