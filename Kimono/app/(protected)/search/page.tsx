@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useDeferredValue } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search as SearchIcon, Loader2 } from "lucide-react";
@@ -20,6 +20,7 @@ export default function SearchPage() {
   const [filter, setFilter] = useState<Filter>("tous");
   const [currentPage, setCurrentPage] = useState(1);
   const { isCreatorLiked } = useLikes();
+  const deferredQuery = useDeferredValue(query);
 
   /* Fetch all creators on mount */
   useEffect(() => {
@@ -27,7 +28,9 @@ export default function SearchPage() {
       setLoading(true);
       try {
         const res = await fetch("/api/search-creators?q=");
+        if (!res.ok) throw new Error("Erreur réseau");
         const data: UnifiedCreator[] = await res.json();
+        if (!Array.isArray(data)) throw new Error("L'API n'a pas retourné de tableau");
         // Sort by favorited DESC
         data.sort((a, b) => (b.favorited ?? 0) - (a.favorited ?? 0));
         setAllCreators(data);
@@ -43,15 +46,15 @@ export default function SearchPage() {
   /* Reset page on filter or query change */
   useEffect(() => {
     setCurrentPage(1);
-  }, [filter, query]);
+  }, [filter, deferredQuery]);
 
   /* Client-side filtering */
   const displayed = useMemo(() => {
     let list = allCreators;
 
     // Text filter
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
+    if (deferredQuery.trim()) {
+      const q = deferredQuery.trim().toLowerCase();
       list = list.filter((c) => c.name.toLowerCase().includes(q));
     }
 
@@ -62,7 +65,7 @@ export default function SearchPage() {
       list = list.filter((c) => isCreatorLiked(c.site, c.service, c.id));
 
     return list;
-  }, [allCreators, query, filter, isCreatorLiked]);
+  }, [allCreators, deferredQuery, filter, isCreatorLiked]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PER_PAGE));
   const paginated = displayed.slice(

@@ -59,7 +59,7 @@ export async function fetchCreatorProfile(
 export async function searchCreators(query: string): Promise<Creator[]> {
   let allCreators = await getCachedCreators("coomer");
 
-  if (!allCreators) {
+  if (!allCreators || allCreators.length === 0) {
     const endpoints = ["/v1/creators.txt", "/v1/creators"];
 
     for (const endpoint of endpoints) {
@@ -83,7 +83,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
       }
     }
 
-    if (!allCreators) {
+    if (!allCreators || allCreators.length === 0) {
       console.log("[SEARCH/coomer] No creators endpoint available — coomer search disabled");
       return [];
     }
