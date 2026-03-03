@@ -48,10 +48,3 @@ model CreatorsCache {
   data      String
   updatedAt DateTime @updatedAt
 }
-
-model PostsCache {
-  id        String   @id  // Format: "{site}-{service}-{creatorId}"
-  data      String        // JSON stringifié des posts
-  postCount Int           // Nombre de posts (pour info rapide)
-  updatedAt DateTime @updatedAt
-}
