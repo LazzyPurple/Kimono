@@ -3,10 +3,8 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Image, Film, FileText, Play, Loader2 } from "lucide-react";
+import { Image, Film, FileText, Play } from "lucide-react";
 import type { Site } from "@/lib/api/unified";
-import { useVideoFrame } from "@/hooks/useVideoFrame";
-import { useVideoThumbnail } from "@/hooks/useVideoThumbnail";
 
 interface MediaCardProps {
   title: string;
@@ -38,25 +36,8 @@ export default function MediaCard({
   const [imgError, setImgError] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Pour Kemono : extraction canvas via le hook historique (videos accessibles en CORS)
-  const { thumbnailDataUrl: kemonoFrameUrl } = useVideoThumbnail(
-    type === "video" && !thumbnailUrl && site === "kemono" ? (videoUrl ?? undefined) : undefined
-  );
-
-  // Pour Coomer : extraction canvas via le hook useVideoFrame
-  // crossOrigin=anonymous est tenté — si bloqué par CORS, retourne null (icône générique)
-  const { frameUrl: coomerFrameUrl, loading: coomerFrameLoading } = useVideoFrame(
-    type === "video" && site === "coomer" && (imgError || !thumbnailUrl) ? (videoUrl ?? undefined) : undefined
-  );
-
-  // Chaîne de fallback : CDN direct > frame canvas > null (icône générique)
-  const effectiveThumbnail = imgError
-    ? coomerFrameUrl ?? kemonoFrameUrl ?? undefined
-    : thumbnailUrl || coomerFrameUrl || kemonoFrameUrl || undefined;
-
-  // Le skeleton s'affiche pendant l'extraction de la frame Coomer
-  const serverThumbnailLoading = coomerFrameLoading;
-
+  // thumbnailUrl vient de getPostThumbnail() qui applique déjà le trick .jpg pour les vidéos
+  const showImg = !!thumbnailUrl && !imgError;
   const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
 
   const handleMouseEnter = useCallback(() => {
@@ -71,8 +52,7 @@ export default function MediaCard({
     setHovered(false);
   }, []);
 
-  const previewSrc = videoUrl || effectiveThumbnail;
-  const showImg = !!effectiveThumbnail && !imgError;
+  const previewSrc = videoUrl || thumbnailUrl;
 
   return (
     <div
@@ -83,11 +63,7 @@ export default function MediaCard({
     >
       {/* Aperçu */}
       <div className="relative aspect-square bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
-        {serverThumbnailLoading ? (
-          <div className="w-full h-full bg-[#12121a] animate-pulse flex items-center justify-center">
-             <Film className="h-8 w-8 text-[#3f3f46] animate-pulse opacity-50" />
-          </div>
-        ) : hovered && type === "video" && previewSrc ? (
+        {hovered && type === "video" && previewSrc ? (
           <video
             src={previewSrc}
             autoPlay
@@ -98,7 +74,7 @@ export default function MediaCard({
           />
         ) : hovered && type === "image" && showImg ? (
           <img
-            src={effectiveThumbnail}
+            src={thumbnailUrl}
             alt={title}
             referrerPolicy="no-referrer"
             loading="lazy"
@@ -107,7 +83,7 @@ export default function MediaCard({
           />
         ) : showImg ? (
           <img
-            src={effectiveThumbnail}
+            src={thumbnailUrl}
             alt={title}
             referrerPolicy="no-referrer"
             loading="lazy"
@@ -125,8 +101,21 @@ export default function MediaCard({
           </div>
         )}
 
+        {/* Badge type */}
+        <div className="absolute top-2 left-2">
+          <Badge
+            className={`text-xs ${
+              type === "video"
+                ? "bg-pink-600/80 text-white"
+                : "bg-[#7c3aed]/80 text-white"
+            }`}
+          >
+            {type === "video" ? "Vidéo" : type === "text" ? "Texte" : "Image"}
+          </Badge>
+        </div>
+
         {/* Badge site */}
-        <div className="absolute top-2 right-2 z-10">
+        <div className="absolute top-2 right-2">
           <Badge
             className={`text-xs ${
               site === "kemono"
@@ -137,32 +126,27 @@ export default function MediaCard({
             {site}
           </Badge>
         </div>
-
-        {/* Badge type */}
-        {type !== "image" && (
-          <div className="absolute top-2 left-2 z-10">
-            <Badge className="bg-black/60 text-white text-xs">
-              {type === "video" ? "Vidéo" : "Texte"}
-            </Badge>
-          </div>
-        )}
       </div>
 
+      {/* Texte */}
       <div className="p-3 space-y-1">
-        <h3 className="text-sm font-medium text-[#f0f0f5] line-clamp-2">
+        <h3 className="text-sm font-medium text-[#f0f0f5] truncate">
           {title || "Sans titre"}
         </h3>
-        <div className="flex items-center justify-between text-xs text-[#6b7280]">
-          {creatorName && <span>{creatorName}</span>}
+        <div className="flex items-center gap-2 text-xs text-[#6b7280]">
           <Badge variant="outline" className="border-[#1e1e2e] text-[#6b7280] text-xs">
             {service}
           </Badge>
+          {publishedAt && (
+            <span>
+              {new Date(
+                typeof publishedAt === "number"
+                  ? (publishedAt as number) * 1000
+                  : publishedAt
+              ).toLocaleDateString("fr-FR")}
+            </span>
+          )}
         </div>
-        {publishedAt && (
-          <p className="text-xs text-[#6b7280]">
-            {new Date(publishedAt).toLocaleDateString("fr-FR")}
-          </p>
-        )}
       </div>
     </div>
   );
