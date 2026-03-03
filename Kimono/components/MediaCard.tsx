@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Image, Film, FileText, Play, Loader2 } from "lucide-react";
 import type { Site } from "@/lib/api/unified";
+import { useVideoFrame } from "@/hooks/useVideoFrame";
 import { useVideoThumbnail } from "@/hooks/useVideoThumbnail";
-import { useServerThumbnail } from "@/hooks/useServerThumbnail";
 
 interface MediaCardProps {
   title: string;
@@ -38,25 +38,24 @@ export default function MediaCard({
   const [imgError, setImgError] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const shouldFetchKemonoThumbnail =
-    type === "video" && !thumbnailUrl && site === "kemono";
-  const { thumbnailDataUrl: kemonoThumbnailDataUrl } = useVideoThumbnail(
-    shouldFetchKemonoThumbnail ? (videoUrl ?? undefined) : undefined
+  // Pour Kemono : extraction canvas via le hook historique (videos accessibles en CORS)
+  const { thumbnailDataUrl: kemonoFrameUrl } = useVideoThumbnail(
+    type === "video" && !thumbnailUrl && site === "kemono" ? (videoUrl ?? undefined) : undefined
   );
 
-  // Pour Coomer : si le thumbnail CDN échoue (imgError=true) ou est absent,
-  // on le proxifie via /api/thumbnail pour contourner le CORS
-  const shouldProxyCoomerThumbnail =
-    site === "coomer" && (imgError || !thumbnailUrl);
-  const { thumbnailUrl: proxiedThumbnailUrl, loading: serverThumbnailLoading } =
-    useServerThumbnail(
-      shouldProxyCoomerThumbnail ? (thumbnailUrl ?? undefined) : undefined
-    );
+  // Pour Coomer : extraction canvas via le hook useVideoFrame
+  // crossOrigin=anonymous est tenté — si bloqué par CORS, retourne null (icône générique)
+  const { frameUrl: coomerFrameUrl, loading: coomerFrameLoading } = useVideoFrame(
+    type === "video" && site === "coomer" && (imgError || !thumbnailUrl) ? (videoUrl ?? undefined) : undefined
+  );
 
-  // Chaîne de fallback : direct CDN > proxy CDN > canvas kemono
+  // Chaîne de fallback : CDN direct > frame canvas > null (icône générique)
   const effectiveThumbnail = imgError
-    ? proxiedThumbnailUrl ?? kemonoThumbnailDataUrl ?? undefined
-    : thumbnailUrl || proxiedThumbnailUrl || kemonoThumbnailDataUrl || undefined;
+    ? coomerFrameUrl ?? kemonoFrameUrl ?? undefined
+    : thumbnailUrl || coomerFrameUrl || kemonoFrameUrl || undefined;
+
+  // Le skeleton s'affiche pendant l'extraction de la frame Coomer
+  const serverThumbnailLoading = coomerFrameLoading;
 
   const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
 
