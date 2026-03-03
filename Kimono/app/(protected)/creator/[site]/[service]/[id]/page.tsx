@@ -90,7 +90,7 @@ export default function CreatorPage() {
 
     async function prefetchNextPages() {
       let currentCheckPage = knownMaxPage;
-      const targetMaxPage = currentPage + 9;
+      const targetMaxPage = currentPage + 4;
       
       while (currentCheckPage < targetMaxPage && !isCancelled) {
         try {
@@ -119,7 +119,7 @@ export default function CreatorPage() {
       }
     }
 
-    if (hasNextPage && knownMaxPage < currentPage + 9) {
+    if (hasNextPage && knownMaxPage < currentPage + 4) {
       prefetchNextPages();
     }
 
