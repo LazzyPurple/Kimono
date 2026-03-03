@@ -135,45 +135,19 @@ export default function CreatorPage() {
   useEffect(() => {
     if (postQuery.trim() && allPosts === null && !loadingAllPosts) {
       let isCancelled = false;
-      const BATCH = 5; // fetch 5 pages in parallel
-
       async function fetchAllPosts() {
         setLoadingAllPosts(true);
-        const all: UnifiedPost[] = [];
-        let offset = 0;
-        let done = false;
-
         try {
-          while (!done && !isCancelled) {
-            const offsets = Array.from({ length: BATCH }, (_, i) => offset + i * 50);
-            const results = await Promise.all(
-              offsets.map((o) =>
-                fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${o}`)
-                  .then((r) => r.json())
-                  .catch(() => [])
-              )
-            );
-
-            for (const data of results) {
-              if (!Array.isArray(data) || data.length === 0) { done = true; break; }
-              all.push(...data);
-              if (data.length < 50) { done = true; break; }
-            }
-
-            // Progressive update so user sees results as they load
-            if (!isCancelled) setAllPosts([...all]);
-            offset += BATCH * 50;
-          }
-
-          if (!isCancelled) setAllPosts(all);
+          const res = await fetch(`/api/creator-all-posts?site=${site}&service=${service}&id=${id}`);
+          const data = await res.json();
+          if (!isCancelled) setAllPosts(Array.isArray(data) ? data : []);
         } catch (err) {
           console.error("Error fetching all posts", err);
-          if (!isCancelled && all.length > 0) setAllPosts(all);
+          if (!isCancelled) setAllPosts([]);
         } finally {
           if (!isCancelled) setLoadingAllPosts(false);
         }
       }
-
       fetchAllPosts();
       return () => { isCancelled = true; };
     }
