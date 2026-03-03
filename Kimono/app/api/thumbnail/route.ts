@@ -3,93 +3,109 @@ import ffmpeg from "fluent-ffmpeg";
 import ffmpegStatic from "ffmpeg-static";
 import { PassThrough } from "stream";
 
-// Doit run dans l'environnement Node.js (pas Edge) pour child_process (FFMPEG)
+// Force le runtime Node.js (FFMPEG a besoin de child_process, incompatible avec l'Edge runtime)
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-ffmpeg.setFfmpegPath(ffmpegStatic as string);
+// Assigne le binaire statique à fluent-ffmpeg
+// ffmpegStatic retourne le chemin absolu vers le .exe sur Windows
+const ffmpegPath = ffmpegStatic as string;
+if (ffmpegPath) {
+  ffmpeg.setFfmpegPath(ffmpegPath);
+}
 
 export async function GET(req: NextRequest) {
-  const url = req.nextUrl.searchParams.get("url");
+  const rawUrl = req.nextUrl.searchParams.get("url");
 
-  if (!url) {
+  if (!rawUrl) {
     return NextResponse.json({ error: "No URL provided" }, { status: 400 });
   }
 
+  // Valide que c'est bien une URL HTTP(S) valide
+  let url: URL;
   try {
-    // Timeout global de 10s pour libérer les workers si le stream est trop lent
+    url = new URL(rawUrl);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      throw new Error("Invalid protocol");
+    }
+  } catch {
+    return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
+  }
+
+  try {
+    // Timeout global de 15s pour les serveurs lents
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
 
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        "User-Agent": "Mozilla/5.0 KimonoApp/1.0",
-        Accept: "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.5",
-      },
-    });
-
-    clearTimeout(timeout);
+    let response: Response;
+    try {
+      response = await fetch(url.toString(), {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; KimonoApp/1.0)",
+          Accept: "video/webm,video/mp4,video/*;q=0.9,*/*;q=0.5",
+        },
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok || !response.body) {
       return NextResponse.json(
-        { error: "Failed to fetch video stream" },
+        { error: `Failed to fetch video: HTTP ${response.status}` },
         { status: 400 }
       );
     }
 
-    // Convertisseur de Web ReadableStream vers Node.js stream
-    const nodeStream = new PassThrough();
-    const reader = response.body.getReader();
-
-    // Limite de taille fixée à 20MB pour éviter toute congestion de RAM
+    // Limite la quantité de données lues à 20MB pour éviter de saturer la RAM
     const MAX_BYTES = 20 * 1024 * 1024;
     let byteCount = 0;
 
-    const pump = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
+    // Convertit le Web ReadableStream en Node.js PassThrough stream (requis par fluent-ffmpeg)
+    const nodeStream = new PassThrough();
+    const reader = response.body.getReader();
+
+    // Pompe les chunks en arrière-plan — FFMPEG consomme de l'autre côté
+    (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            nodeStream.end();
+            break;
+          }
+          if (value) {
+            byteCount += value.byteLength;
+            if (byteCount > MAX_BYTES) {
+              // Stop le download si on dépasse la limite
               nodeStream.end();
+              await reader.cancel("size limit exceeded");
               break;
             }
-            if (value) {
-              byteCount += value.length;
-              if (byteCount > MAX_BYTES) {
-                // Interruption agressive si limite dépassée
-                nodeStream.destroy(new Error("Stream size exceeded 20MB limit"));
-                await reader.cancel();
-                break;
-              }
-              nodeStream.write(value);
-            }
+            nodeStream.write(Buffer.from(value));
           }
-        } catch (err) {
-          nodeStream.destroy(err as NodeJS.ErrnoException);
         }
-    };
+      } catch (err) {
+        nodeStream.destroy(err instanceof Error ? err : new Error(String(err)));
+      }
+    })();
 
-    // Fire & Forget stream reader loop (FFMPEG tirera les données de l'autre bout)
-    pump();
-
-    // Promesse qui résout avec l'image passée depuis stdout de FFMPEG
+    // Extrait 1 frame à t=2s (2s évite le fade-in noir des vidéos) et la renvoie en JPEG
     const buffer = await new Promise<Buffer>((resolve, reject) => {
       const chunks: Buffer[] = [];
       const imageStream = new PassThrough();
 
-      imageStream.on("data", (chunk) => chunks.push(chunk));
+      imageStream.on("data", (chunk: Buffer) => chunks.push(chunk));
       imageStream.on("end", () => resolve(Buffer.concat(chunks)));
       imageStream.on("error", reject);
 
       ffmpeg(nodeStream)
-        .seekInput(2) // Saute exactement aux 2 premières secondes
-        .frames(1) // Extrait l'unique frame
+        .inputOption("-ss 2")   // seek à 2s en input (plus rapide que seekInput post-decode)
+        .frames(1)
         .format("image2")
         .videoCodec("mjpeg")
-        .on("error", (err) => {
-          // Rejette s'il y a un vrai échec
-          reject(err);
-        })
+        .outputOptions(["-q:v 5"]) // qualité JPEG 1-31, 5 = bon compromis
+        .on("error", (err: Error) => reject(err))
         .pipe(imageStream, { end: true });
     });
 
@@ -97,14 +113,15 @@ export async function GET(req: NextRequest) {
       status: 200,
       headers: {
         "Content-Type": "image/jpeg",
-        "Cache-Control": "public, max-age=604800, immutable", // Cache agressif navigateur (7j)
+        // Cache 7 jours côté navigateur + CDN — les thumbnails ne changent pas
+        "Cache-Control": "public, max-age=604800, immutable",
       },
     });
   } catch (error) {
-    console.error("Thumbnail generation error:", error);
+    console.error("[thumbnail] Error:", error instanceof Error ? error.message : error);
     return NextResponse.json(
-      { error: "Failed to generate thumbnail or timeout exceeded" },
-      { status: 400 }
+      { error: "Failed to generate thumbnail" },
+      { status: 500 }
     );
   }
 }
