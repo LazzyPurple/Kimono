@@ -68,7 +68,7 @@ export default function MediaCard({
       onMouseLeave={handleMouseLeave}
     >
       {/* Aperçu */}
-      <div className="relative aspect-[4/5] bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
+      <div className="relative aspect-square bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
         {/* Prévisualisation hover vidéo */}
         {hovered && type === "video" && previewSrc ? (
           <video
