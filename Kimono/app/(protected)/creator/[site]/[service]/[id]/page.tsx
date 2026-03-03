@@ -438,11 +438,11 @@ export default function CreatorPage() {
 
       {/* Grille de posts */}
       {(loadingPosts && !isSearching) ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {Array.from({ length: 12 }).map((_, i) => (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          {Array.from({ length: 18 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-[4/5] animate-pulse"
+              className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-square animate-pulse"
             />
           ))}
         </div>
@@ -456,7 +456,7 @@ export default function CreatorPage() {
             <Pagination />
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {filteredPosts.map((post) => (
               <MediaCard
                 key={`${post.site}-${post.service}-${post.id}`}
