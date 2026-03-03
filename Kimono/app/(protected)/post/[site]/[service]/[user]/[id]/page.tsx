@@ -102,6 +102,19 @@ export default function PostPage() {
     fetchPost();
   }, [site, service, user, id, isValid]);
 
+  const creatorName = creatorProfile?.name || post?.user;
+
+  useEffect(() => {
+    if (post?.title) {
+      document.title = `${creatorName ? creatorName + ' - ' : ''}${post.title}`;
+    } else if (post) {
+      document.title = `${creatorName ? creatorName + ' - ' : ''}Sans titre`;
+    }
+    return () => {
+      document.title = 'Kimono';
+    };
+  }, [post, creatorName]);
+
   if (!isValid) {
     return (
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center space-y-2">
@@ -200,19 +213,7 @@ export default function PostPage() {
     );
   }
 
-  const creatorName = creatorProfile?.name || post.user;
   const displayName = creatorProfile?.name ?? `Créateur`;
-
-  useEffect(() => {
-    if (post?.title) {
-      document.title = `${creatorName ? creatorName + ' - ' : ''}${post.title}`;
-    } else if (post) {
-      document.title = `${creatorName ? creatorName + ' - ' : ''}Sans titre`;
-    }
-    return () => {
-      document.title = 'Kimono';
-    };
-  }, [post, creatorName]);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
