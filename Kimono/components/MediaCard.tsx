@@ -44,15 +44,21 @@ export default function MediaCard({
     shouldFetchKemonoThumbnail ? (videoUrl ?? undefined) : undefined
   );
 
+  // Déclenche le thumbnail FFMPEG pour Coomer si :
+  //  - c'est une vidéo ET il n'y a pas de thumbnailUrl du tout
+  //  - OU que le thumbnail CDN a renvoyé une 404 (imgError)
   const shouldFetchCoomerThumbnail =
-    type === "video" && !thumbnailUrl && site === "coomer";
+    type === "video" && site === "coomer" && (!thumbnailUrl || imgError);
   const { thumbnailUrl: serverThumbnailDataUrl, loading: serverThumbnailLoading } =
     useServerThumbnail(
       shouldFetchCoomerThumbnail ? (videoUrl ?? undefined) : undefined
     );
 
-  const effectiveThumbnail =
-    thumbnailUrl || kemonoThumbnailDataUrl || serverThumbnailDataUrl || undefined;
+  // Priorité : thumbnailUrl CDN > fallback FFMPEG server > kemono canvas
+  // Si imgError, on passe directement au fallback FFMPEG (serverThumbnailDataUrl)
+  const effectiveThumbnail = imgError
+    ? serverThumbnailDataUrl ?? kemonoThumbnailDataUrl ?? undefined
+    : thumbnailUrl || serverThumbnailDataUrl || kemonoThumbnailDataUrl || undefined;
 
   const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
 

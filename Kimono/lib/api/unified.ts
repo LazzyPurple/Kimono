@@ -221,3 +221,22 @@ export function getPostType(post: UnifiedPost): "image" | "video" | "text" {
 
   return "text";
 }
+
+/**
+ * Retourne l'URL directe (source) de la vidéo d'un post (pas le thumbnail CDN)
+ */
+export function getPostVideoUrl(post: UnifiedPost): string | undefined {
+  const base = post.site === "kemono" ? "https://kemono.su" : "https://coomer.su";
+
+  if (post.file?.path && isVideo(post.file.path)) {
+    return `${base}/data${encodeURI(post.file.path)}`;
+  }
+
+  const vidAttachment = post.attachments?.find((a) => isVideo(a.name || a.path));
+  if (vidAttachment) {
+    return `${base}/data${encodeURI(vidAttachment.path)}`;
+  }
+
+  return undefined;
+}
+
