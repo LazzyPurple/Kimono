@@ -3,9 +3,10 @@
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Image, Film, FileText, Play } from "lucide-react";
+import { Image, Film, FileText, Play, Loader2 } from "lucide-react";
 import type { Site } from "@/lib/api/unified";
 import { useVideoThumbnail } from "@/hooks/useVideoThumbnail";
+import { useServerThumbnail } from "@/hooks/useServerThumbnail";
 
 interface MediaCardProps {
   title: string;
@@ -37,11 +38,21 @@ export default function MediaCard({
   const [imgError, setImgError] = useState(false);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { thumbnailDataUrl } = useVideoThumbnail(
-    type === "video" && !thumbnailUrl ? (videoUrl ?? undefined) : undefined
+  const shouldFetchKemonoThumbnail =
+    type === "video" && !thumbnailUrl && site === "kemono";
+  const { thumbnailDataUrl: kemonoThumbnailDataUrl } = useVideoThumbnail(
+    shouldFetchKemonoThumbnail ? (videoUrl ?? undefined) : undefined
   );
 
-  const effectiveThumbnail = thumbnailUrl || thumbnailDataUrl || undefined;
+  const shouldFetchCoomerThumbnail =
+    type === "video" && !thumbnailUrl && site === "coomer";
+  const { thumbnailUrl: serverThumbnailDataUrl, loading: serverThumbnailLoading } =
+    useServerThumbnail(
+      shouldFetchCoomerThumbnail ? (videoUrl ?? undefined) : undefined
+    );
+
+  const effectiveThumbnail =
+    thumbnailUrl || kemonoThumbnailDataUrl || serverThumbnailDataUrl || undefined;
 
   const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
 
@@ -69,8 +80,11 @@ export default function MediaCard({
     >
       {/* Aperçu */}
       <div className="relative aspect-square bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
-        {/* Prévisualisation hover vidéo */}
-        {hovered && type === "video" && previewSrc ? (
+        {serverThumbnailLoading ? (
+          <div className="w-full h-full bg-[#12121a] animate-pulse flex items-center justify-center">
+             <Film className="h-8 w-8 text-[#3f3f46] animate-pulse opacity-50" />
+          </div>
+        ) : hovered && type === "video" && previewSrc ? (
           <video
             src={previewSrc}
             autoPlay

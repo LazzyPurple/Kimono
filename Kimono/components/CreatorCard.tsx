@@ -12,7 +12,7 @@ interface CreatorCardProps {
   service: string;
   site: Site;
   favorited?: number;
-  updated?: number;
+  updated?: string | number;
 }
 
 export default function CreatorCard({
@@ -148,7 +148,7 @@ export default function CreatorCard({
                 </span>
               )}
               {updated !== undefined && (
-                <span>{new Date(updated * 1000).toLocaleDateString("fr-FR")}</span>
+                <span>{new Date(typeof updated === "number" ? updated * 1000 : updated).toLocaleDateString("fr-FR")}</span>
               )}
             </div>
           </div>
