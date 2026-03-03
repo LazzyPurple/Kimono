@@ -29,6 +29,7 @@ export default function CreatorPage() {
   const [avatarError, setAvatarError] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const [knownMaxPage, setKnownMaxPage] = useState(1);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
 
   const siteBaseUrl =
@@ -62,8 +63,11 @@ export default function CreatorPage() {
         const data: UnifiedPost[] = Array.isArray(raw) ? raw : [];
 
         setPosts(data);
-        setHasNextPage(data.length >= 50);
+        const hasNext = data.length >= 50;
+        setHasNextPage(hasNext);
         setCurrentPage(page);
+        if (page > knownMaxPage) setKnownMaxPage(page);
+        if (hasNext && page >= knownMaxPage) setKnownMaxPage(page + 1);
       } catch (err) {
         console.error(err);
       } finally {
@@ -77,6 +81,51 @@ export default function CreatorPage() {
     fetchProfile();
     fetchPosts(1);
   }, [fetchProfile, fetchPosts]);
+
+  // Prefetching to find the max page (up to 10)
+  useEffect(() => {
+    if (!isValid) return;
+    
+    let isCancelled = false;
+
+    async function prefetchNextPages() {
+      let currentCheckPage = knownMaxPage;
+      
+      while (currentCheckPage < 10 && !isCancelled) {
+        try {
+          const checkOffset = currentCheckPage * 50;
+          const res = await fetch(
+            `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${checkOffset}`
+          );
+          const raw = await res.json();
+          const pData: UnifiedPost[] = Array.isArray(raw) ? raw : [];
+          
+          if (pData.length > 0) {
+            currentCheckPage++;
+            setKnownMaxPage(currentCheckPage);
+            if (pData.length < 50) {
+              // We found the actual last page
+              break;
+            }
+          } else {
+            // Empty page means the previous page was the last
+            break;
+          }
+        } catch (err) {
+          console.error("Error prefetching page", currentCheckPage + 1, err);
+          break;
+        }
+      }
+    }
+
+    if (hasNextPage && knownMaxPage < 10) {
+      prefetchNextPages();
+    }
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [hasNextPage, knownMaxPage, site, service, id, isValid]);
 
   const filteredPosts = posts.filter((post) => {
     if (mediaFilter === "tout") return true;
@@ -107,23 +156,45 @@ export default function CreatorPage() {
 
   function Pagination() {
     const pages = [];
+    const maxVisiblePage = Math.max(currentPage, knownMaxPage);
+
+    // Always show 1
+    pages.push(1);
+
+    // Show dots or pages between 1 and currentPage-1
     if (currentPage > 3) {
-      pages.push(1, "...");
-    } else {
-      for (let i = 1; i < currentPage; i++) pages.push(i);
+      pages.push("...");
+      pages.push(currentPage - 1);
+    } else if (currentPage > 2) {
+      pages.push(2);
     }
-    pages.push(currentPage);
-    if (hasNextPage) pages.push(currentPage + 1);
+
+    // Show currentPage (if > 1)
+    if (currentPage > 1) {
+      pages.push(currentPage);
+    }
+
+    // Show pages up to maxVisiblePage
+    let nextP = currentPage + 1;
+    while (nextP <= maxVisiblePage) {
+      if (nextP === maxVisiblePage && maxVisiblePage > currentPage + 2) {
+        pages.push("...");
+        pages.push(maxVisiblePage);
+        break;
+      }
+      pages.push(nextP);
+      nextP++;
+    }
 
     return (
       <div className="flex items-center justify-center gap-1 pt-4 flex-wrap">
         {currentPage > 1 && (
-          <button onClick={() => goToPage(1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer">
+          <button onClick={() => goToPage(1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
             «
           </button>
         )}
         {currentPage > 1 && (
-          <button onClick={() => goToPage(currentPage - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer">
+          <button onClick={() => goToPage(currentPage - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
             ‹
           </button>
         )}
@@ -136,10 +207,10 @@ export default function CreatorPage() {
             <button
               key={p}
               onClick={() => goToPage(p as number)}
-              className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer ${
+              className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer flex items-center justify-center ${
                 p === currentPage
                   ? "bg-[#7c3aed] text-white"
-                  : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                  : "border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
               }`}
             >
               {p}
@@ -147,7 +218,7 @@ export default function CreatorPage() {
           )
         )}
         {hasNextPage && (
-          <button onClick={() => goToPage(currentPage + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer">
+          <button onClick={() => goToPage(currentPage + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
             ›
           </button>
         )}
