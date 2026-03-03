@@ -135,32 +135,47 @@ export default function CreatorPage() {
   useEffect(() => {
     if (postQuery.trim() && allPosts === null && !loadingAllPosts) {
       let isCancelled = false;
+      const BATCH = 5; // fetch 5 pages in parallel
+
       async function fetchAllPosts() {
         setLoadingAllPosts(true);
         const all: UnifiedPost[] = [];
         let offset = 0;
+        let done = false;
+
         try {
-          while (!isCancelled) {
-            const res = await fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}`);
-            const data = await res.json();
-            if (!Array.isArray(data) || data.length === 0) break;
-            all.push(...data);
-            if (data.length < 50) break;
-            offset += 50;
+          while (!done && !isCancelled) {
+            const offsets = Array.from({ length: BATCH }, (_, i) => offset + i * 50);
+            const results = await Promise.all(
+              offsets.map((o) =>
+                fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${o}`)
+                  .then((r) => r.json())
+                  .catch(() => [])
+              )
+            );
+
+            for (const data of results) {
+              if (!Array.isArray(data) || data.length === 0) { done = true; break; }
+              all.push(...data);
+              if (data.length < 50) { done = true; break; }
+            }
+
+            // Progressive update so user sees results as they load
+            if (!isCancelled) setAllPosts([...all]);
+            offset += BATCH * 50;
           }
-          if (!isCancelled) {
-            setAllPosts(all);
-          }
+
+          if (!isCancelled) setAllPosts(all);
         } catch (err) {
           console.error("Error fetching all posts", err);
+          if (!isCancelled && all.length > 0) setAllPosts(all);
         } finally {
           if (!isCancelled) setLoadingAllPosts(false);
         }
       }
+
       fetchAllPosts();
-      return () => {
-        isCancelled = true;
-      };
+      return () => { isCancelled = true; };
     }
   }, [postQuery, allPosts, loadingAllPosts, site, service, id]);
 
