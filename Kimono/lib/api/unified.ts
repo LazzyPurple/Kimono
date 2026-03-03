@@ -156,11 +156,29 @@ function deduplicateCreators(creators: UnifiedCreator[]): UnifiedCreator[] {
   });
 }
 
+const IMAGE_EXTENSIONS = [".gif", ".jpeg", ".jpg", ".jpe", ".png", ".webp"];
+const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"];
+// Services qui ont souvent le fichier principal vide et les contenus dans les attachments
+const FALLBACK_SERVICES = ["fansly", "candfans", "boosty", "gumroad"];
+
 function isVideo(p: string): boolean {
-  return /\.(mp4|webm|mov|avi)$/i.test(p);
+  const lower = p.toLowerCase();
+  return VIDEO_EXTENSIONS.some((ext) => lower.endsWith(ext));
 }
 function isImage(p: string): boolean {
-  return /\.(jpg|jpeg|png|gif|webp)$/i.test(p);
+  const lower = p.toLowerCase();
+  return IMAGE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/**
+ * Remplace l'extension d'un path par .jpg
+ * Le CDN Kemono/Coomer génère automatiquement un .jpg pour chaque fichier uploadé,
+ * y compris les vidéos. C'est le trick découvert dans KemonoScrapper.
+ */
+function toJpgPath(filePath: string): string {
+  const lastDot = filePath.lastIndexOf(".");
+  if (lastDot === -1) return filePath + ".jpg";
+  return filePath.substring(0, lastDot) + ".jpg";
 }
 
 /**
@@ -180,25 +198,67 @@ export function getFullImageUrl(site: Site, path: string): string {
 }
 
 /**
- * Construit l'URL d'une miniature depuis un post
+ * Construit l'URL d'une miniature depuis un post.
+ *
+ * Logique combinée de Kemono officiel + KemonoScrapper :
+ * 1. Fichier principal est une image → thumbnail CDN direct
+ * 2. Fichier principal est une vidéo → extension → .jpg (trick CDN)
+ * 3. Fallback attachments pour fansly/candfans/boosty/gumroad
+ * 4. Attachments vidéo → extension → .jpg
  */
 export function getPostThumbnail(post: UnifiedPost): string | undefined {
-  const imgCdn =
-    post.site === "kemono" ? "https://img.kemono.cr/thumbnail" : "https://img.coomer.st/thumbnail";
+  const thumbBase =
+    post.site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
 
-  const imgAttachment = post.attachments?.find((a) => isImage(a.name || a.path));
-  if (imgAttachment) return `${imgCdn}/data${encodeURI(imgAttachment.path)}`;
+  const filePath = post.file?.path;
 
-  if (post.file?.path && isImage(post.file.path)) {
-    return `${imgCdn}/data${encodeURI(post.file.path)}`;
+  // 1. Fichier principal est une image → thumbnail direct
+  if (filePath && isImage(filePath) && !filePath.startsWith("http")) {
+    return `${thumbBase}/thumbnail/data${encodeURI(filePath)}`;
   }
 
-  if (post.file?.path && isVideo(post.file.path)) {
-    return `${imgCdn}/data${encodeURI(post.file.path)}`;
+  // 2. Fichier principal est une vidéo → remplacer extension par .jpg
+  //    Le CDN génère un .jpg pour chaque fichier uploadé (trick KemonoScrapper)
+  if (filePath && isVideo(filePath) && !filePath.startsWith("http")) {
+    const jpgPath = toJpgPath(filePath);
+    return `${thumbBase}/thumbnail/data${encodeURI(jpgPath)}`;
   }
 
-  const vidAttachment = post.attachments?.find((a) => isVideo(a.name || a.path));
-  if (vidAttachment) return `${imgCdn}/data${encodeURI(vidAttachment.path)}`;
+  // 3. Fallback pour certains services : chercher dans les attachments
+  if (FALLBACK_SERVICES.includes(post.service) && post.attachments?.length) {
+    // 3a. Chercher une image dans les attachments
+    const imageAtt = post.attachments.find(
+      (att) => att.path && isImage(att.path) && !att.path.startsWith("http")
+    );
+    if (imageAtt) {
+      return `${thumbBase}/thumbnail/data${encodeURI(imageAtt.path)}`;
+    }
+
+    // 3b. Essayer le trick .jpg sur un attachment vidéo
+    const videoAtt = post.attachments.find(
+      (att) => att.path && isVideo(att.path) && !att.path.startsWith("http")
+    );
+    if (videoAtt) {
+      const jpgPath = toJpgPath(videoAtt.path);
+      return `${thumbBase}/thumbnail/data${encodeURI(jpgPath)}`;
+    }
+  }
+
+  // 4. Dernier fallback : n'importe quel attachment avec le trick .jpg
+  if (post.attachments?.length) {
+    const anyAtt = post.attachments.find(
+      (att) => att.path && !att.path.startsWith("http")
+    );
+    if (anyAtt) {
+      if (isImage(anyAtt.path)) {
+        return `${thumbBase}/thumbnail/data${encodeURI(anyAtt.path)}`;
+      }
+      if (isVideo(anyAtt.path)) {
+        const jpgPath = toJpgPath(anyAtt.path);
+        return `${thumbBase}/thumbnail/data${encodeURI(jpgPath)}`;
+      }
+    }
+  }
 
   return undefined;
 }
@@ -239,4 +299,5 @@ export function getPostVideoUrl(post: UnifiedPost): string | undefined {
 
   return undefined;
 }
+
 
