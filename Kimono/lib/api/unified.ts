@@ -60,10 +60,14 @@ export async function fetchCreatorPosts(
   const posts: UnifiedPost[] = [];
 
   if (results[0].status === "fulfilled") {
-    posts.push(...results[0].value.map((p) => ({ ...p, site: "kemono" as Site })));
+    for (const p of results[0].value) {
+      posts.push({ ...p, site: "kemono" });
+    }
   }
   if (results[1].status === "fulfilled") {
-    posts.push(...results[1].value.map((p) => ({ ...p, site: "coomer" as Site })));
+    for (const p of results[1].value) {
+      posts.push({ ...p, site: "coomer" });
+    }
   }
 
   return deduplicatePosts(posts);
@@ -81,14 +85,14 @@ export async function searchCreators(query: string): Promise<UnifiedCreator[]> {
   const creators: UnifiedCreator[] = [];
 
   if (results[0].status === "fulfilled") {
-    creators.push(
-      ...results[0].value.map((c) => ({ ...c, site: "kemono" as Site }))
-    );
+    for (const c of results[0].value) {
+      creators.push({ ...c, site: "kemono" });
+    }
   }
   if (results[1].status === "fulfilled") {
-    creators.push(
-      ...results[1].value.map((c) => ({ ...c, site: "coomer" as Site }))
-    );
+    for (const c of results[1].value) {
+      creators.push({ ...c, site: "coomer" });
+    }
   }
 
   return deduplicateCreators(creators);
@@ -108,12 +112,16 @@ export async function fetchRecentPosts(
   const posts: UnifiedPost[] = [];
 
   if (results[0].status === "fulfilled") {
-    posts.push(...results[0].value.map((p) => ({ ...p, site: "kemono" as Site })));
+    for (const p of results[0].value) {
+      posts.push({ ...p, site: "kemono" });
+    }
   } else {
     console.error("[RECENT] kemono fetchRecentPosts failed:", results[0].reason?.message || results[0].reason);
   }
   if (results[1].status === "fulfilled") {
-    posts.push(...results[1].value.map((p) => ({ ...p, site: "coomer" as Site })));
+    for (const p of results[1].value) {
+      posts.push({ ...p, site: "coomer" });
+    }
   } else {
     console.error("[RECENT] coomer fetchRecentPosts failed:", results[1].reason?.message || results[1].reason);
   }

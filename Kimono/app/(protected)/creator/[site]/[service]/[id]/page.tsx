@@ -33,6 +33,8 @@ export default function CreatorPage() {
   const [knownMaxPage, setKnownMaxPage] = useState(1);
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
   const [postQuery, setPostQuery] = useState("");
+  const [allPosts, setAllPosts] = useState<UnifiedPost[] | null>(null);
+  const [loadingAllPosts, setLoadingAllPosts] = useState(false);
 
   const siteBaseUrl =
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
@@ -130,7 +132,41 @@ export default function CreatorPage() {
     };
   }, [hasNextPage, knownMaxPage, currentPage, site, service, id, isValid]);
 
-  const filteredPosts = posts.filter((post) => {
+  useEffect(() => {
+    if (postQuery.trim() && allPosts === null && !loadingAllPosts) {
+      let isCancelled = false;
+      async function fetchAllPosts() {
+        setLoadingAllPosts(true);
+        const all: UnifiedPost[] = [];
+        let offset = 0;
+        try {
+          while (!isCancelled) {
+            const res = await fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}`);
+            const data = await res.json();
+            if (!Array.isArray(data) || data.length === 0) break;
+            all.push(...data);
+            if (data.length < 50) break;
+            offset += 50;
+          }
+          if (!isCancelled) {
+            setAllPosts(all);
+          }
+        } catch (err) {
+          console.error("Error fetching all posts", err);
+        } finally {
+          if (!isCancelled) setLoadingAllPosts(false);
+        }
+      }
+      fetchAllPosts();
+      return () => {
+        isCancelled = true;
+      };
+    }
+  }, [postQuery, allPosts, loadingAllPosts, site, service, id]);
+
+  const basePosts = postQuery.trim() && allPosts !== null ? allPosts : posts;
+
+  const filteredPosts = basePosts.filter((post) => {
     if (mediaFilter === "images" && getPostType(post) !== "image") return false;
     if (mediaFilter === "videos" && getPostType(post) !== "video") return false;
     if (postQuery.trim()) {
@@ -342,15 +378,24 @@ export default function CreatorPage() {
             className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
           />
         </div>
-        {postQuery.trim() && (
+        {loadingAllPosts ? (
+          <div className="flex items-center text-xs text-[#7c3aed]">
+            <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+            Chargement de tous les posts…
+          </div>
+        ) : postQuery.trim() && allPosts !== null ? (
+          <p className="text-xs text-[#6b7280]">
+            {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé{filteredPosts.length > 1 ? "s" : ""} sur {allPosts.length} au total
+          </p>
+        ) : postQuery.trim() ? (
           <p className="text-xs text-[#6b7280]">
             {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé{filteredPosts.length > 1 ? "s" : ""}
           </p>
-        )}
+        ) : null}
       </div>
 
       {/* Grille de posts */}
-      {loadingPosts ? (
+      {loadingPosts && !postQuery.trim() ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {Array.from({ length: 12 }).map((_, i) => (
             <div
@@ -359,15 +404,17 @@ export default function CreatorPage() {
             />
           ))}
         </div>
-      ) : filteredPosts.length === 0 ? (
+      ) : filteredPosts.length === 0 && !loadingAllPosts ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
           <p className="text-[#6b7280] text-lg">Aucun post disponible.</p>
         </div>
       ) : (
         <>
-          <div className="pb-4">
-            <Pagination />
-          </div>
+          {!postQuery.trim() && (
+            <div className="pb-4">
+              <Pagination />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredPosts.map((post) => (
@@ -385,7 +432,7 @@ export default function CreatorPage() {
             ))}
           </div>
 
-          <Pagination />
+          {!postQuery.trim() && <Pagination />}
         </>
       )}
 
