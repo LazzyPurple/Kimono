@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       {
         headers: {
           Cookie: cookie,
-          Accept: "application/json",
+          Accept: "text/css",
         },
         timeout: 15000,
       }
@@ -62,7 +62,7 @@ export async function POST(request: NextRequest) {
       {
         headers: {
           Cookie: cookie,
-          Accept: "application/json",
+          Accept: "text/css",
         },
         timeout: 15000,
       }
@@ -92,7 +92,7 @@ export async function DELETE(request: NextRequest) {
       {
         headers: {
           Cookie: cookie,
-          Accept: "application/json",
+          Accept: "text/css",
         },
         timeout: 15000,
       }

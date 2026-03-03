@@ -89,7 +89,7 @@ export async function searchCreators(query: string): Promise<Creator[]> {
     }
   }
 
-  if (!query.trim()) return [];
+  if (!query.trim()) return allCreators;
   const lower = query.toLowerCase();
   const result = allCreators.filter((c: Creator) => c.name.toLowerCase().includes(lower)).slice(0, 50);
   console.log("[SEARCH/coomer] Results for query", query, ":", result.length, "matches");
