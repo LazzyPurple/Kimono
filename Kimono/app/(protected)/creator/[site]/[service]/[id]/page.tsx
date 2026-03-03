@@ -264,6 +264,10 @@ export default function CreatorPage() {
         </div>
       ) : (
         <>
+          <div className="pb-4">
+            <Pagination />
+          </div>
+
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {filteredPosts.map((post) => (
               <MediaCard
