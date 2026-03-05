@@ -6,10 +6,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MediaCard from "@/components/MediaCard";
-import { User, ExternalLink, Loader2, Search } from "lucide-react";
+import { User, ExternalLink, Loader2, Search, Heart } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
 import { getPostThumbnail, getPostType, getPostVideoUrl, getPostVideoThumbnailUrl, proxyCdnUrl } from "@/lib/api/unified";
+import { useLikes } from "@/contexts/LikesContext";
 
 type MediaFilter = "tout" | "images" | "videos";
 
@@ -31,6 +32,9 @@ export default function CreatorPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
+  
+  const { isCreatorLiked, toggleCreatorLike } = useLikes();
+  const liked = isCreatorLiked(site, service, id);
 
   const query = searchParams.get("q") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
@@ -353,6 +357,21 @@ export default function CreatorPage() {
               >
                 {service}
               </Badge>
+              <button
+                onClick={() => toggleCreatorLike(site, service, id)}
+                className="ml-auto flex items-center gap-1.5 text-sm transition-colors cursor-pointer bg-[#1e1e2e]/50 hover:bg-[#1e1e2e] px-3 py-1.5 rounded-full border border-[#1e1e2e]"
+              >
+                <Heart
+                  className={`h-4 w-4 transition-colors ${
+                    liked
+                      ? "text-red-500 fill-red-500"
+                      : "text-[#6b7280] group-hover:text-red-400"
+                  }`}
+                />
+                <span className={liked ? "text-red-500 font-medium" : "text-[#6b7280]"}>
+                  {liked ? "Abonné" : "S'abonner"}
+                </span>
+              </button>
             </div>
 
             <div className="flex items-center gap-2 text-[#6b7280] text-sm">

@@ -3,8 +3,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { Image, Film, FileText, Play } from "lucide-react";
+import { Image, Film, FileText, Play, Heart } from "lucide-react";
 import type { Site } from "@/lib/api/unified";
+import { useLikes } from "@/contexts/LikesContext";
 
 interface MediaCardProps {
   title: string;
@@ -43,6 +44,9 @@ export default function MediaCard({
   const isHoveredRef = useRef(hovered);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playPromiseRef = useRef<Promise<void> | undefined>(undefined);
+
+  const { isPostLiked } = useLikes();
+  const liked = isPostLiked(site, service, postId);
 
   // thumbnailUrl vient de getPostThumbnail() qui applique déjà le trick .jpg pour les vidéos
   const showImg = !!thumbnailUrl && !imgError;
@@ -92,7 +96,9 @@ export default function MediaCard({
 
   return (
     <div
-      className="bg-[#12121a] border-[#1e1e2e] rounded-xl overflow-hidden group hover:border-[#7c3aed]/50 transition-all duration-300 cursor-pointer"
+      className={`bg-[#12121a] rounded-xl overflow-hidden group transition-all duration-300 cursor-pointer border ${
+        liked ? "border-red-500/50 hover:border-red-500 shadow-[0_0_15px_-5px_theme(colors.red.500)]" : "border-[#1e1e2e] hover:border-[#7c3aed]/50"
+      }`}
       onClick={() => router.push(`/post/${site}/${service}/${user}/${postId}`)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -164,8 +170,13 @@ export default function MediaCard({
           </Badge>
         </div>
 
-        {/* Badge site */}
-        <div className="absolute top-2 right-2">
+        {/* Badge Site */}
+        <div className="absolute top-2 right-2 flex items-center gap-2">
+          {liked && (
+            <div className="bg-red-500/80 p-1 rounded backdrop-blur-sm">
+              <Heart className="h-4 w-4 text-white fill-white" />
+            </div>
+          )}
           <Badge
             className={`text-xs ${
               site === "kemono"
