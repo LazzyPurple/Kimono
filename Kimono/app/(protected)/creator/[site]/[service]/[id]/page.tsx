@@ -6,12 +6,23 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MediaCard from "@/components/MediaCard";
-import { User, ExternalLink, Loader2, Search, Heart } from "lucide-react";
+import { User, ExternalLink, Loader2, Search, Heart, Users, LayoutGrid } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
 import { getPostThumbnail, getPostType, getPostVideoUrl, getPostVideoThumbnailUrl, proxyCdnUrl } from "@/lib/api/unified";
 import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import CreatorCard from "@/components/CreatorCard";
+
+interface RecommendedCreator {
+  id: string;
+  service: string;
+  name: string;
+  indexed: string;
+  updated: string;
+  public_id: string | null;
+  relation_id: number | null;
+}
 
 type MediaFilter = "tout" | "images" | "videos";
 
@@ -29,6 +40,8 @@ export default function CreatorPage() {
   const [posts, setPosts] = useState<UnifiedPost[]>([]);
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
+  const [recommended, setRecommended] = useState<RecommendedCreator[]>([]);
+  const [loadingRecommended, setLoadingRecommended] = useState(true);
   const [avatarError, setAvatarError] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -46,6 +59,8 @@ export default function CreatorPage() {
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
+  
+  const [activeTab, setActiveTab] = useState<"posts" | "recommended">("posts");
 
   // Construction de la clé unique pour ce créateur (site-service-id)
   const creatorPageKey = `${site}-${service}-${id}`;
@@ -121,6 +136,27 @@ export default function CreatorPage() {
   useEffect(() => {
     fetchProfile();
   }, [fetchProfile]);
+  
+  useEffect(() => {
+    let active = true;
+    setLoadingRecommended(true);
+    fetch(`/api/recommended?site=${site}&service=${service}&id=${id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (active) {
+          setRecommended(Array.isArray(data) ? data : []);
+          setLoadingRecommended(false);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setRecommended([]);
+          setLoadingRecommended(false);
+        }
+      });
+      
+    return () => { active = false; };
+  }, [site, service, id]);
   
   useEffect(() => {
     if (!query) {
@@ -417,8 +453,41 @@ export default function CreatorPage() {
         </div>
       </div>
 
-      {/* Filtres médias */}
-      <div className="flex gap-2">
+      {/* Onglets */}
+      <div className="flex bg-[#12121a] border border-[#1e1e2e] rounded-xl p-1 gap-1 w-full max-w-sm">
+        <button
+          onClick={() => setActiveTab("posts")}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+            activeTab === "posts"
+              ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
+              : "text-[#6b7280] hover:text-[#f0f0f5]"
+          }`}
+        >
+          <LayoutGrid className="h-4 w-4" />
+          Posts
+          {profile?.post_count !== undefined && (
+            <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px] h-4 bg-[#7c3aed]/20 text-[#7c3aed]">
+              {profile.post_count > 999 ? "999+" : profile.post_count}
+            </Badge>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("recommended")}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
+            activeTab === "recommended"
+              ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
+              : "text-[#6b7280] hover:text-[#f0f0f5]"
+          }`}
+        >
+          <Users className="h-4 w-4" />
+          Similaires
+        </button>
+      </div>
+
+      {activeTab === "posts" ? (
+        <>
+          {/* Filtres médias */}
+          <div className="flex gap-2">
         {(["tout", "images", "videos"] as MediaFilter[]).map((f) => (
           <Button
             key={f}
@@ -464,7 +533,7 @@ export default function CreatorPage() {
       </div>
 
       {/* Grille de posts */}
-      {(loadingPosts && !isSearching) ? (
+      {(loadingPosts && !isSearching) || (loadingSearch && isSearching) ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {Array.from({ length: 18 }).map((_, i) => (
             <div
@@ -473,15 +542,19 @@ export default function CreatorPage() {
             />
           ))}
         </div>
-      ) : filteredPosts.length === 0 && !loadingPosts ? (
+      ) : filteredPosts.length === 0 ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
-          <p className="text-[#6b7280] text-lg">Aucun post disponible.</p>
+          <p className="text-[#6b7280] text-lg">
+            {isSearching ? "Aucun post trouvé pour cette recherche." : "Aucun post disponible."}
+          </p>
         </div>
       ) : (
         <>
-          <div className="pb-4">
-            <Pagination />
-          </div>
+          {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
+            <div className="pb-4">
+              <Pagination />
+            </div>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
             {filteredPosts.map((post) => (
@@ -501,8 +574,45 @@ export default function CreatorPage() {
             ))}
           </div>
 
-          <Pagination />
+          {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
+            <div className="pt-4">
+              <Pagination />
+            </div>
+          )}
         </>
+      )}
+      </>
+      ) : (
+        /* Créateurs similaires */
+        <div className="pt-2">
+          {loadingRecommended ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-[4/5] animate-pulse"
+                />
+              ))}
+            </div>
+          ) : recommended.length === 0 ? (
+            <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
+              <p className="text-[#6b7280] text-sm">Aucun créateur similaire trouvé.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+              {recommended.map((rc) => (
+                <CreatorCard
+                  key={`${rc.service}-${rc.id}`}
+                  id={rc.id}
+                  name={rc.name}
+                  service={rc.service}
+                  site={site}
+                  updated={rc.updated}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
     </div>

@@ -52,6 +52,12 @@ export default function ProtectedLayout({
               >
                 Favoris
               </a>
+              <a
+                href="/discover"
+                className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors flex items-center gap-1"
+              >
+                Découverte
+              </a>
 
               {/* Bouton 2FA / Sécurité */}
               <Button

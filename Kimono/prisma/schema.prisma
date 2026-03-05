@@ -48,3 +48,19 @@ model CreatorsCache {
   data      String
   updatedAt DateTime @updatedAt
 }
+
+model DiscoveryBlock {
+  id        String   @id @default(cuid())
+  site      String
+  service   String
+  creatorId String
+  blockedAt DateTime @default(now())
+
+  @@unique([site, service, creatorId])
+}
+
+model DiscoveryCache {
+  id        String   @id @default(cuid())
+  data      String
+  updatedAt DateTime @default(now())
+}
