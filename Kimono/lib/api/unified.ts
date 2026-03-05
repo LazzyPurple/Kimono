@@ -181,20 +181,49 @@ function toJpgPath(filePath: string): string {
   return filePath.substring(0, lastDot) + ".jpg";
 }
 
+/* ── Proxy helpers ──────────────────────────────────────────── */
+
 /**
- * Construit une URL de thumbnail pour un chemin de fichier
+ * Enveloppe une URL externe dans le proxy thumbnail local.
+ * Utilisable côté client : génère /api/thumbnail?url=<encoded>
  */
-export function getThumbnailUrl(site: Site, path: string): string {
-  const base = site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
-  return `${base}/thumbnail/data${encodeURI(path)}`;
+export function proxyUrl(externalUrl: string): string {
+  return `/api/thumbnail?url=${encodeURIComponent(externalUrl)}`;
 }
 
 /**
- * Construit une URL full-res pour un chemin de fichier
+ * Construit une URL CDN (avatar, banner…) et la proxifie automatiquement.
+ * @param site  kemono | coomer
+ * @param path  e.g. "/icons/patreon/12345" ou "/banners/patreon/12345"
+ */
+export function proxyCdnUrl(site: Site, path: string): string {
+  const cdn = site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
+  return proxyUrl(`${cdn}${path}`);
+}
+
+/**
+ * Construit une URL pour le proxy video-thumbnail (extraction ffmpeg).
+ */
+export function getVideoThumbnailUrl(site: Site, filePath: string): string {
+  const base = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+  const fullUrl = `${base}/data${encodeURI(filePath)}`;
+  return `/api/proxy/video-thumbnail?url=${encodeURIComponent(fullUrl)}`;
+}
+
+/**
+ * Construit une URL de thumbnail pour un chemin de fichier (proxifiée).
+ */
+export function getThumbnailUrl(site: Site, path: string): string {
+  const base = site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
+  return proxyUrl(`${base}/thumbnail/data${encodeURI(path)}`);
+}
+
+/**
+ * Construit une URL full-res pour un chemin de fichier (proxifiée).
  */
 export function getFullImageUrl(site: Site, path: string): string {
   const base = site === "kemono" ? "https://kemono.su" : "https://coomer.su";
-  return `${base}/data${encodeURI(path)}`;
+  return proxyUrl(`${base}/data${encodeURI(path)}`);
 }
 
 /**
@@ -212,16 +241,19 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
 
   const filePath = post.file?.path;
 
+  // Helper interne : construit l'URL CDN et la proxifie
+  const proxiedThumb = (path: string) =>
+    proxyUrl(`${thumbBase}/thumbnail/data${encodeURI(path)}`);
+
   // 1. Fichier principal est une image → thumbnail direct
   if (filePath && isImage(filePath) && !filePath.startsWith("http")) {
-    return `${thumbBase}/thumbnail/data${encodeURI(filePath)}`;
+    return proxiedThumb(filePath);
   }
 
   // 2. Fichier principal est une vidéo → remplacer extension par .jpg
   //    Le CDN génère un .jpg pour chaque fichier uploadé (trick KemonoScrapper)
   if (filePath && isVideo(filePath) && !filePath.startsWith("http")) {
-    const jpgPath = toJpgPath(filePath);
-    return `${thumbBase}/thumbnail/data${encodeURI(jpgPath)}`;
+    return proxiedThumb(toJpgPath(filePath));
   }
 
   // 3. Fallback pour certains services : chercher dans les attachments
@@ -231,7 +263,7 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
       (att) => att.path && isImage(att.path) && !att.path.startsWith("http")
     );
     if (imageAtt) {
-      return `${thumbBase}/thumbnail/data${encodeURI(imageAtt.path)}`;
+      return proxiedThumb(imageAtt.path);
     }
 
     // 3b. Essayer le trick .jpg sur un attachment vidéo
@@ -239,8 +271,7 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
       (att) => att.path && isVideo(att.path) && !att.path.startsWith("http")
     );
     if (videoAtt) {
-      const jpgPath = toJpgPath(videoAtt.path);
-      return `${thumbBase}/thumbnail/data${encodeURI(jpgPath)}`;
+      return proxiedThumb(toJpgPath(videoAtt.path));
     }
   }
 
@@ -251,11 +282,10 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
     );
     if (anyAtt) {
       if (isImage(anyAtt.path)) {
-        return `${thumbBase}/thumbnail/data${encodeURI(anyAtt.path)}`;
+        return proxiedThumb(anyAtt.path);
       }
       if (isVideo(anyAtt.path)) {
-        const jpgPath = toJpgPath(anyAtt.path);
-        return `${thumbBase}/thumbnail/data${encodeURI(jpgPath)}`;
+        return proxiedThumb(toJpgPath(anyAtt.path));
       }
     }
   }
@@ -295,6 +325,27 @@ export function getPostVideoUrl(post: UnifiedPost): string | undefined {
   const vidAttachment = post.attachments?.find((a) => isVideo(a.name || a.path));
   if (vidAttachment) {
     return `${base}/data${encodeURI(vidAttachment.path)}`;
+  }
+
+  return undefined;
+}
+
+/**
+ * Retourne l'URL du proxy video-thumbnail pour le premier attachment vidéo d'un post.
+ * Permet d'obtenir une image JPEG extraite de la vidéo via ffmpeg.
+ */
+export function getPostVideoThumbnailUrl(post: UnifiedPost): string | undefined {
+  const filePath = post.file?.path;
+
+  if (filePath && isVideo(filePath) && !filePath.startsWith("http")) {
+    return getVideoThumbnailUrl(post.site, filePath);
+  }
+
+  const vidAtt = post.attachments?.find(
+    (a) => a.path && isVideo(a.path) && !a.path.startsWith("http")
+  );
+  if (vidAtt) {
+    return getVideoThumbnailUrl(post.site, vidAtt.path);
   }
 
   return undefined;

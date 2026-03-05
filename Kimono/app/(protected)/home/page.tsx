@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import MediaCard from "@/components/MediaCard";
 import { Loader2 } from "lucide-react";
 import type { UnifiedPost } from "@/lib/api/unified";
-import { getPostThumbnail, getPostType } from "@/lib/api/unified";
+import { getPostThumbnail, getPostType, getPostVideoThumbnailUrl } from "@/lib/api/unified";
 
 function SkeletonGrid() {
   return (
@@ -82,6 +82,7 @@ export default function HomePage() {
                 key={`${post.site}-${post.service}-${post.id}`}
                 title={post.title}
                 thumbnailUrl={getPostThumbnail(post)}
+                videoThumbnailUrl={getPostVideoThumbnailUrl(post)}
                 type={getPostType(post)}
                 site={post.site}
                 service={post.service}

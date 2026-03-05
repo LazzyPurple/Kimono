@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
+import { proxyCdnUrl, getVideoThumbnailUrl } from "@/lib/api/unified";
 import VideoPlayer from "@/components/VideoPlayer";
 import Lightbox from "@/components/Lightbox";
 import { useLikes } from "@/contexts/LikesContext";
@@ -23,7 +24,7 @@ function isImage(p: string): boolean {
   return /\.(jpg|jpeg|png|gif|webp)$/i.test(p);
 }
 function isVideo(p: string): boolean {
-  return /\.(mp4|webm|mov|avi)$/i.test(p);
+  return /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(p);
 }
 
 export default function PostPage() {
@@ -53,8 +54,7 @@ export default function PostPage() {
 
   const baseUrl =
     site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
-  const cdn =
-    site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
+  const avatarProxyUrl = proxyCdnUrl(site, `/icons/${service}/${user}`);
 
   useEffect(() => {
     if (!isValid) return;
@@ -238,9 +238,8 @@ export default function PostPage() {
             <div className="h-10 w-10 rounded-full overflow-hidden bg-[#7c3aed]/20 flex items-center justify-center">
               {!avatarError ? (
                 <img
-                  src={`${cdn}/icons/${service}/${user}`}
+                  src={avatarProxyUrl}
                   alt={displayName}
-                  referrerPolicy="no-referrer"
                   onError={() => setAvatarError(true)}
                   className="h-full w-full object-cover"
                 />
@@ -318,6 +317,7 @@ export default function PostPage() {
             <VideoPlayer
               key={`vid-${index}`}
               src={makeUrl(item.path)}
+              poster={getVideoThumbnailUrl(site, item.path)}
               filename={item.name || item.path}
               className="w-full"
             />

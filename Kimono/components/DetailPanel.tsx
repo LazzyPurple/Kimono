@@ -9,6 +9,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Download, ExternalLink, Calendar, FileText, Image, Film } from "lucide-react";
 import type { UnifiedPost } from "@/lib/api/unified";
+import { proxyUrl, getVideoThumbnailUrl } from "@/lib/api/unified";
 
 interface DetailPanelProps {
   post: UnifiedPost | null;
@@ -27,7 +28,7 @@ function formatDate(dateStr?: string) {
 
 function getMediaType(path: string): "image" | "video" | null {
   if (/\.(jpg|jpeg|png|gif|webp)$/i.test(path)) return "image";
-  if (/\.(mp4|webm|mov)$/i.test(path)) return "video";
+  if (/\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(path)) return "video";
   return null;
 }
 
@@ -48,7 +49,11 @@ export default function DetailPanel({ post, open, onClose }: DetailPanelProps) {
     (a) => getMediaType(a.name || a.path) !== null
   );
   const firstMediaType = firstMedia ? getMediaType(firstMedia.name || firstMedia.path) : null;
-  const firstMediaUrl = firstMedia ? encodeURI(`${baseUrl}/data${firstMedia.path}`) : null;
+  const firstMediaUrl = firstMedia
+    ? firstMediaType === "image"
+      ? proxyUrl(encodeURI(`${baseUrl}/data${firstMedia.path}`))
+      : encodeURI(`${baseUrl}/data${firstMedia.path}`)
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -96,6 +101,7 @@ export default function DetailPanel({ post, open, onClose }: DetailPanelProps) {
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
               <video
                 src={firstMediaUrl}
+                poster={firstMediaType === "video" && firstMedia?.path ? getVideoThumbnailUrl(post.site, firstMedia.path) : undefined}
                 controls
                 className="max-h-[300px] w-full rounded-lg"
               />
