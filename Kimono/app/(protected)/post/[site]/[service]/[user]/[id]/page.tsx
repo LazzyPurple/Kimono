@@ -317,7 +317,7 @@ export default function PostPage() {
             <VideoPlayer
               key={`vid-${index}`}
               src={makeUrl(item.path)}
-              poster={getVideoThumbnailUrl(site, item.path)}
+              poster={getVideoThumbnailUrl(site, item.path) || undefined}
               filename={item.name || item.path}
               className="w-full"
             />

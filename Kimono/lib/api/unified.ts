@@ -204,8 +204,9 @@ export function proxyCdnUrl(site: Site, path: string): string {
 /**
  * Construit une URL pour le proxy video-thumbnail (extraction ffmpeg).
  */
-export function getVideoThumbnailUrl(site: Site, filePath: string): string {
-  const base = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+export function getVideoThumbnailUrl(site: Site, filePath: string): string | undefined {
+  if (site === "coomer") return undefined;
+  const base = "https://kemono.cr";
   const fullUrl = `${base}/data${encodeURI(filePath)}`;
   return `/api/proxy/video-thumbnail?url=${encodeURIComponent(fullUrl)}`;
 }
