@@ -11,6 +11,7 @@ import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
 import { getPostThumbnail, getPostType, getPostVideoUrl, getPostVideoThumbnailUrl, proxyCdnUrl } from "@/lib/api/unified";
 import { useLikes } from "@/contexts/LikesContext";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 
 type MediaFilter = "tout" | "images" | "videos";
 
@@ -45,6 +46,14 @@ export default function CreatorPage() {
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
+
+  // Construction de la clé unique pour ce créateur (site-service-id)
+  const creatorPageKey = `${site}-${service}-${id}`;
+  
+  // Le scroll sera restauré uniquement quand les posts ne sont plus en cours de chargement
+  // (On suppose ici que loadingPosts à false veut dire "données chargées et prêtes")
+  const isDataReady = !loadingPosts && !loadingProfile;
+  useScrollRestoration(creatorPageKey, isDataReady);
 
   const updateURL = useMemo(() => {
     let timeout: ReturnType<typeof setTimeout>;

@@ -3,7 +3,8 @@
 import { useState, useEffect, useMemo, useDeferredValue } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Search as SearchIcon, Loader2 } from "lucide-react";
+import { Search as SearchIcon, Loader2, SlidersHorizontal } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
@@ -18,6 +19,8 @@ export default function SearchPage() {
   const [allCreators, setAllCreators] = useState<UnifiedCreator[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("tous");
+  const [sortBy, setSortBy] = useState<"date" | "favorites" | "az">("date");
+  const [serviceFilter, setServiceFilter] = useState("Tous");
   const [currentPage, setCurrentPage] = useState(1);
   const { isCreatorLiked } = useLikes();
   const deferredQuery = useDeferredValue(query);
@@ -46,7 +49,12 @@ export default function SearchPage() {
   /* Reset page on filter or query change */
   useEffect(() => {
     setCurrentPage(1);
-  }, [filter, deferredQuery]);
+  }, [filter, deferredQuery, sortBy, serviceFilter]);
+
+  const services = useMemo(() => {
+    const s = new Set(allCreators.map((c) => c.service));
+    return ["Tous", ...Array.from(s).sort()];
+  }, [allCreators]);
 
   /* Client-side filtering */
   const displayed = useMemo(() => {
@@ -64,8 +72,29 @@ export default function SearchPage() {
     else if (filter === "liked")
       list = list.filter((c) => isCreatorLiked(c.site, c.service, c.id));
 
+    // Service filter
+    if (serviceFilter !== "Tous") {
+      list = list.filter((c) => c.service === serviceFilter);
+    }
+    
+    // Sorting
+    list.sort((a, b) => {
+      if (sortBy === "date") {
+        const dateA = new Date(a.updated || 0).getTime();
+        const dateB = new Date(b.updated || 0).getTime();
+        return dateB - dateA; // Descending
+      }
+      if (sortBy === "favorites") {
+        return (b.favorited || 0) - (a.favorited || 0); // Descending global favorite count
+      }
+      if (sortBy === "az") {
+        return a.name.localeCompare(b.name); // Ascending
+      }
+      return 0;
+    });
+
     return list;
-  }, [allCreators, deferredQuery, filter, isCreatorLiked]);
+  }, [allCreators, deferredQuery, filter, isCreatorLiked, serviceFilter, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PER_PAGE));
   const paginated = displayed.slice(
@@ -82,38 +111,96 @@ export default function SearchPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-[#f0f0f5]">Accueil</h1>
 
-      {/* Search bar */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Rechercher un créateur…"
-            className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
-          />
+      {/* Barre de filtres (recherche, tri, site) */}
+      <div className="bg-[#12121a] border border-[#1e1e2e] rounded-xl p-4 space-y-4">
+        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+          {/* Recherche */}
+          <div className="relative w-full sm:max-w-xs">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher un créateur…"
+              className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9 text-sm h-9"
+            />
+          </div>
+          
+          {/* Tri */}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              onClick={() => setSortBy("favorites")}
+              className={`cursor-pointer text-xs h-8 transition-colors ${
+                sortBy === "favorites"
+                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                  : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+              }`}
+            >
+              Popularité
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setSortBy("date")}
+              className={`cursor-pointer text-xs h-8 transition-colors ${
+                sortBy === "date"
+                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                  : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+              }`}
+            >
+              Last update
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setSortBy("az")}
+              className={`cursor-pointer text-xs h-8 transition-colors ${
+                sortBy === "az"
+                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                  : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+              }`}
+            >
+              A-Z
+            </Button>
+          </div>
         </div>
-      </div>
 
-      {/* Filters */}
-      <div className="flex gap-2 flex-wrap">
-        {(["tous", "kemono", "coomer", "liked"] as Filter[]).map((f) => (
-          <Button
-            key={f}
-            variant="outline"
-            size="sm"
-            onClick={() => setFilter(f)}
-            className={`border-[#1e1e2e] cursor-pointer transition-colors ${
-              filter === f
-                ? f === "liked"
-                  ? "bg-red-500 border-red-500 text-white hover:bg-red-600"
-                  : "bg-[#7c3aed] border-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-            }`}
-          >
-            {f === "liked" ? "❤ Likés" : f.charAt(0).toUpperCase() + f.slice(1)}
-          </Button>
-        ))}
+        {/* Filters de Site */}
+        <div className="flex gap-2 flex-wrap pb-2 border-b border-[#1e1e2e]/50">
+          {(["tous", "kemono", "coomer", "liked"] as Filter[]).map((f) => (
+            <Button
+              key={f}
+              variant="outline"
+              size="sm"
+              onClick={() => setFilter(f)}
+              className={`border-[#1e1e2e] cursor-pointer text-xs h-7 transition-colors px-3 ${
+                filter === f
+                  ? f === "liked"
+                    ? "bg-red-500/90 border-red-500 text-white hover:bg-red-600"
+                    : "bg-[#7c3aed] border-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                  : "bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+              }`}
+            >
+              {f === "liked" ? "❤ Likés" : f.charAt(0).toUpperCase() + f.slice(1)}
+            </Button>
+          ))}
+        </div>
+
+        {/* Services */}
+        <div className="flex flex-wrap gap-2 items-center">
+          <SlidersHorizontal className="h-4 w-4 text-[#6b7280] mr-1" />
+          {services.map((s) => (
+            <Badge
+              key={s}
+              onClick={() => setServiceFilter(s)}
+              className={`cursor-pointer px-3 py-1 text-xs transition-colors ${
+                serviceFilter === s
+                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                  : "bg-[#0a0a0f] text-[#6b7280] border border-[#1e1e2e] hover:bg-[#1e1e2e]"
+              }`}
+            >
+              {s}
+            </Badge>
+          ))}
+        </div>
       </div>
 
       {/* Content */}
@@ -131,9 +218,9 @@ export default function SearchPage() {
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
           <SearchIcon className="h-12 w-12 text-[#6b7280] mx-auto mb-4" />
           <p className="text-[#6b7280] text-lg">Aucun résultat</p>
-          {filter !== "tous" && (
+          {(filter !== "tous" || query !== "" || serviceFilter !== "Tous") && (
             <p className="text-[#6b7280] text-sm mt-1">
-              Essayez avec le filtre « Tous »
+              Modifiez vos filtres ou votre recherche.
             </p>
           )}
         </div>
@@ -160,7 +247,7 @@ export default function SearchPage() {
           )}
 
           {/* Grid */}
-          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {paginated.map((creator) => (
               <CreatorCard
                 key={`${creator.site}-${creator.service}-${creator.id}`}

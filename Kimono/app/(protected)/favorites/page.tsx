@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Heart, Loader2, X, LogOut } from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Heart, Loader2, X, LogOut, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
+import Pagination from "@/components/Pagination";
+import { useLikes } from "@/contexts/LikesContext";
 import type { UnifiedCreator, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
 
@@ -45,6 +47,15 @@ export default function FavoritesPage() {
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
+
+  const { likedCreatorsOrder } = useLikes();
+
+  const [kemonoActive, setKemonoActive] = useState(true);
+  const [coomerActive, setCoomerActive] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState<"date" | "favorites" | "az">("date");
+  const [serviceFilter, setServiceFilter] = useState("Tous");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fetchFavorites = useCallback(async (site: Site) => {
     const setter = site === "kemono" ? setKemono : setCoomer;
@@ -122,13 +133,70 @@ export default function FavoritesPage() {
     setter({ loggedIn: false, loading: false, favorites: [] });
   }
 
-  const allFavorites: UnifiedCreator[] = [
-    ...kemono.favorites,
-    ...coomer.favorites,
-  ];
+  const allFavorites: UnifiedCreator[] = useMemo(() => {
+    return [...kemono.favorites, ...coomer.favorites];
+  }, [kemono.favorites, coomer.favorites]);
+
+  const services = useMemo(() => {
+    const s = new Set(allFavorites.map((c) => c.service));
+    return ["Tous", ...Array.from(s).sort()];
+  }, [allFavorites]);
+
+  const filteredFavorites = useMemo(() => {
+    let result: UnifiedCreator[] = [];
+    if (kemonoActive) result.push(...kemono.favorites);
+    if (coomerActive) result.push(...coomer.favorites);
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((c) => c.name.toLowerCase().includes(q));
+    }
+
+    if (serviceFilter !== "Tous") {
+      result = result.filter((c) => c.service === serviceFilter);
+    }
+
+    result.sort((a, b) => {
+      if (sortBy === "date") {
+        const dateA = new Date(a.updated || 0).getTime();
+        const dateB = new Date(b.updated || 0).getTime();
+        return dateB - dateA;
+      }
+      if (sortBy === "favorites") {
+        const orderA = likedCreatorsOrder.get(`${a.site}-${a.service}-${a.id}`) ?? Infinity;
+        const orderB = likedCreatorsOrder.get(`${b.site}-${b.service}-${b.id}`) ?? Infinity;
+        if (orderA !== orderB) return orderA - orderB;
+        // fallback au favoris global si jamais
+        return (b.favorited || 0) - (a.favorited || 0);
+      }
+      if (sortBy === "az") {
+        return a.name.localeCompare(b.name);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [
+    kemono.favorites,
+    coomer.favorites,
+    kemonoActive,
+    coomerActive,
+    searchQuery,
+    serviceFilter,
+    sortBy,
+    likedCreatorsOrder,
+  ]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, serviceFilter, sortBy, kemonoActive, coomerActive]);
 
   const isFullyLoaded = !kemono.loading && !coomer.loading;
-  const anyLoggedIn = kemono.loggedIn || coomer.loggedIn;
+  const ITEMS_PER_PAGE = 50;
+  const paginatedFavorites = filteredFavorites.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
 
   return (
     <div className="space-y-6">
@@ -137,10 +205,16 @@ export default function FavoritesPage() {
         <h1 className="text-2xl font-bold text-[#f0f0f5]">Favoris</h1>
       </div>
 
-      {/* Panneaux de connexion par site */}
+      {/* Panneaux de connexion et Toggles */}
       <div className="grid gap-4 sm:grid-cols-2">
         {(["kemono", "coomer"] as Site[]).map((site) => {
           const state = site === "kemono" ? kemono : coomer;
+          const isActive = site === "kemono" ? kemonoActive : coomerActive;
+          const toggleActive = () =>
+            site === "kemono"
+              ? setKemonoActive(!kemonoActive)
+              : setCoomerActive(!coomerActive);
+
           const siteColor =
             site === "kemono"
               ? "text-[#7c3aed] bg-[#7c3aed]/10 border-[#7c3aed]/30"
@@ -149,7 +223,10 @@ export default function FavoritesPage() {
           return (
             <div
               key={site}
-              className={`rounded-xl border p-4 space-y-3 ${siteColor}`}
+              onClick={toggleActive}
+              className={`rounded-xl border p-4 space-y-3 cursor-pointer transition-all duration-200 ${siteColor} ${
+                !isActive && "opacity-50 grayscale hover:opacity-75"
+              }`}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -169,37 +246,41 @@ export default function FavoritesPage() {
                   )}
                 </div>
 
-                {state.loading ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-[#6b7280]" />
-                ) : state.loggedIn ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleLogout(site)}
-                    className="text-[#6b7280] hover:text-red-400 h-7 px-2 cursor-pointer"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    onClick={() => openLoginModal(site)}
-                    className={`cursor-pointer text-xs h-7 ${
-                      site === "kemono"
-                        ? "bg-[#7c3aed] hover:bg-[#6d28d9] text-white"
-                        : "bg-pink-600 hover:bg-pink-700 text-white"
-                    }`}
-                  >
-                    Se connecter
-                  </Button>
-                )}
+                <div onClick={(e) => e.stopPropagation()}>
+                  {state.loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-[#6b7280]" />
+                  ) : state.loggedIn ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleLogout(site)}
+                      className="text-[#6b7280] hover:text-red-400 h-7 px-2 cursor-pointer"
+                    >
+                      <LogOut className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={() => openLoginModal(site)}
+                      className={`cursor-pointer text-xs h-7 ${
+                        site === "kemono"
+                          ? "bg-[#7c3aed] hover:bg-[#6d28d9] text-white"
+                          : "bg-pink-600 hover:bg-pink-700 text-white"
+                      }`}
+                    >
+                      Se connecter
+                    </Button>
+                  )}
+                </div>
               </div>
 
               {!state.loading && !state.loggedIn && (
                 <p className="text-xs text-[#6b7280]">
                   {state.expired
                     ? "Session expirée. Reconnectez-vous."
-                    : `Connectez-vous à ${site.charAt(0).toUpperCase() + site.slice(1)} pour voir vos favoris.`}
+                    : `Connectez-vous à ${
+                        site.charAt(0).toUpperCase() + site.slice(1)
+                      } pour voir vos favoris.`}
                 </p>
               )}
 
@@ -214,47 +295,100 @@ export default function FavoritesPage() {
         })}
       </div>
 
+      {/* Barre de filtres */}
+      {allFavorites.length > 0 && (
+        <div className="bg-[#12121a] border border-[#1e1e2e] rounded-xl p-4 space-y-4">
+          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+            {/* Recherche */}
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
+              <Input
+                placeholder="Rechercher un créateur..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] h-9 text-sm"
+              />
+            </div>
+            {/* Tri */}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                onClick={() => setSortBy("date")}
+                className={`cursor-pointer text-xs h-8 transition-colors ${
+                  sortBy === "date"
+                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                }`}
+              >
+                Par date
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setSortBy("favorites")}
+                className={`cursor-pointer text-xs h-8 transition-colors ${
+                  sortBy === "favorites"
+                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                }`}
+              >
+                Date d'ajout
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setSortBy("az")}
+                className={`cursor-pointer text-xs h-8 transition-colors ${
+                  sortBy === "az"
+                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                }`}
+              >
+                A-Z
+              </Button>
+            </div>
+          </div>
+          {/* Services */}
+          <div className="flex flex-wrap gap-2 items-center">
+            <SlidersHorizontal className="h-4 w-4 text-[#6b7280] mr-1" />
+            {services.map((s) => (
+              <Badge
+                key={s}
+                onClick={() => setServiceFilter(s)}
+                className={`cursor-pointer px-3 py-1 text-xs transition-colors ${
+                  serviceFilter === s
+                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "bg-[#0a0a0f] text-[#6b7280] border border-[#1e1e2e] hover:bg-[#1e1e2e]"
+                }`}
+              >
+                {s}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Contenu */}
       {!isFullyLoaded ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" />
         </div>
-      ) : !anyLoggedIn ? (
-        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center space-y-4">
-          <Heart className="h-12 w-12 text-[#6b7280] mx-auto" />
-          <p className="text-[#6b7280] text-lg">
-            Connectez-vous à Kemono/Coomer pour voir vos favoris
-          </p>
-          <div className="flex gap-3 justify-center flex-wrap">
-            <Button
-              onClick={() => openLoginModal("kemono")}
-              className="bg-[#7c3aed] hover:bg-[#6d28d9] text-white cursor-pointer"
-            >
-              Se connecter à Kemono
-            </Button>
-            <Button
-              onClick={() => openLoginModal("coomer")}
-              className="bg-pink-600 hover:bg-pink-700 text-white cursor-pointer"
-            >
-              Se connecter à Coomer
-            </Button>
-          </div>
-        </div>
       ) : allFavorites.length === 0 ? (
-        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
-          <Heart className="h-12 w-12 text-[#6b7280] mx-auto mb-4" />
-          <p className="text-[#6b7280] text-lg">
-            Aucun créateur en favori pour le moment.
-          </p>
+        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center text-[#6b7280]">
+          Connectez-vous pour voir vos favoris, ou commencez à en ajouter !
+        </div>
+      ) : filteredFavorites.length === 0 ? (
+        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center text-[#6b7280]">
+          Aucun créateur ne correspond à vos filtres.
         </div>
       ) : (
-        <div className="space-y-4">
+        <div className="space-y-6">
           <p className="text-sm text-[#6b7280]">
-            {allFavorites.length} créateur
-            {allFavorites.length !== 1 ? "s" : ""} en favori
+            {filteredFavorites.length} créateur
+            {filteredFavorites.length !== 1 ? "s" : ""} affiché
+            {filteredFavorites.length !== 1 ? "s" : ""}
           </p>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {allFavorites.map((creator) => (
+
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            {paginatedFavorites.map((creator) => (
               <CreatorCard
                 key={`${creator.site}-${creator.service}-${creator.id}`}
                 id={creator.id}
@@ -266,6 +400,12 @@ export default function FavoritesPage() {
               />
             ))}
           </div>
+
+          <Pagination
+            current={currentPage}
+            total={Math.ceil(filteredFavorites.length / ITEMS_PER_PAGE)}
+            onChange={setCurrentPage}
+          />
         </div>
       )}
 

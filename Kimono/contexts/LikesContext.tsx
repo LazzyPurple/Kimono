@@ -12,6 +12,7 @@ import type { Site } from "@/lib/api/unified";
 
 interface LikesContextType {
   likedCreators: Set<string>;
+  likedCreatorsOrder: Map<string, number>;
   likedPosts: Set<string>;
   toggleCreatorLike: (site: Site, service: string, id: string) => Promise<void>;
   togglePostLike: (site: Site, service: string, creatorId: string, id: string) => Promise<void>;
@@ -29,6 +30,7 @@ function makeKey(site: string, service: string, id: string) {
 
 export function LikesProvider({ children }: { children: ReactNode }) {
   const [likedCreators, setLikedCreators] = useState<Set<string>>(new Set());
+  const [likedCreatorsOrder, setLikedCreatorsOrder] = useState<Map<string, number>>(new Map());
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
@@ -43,6 +45,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
       ]);
 
       const creators = new Set<string>();
+      const creatorsOrder = new Map<string, number>();
       const posts = new Set<string>();
 
       for (const [result, site] of [
@@ -50,8 +53,11 @@ export function LikesProvider({ children }: { children: ReactNode }) {
         [cCreators, "coomer"],
       ] as const) {
         if (result.status === "fulfilled" && Array.isArray(result.value)) {
+          let index = 0;
           for (const c of result.value) {
-            creators.add(makeKey(site, c.service, c.id));
+            const key = makeKey(site, c.service, c.id);
+            creators.add(key);
+            creatorsOrder.set(key, index++);
           }
         }
       }
@@ -68,6 +74,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
       }
 
       setLikedCreators(creators);
+      setLikedCreatorsOrder(creatorsOrder);
       setLikedPosts(posts);
     } catch (err) {
       console.error("Failed to fetch likes:", err);
@@ -92,6 +99,12 @@ export function LikesProvider({ children }: { children: ReactNode }) {
         else next.add(key);
         return next;
       });
+      setLikedCreatorsOrder((prev) => {
+        const next = new Map(prev);
+        if (wasLiked) next.delete(key);
+        else next.set(key, -1); // -1 makes it the absolute newest favorite
+        return next;
+      });
 
       try {
         const method = wasLiked ? "DELETE" : "POST";
@@ -108,6 +121,13 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           if (wasLiked) next.add(key);
           else next.delete(key);
           return next;
+        });
+        setLikedCreatorsOrder((prev) => {
+           // We can't perfectly restore its original index if it was deleted, but reloading will fix it.
+           const next = new Map(prev);
+           if (wasLiked) next.set(key, 0);
+           else next.delete(key);
+           return next;
         });
       }
     },
@@ -164,6 +184,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
     <LikesContext.Provider
       value={{
         likedCreators,
+        likedCreatorsOrder,
         likedPosts,
         toggleCreatorLike,
         togglePostLike,

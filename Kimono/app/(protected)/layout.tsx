@@ -36,7 +36,7 @@ export default function ProtectedLayout({
         {/* Barre de navigation */}
         <nav className="sticky top-0 z-50 border-b border-[#1e1e2e] bg-[#0a0a0f]/80 backdrop-blur-md">
           <div className="container mx-auto flex h-14 items-center justify-between px-4">
-            <a href="/" className="text-xl font-bold text-[#7c3aed]">
+            <a href="/search" className="text-xl font-bold text-[#7c3aed]">
               Kimono
             </a>
             <div className="flex items-center gap-4">
