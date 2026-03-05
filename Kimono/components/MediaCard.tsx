@@ -39,6 +39,7 @@ export default function MediaCard({
   const [hasHovered, setHasHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [videoThumbError, setVideoThumbError] = useState(false);
+  const [fallbackThumbError, setFallbackThumbError] = useState(false);
   
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHoveredRef = useRef(hovered);
@@ -51,6 +52,9 @@ export default function MediaCard({
   // thumbnailUrl vient de getPostThumbnail() qui applique déjà le trick .jpg pour les vidéos
   const showImg = !!thumbnailUrl && !imgError;
   const showVideoThumb = type === "video" && !!videoThumbnailUrl && !videoThumbError;
+  
+  const ffmpegThumbSrc = videoUrl ? `/api/proxy/video-thumbnail?url=${encodeURIComponent(videoUrl)}` : undefined;
+  const showFallbackThumb = type === "video" && !!ffmpegThumbSrc && !fallbackThumbError;
 
   const handleMouseEnter = useCallback(() => {
     hoverTimerRef.current = setTimeout(() => {
@@ -123,6 +127,16 @@ export default function MediaCard({
                 alt={title}
                 loading="lazy"
                 onError={() => setVideoThumbError(true)}
+                className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
+                  hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
+                }`}
+              />
+            ) : showFallbackThumb ? (
+              <img
+                src={ffmpegThumbSrc}
+                alt={title}
+                loading="lazy"
+                onError={() => setFallbackThumbError(true)}
                 className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
                   hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
                 }`}
