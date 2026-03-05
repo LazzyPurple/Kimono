@@ -31,6 +31,9 @@ export default function CreatorCard({
 
   const avatarUrl = proxyCdnUrl(site, `/icons/${service}/${id}`);
   const bannerUrl = proxyCdnUrl(site, `/banners/${service}/${id}`);
+  
+  const isGumroad = service.toLowerCase() === "gumroad";
+  const displayBannerUrl = isGumroad ? avatarUrl : bannerUrl;
 
   const siteColor = site === "kemono" ? "#7c3aed" : "#db2777";
   const siteBadgeClass =
@@ -55,26 +58,31 @@ export default function CreatorCard({
         }
       >
         {/* ── Banner ───────────────────────────────────────────── */}
-        <div className="relative overflow-hidden" style={{ aspectRatio: "16/9" }}>
-          {!bannerError ? (
-            <img
-              src={bannerUrl}
-              alt=""
-              referrerPolicy="no-referrer"
-              onError={() => setBannerError(true)}
-              className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-            />
-          ) : (
-            <div
-              className="w-full h-full"
-              style={{
-                background: `linear-gradient(135deg, ${siteColor}33 0%, #1e1e2e 100%)`,
-              }}
-            />
-          )}
+        <div className="relative" style={{ aspectRatio: "16/9" }}>
+          {/* Wrapper image avec overflow-hidden pour ne pas que l'image dépasse au hover */}
+          <div className="absolute inset-0 overflow-hidden">
+            {!bannerError ? (
+              <img
+                src={displayBannerUrl}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={() => setBannerError(true)}
+                className={`w-full h-full transition-transform duration-500 group-hover:scale-105 ${
+                  isGumroad ? "object-contain bg-[#0a0a0f]" : "object-cover"
+                }`}
+              />
+            ) : (
+              <div
+                className="w-full h-full"
+                style={{
+                  background: `linear-gradient(135deg, ${siteColor}33 0%, #1e1e2e 100%)`,
+                }}
+              />
+            )}
 
-          {/* Voile dégradé */}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#12121a] via-transparent to-transparent" />
+            {/* Voile dégradé */}
+            <div className="absolute inset-0 bg-gradient-to-t from-[#12121a] via-transparent to-transparent pointer-events-none" />
+          </div>
 
           {/* Like button top-left */}
           <div className="absolute top-2 left-2 z-10">
@@ -100,31 +108,32 @@ export default function CreatorCard({
           </div>
 
           {/* Avatar circulaire */}
-          <div className="absolute -bottom-5 left-4 z-10">
-            <div
-              className="h-14 w-14 rounded-full overflow-hidden flex items-center justify-center border-2"
-              style={{
-                borderColor: "#12121a",
-                backgroundColor: "rgba(124,58,237,0.2)",
-              }}
-            >
-              {!avatarError ? (
-                <img
-                  src={avatarUrl}
-                  alt={name}
-                  referrerPolicy="no-referrer"
-                  onError={() => setAvatarError(true)}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <User className="h-7 w-7 text-[#7c3aed]" />
-              )}
+          {!isGumroad && (
+            <div className="absolute -bottom-5 left-4 z-10">
+              <div
+                className="h-14 w-14 rounded-full overflow-hidden flex items-center justify-center border-2 bg-[#12121a]"
+                style={{
+                  borderColor: "#12121a",
+                }}
+              >
+                {!avatarError ? (
+                  <img
+                    src={avatarUrl}
+                    alt={name}
+                    referrerPolicy="no-referrer"
+                    onError={() => setAvatarError(true)}
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <User className="h-7 w-7 text-[#7c3aed]" />
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── Footer info ──────────────────────────────────────── */}
-        <div className="px-4 pt-7 pb-4 space-y-1.5">
+        <div className={`px-4 pb-4 space-y-1.5 ${isGumroad ? "pt-4" : "pt-7"}`}>
           <h3 className="text-sm font-bold text-[#f0f0f5] truncate leading-tight">
             {name}
           </h3>

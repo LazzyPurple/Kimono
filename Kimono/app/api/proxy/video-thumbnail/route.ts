@@ -24,12 +24,8 @@ const CACHE_MAX_ENTRIES = 500;
 const ALLOWED_HOSTS = [
   "kemono.cr",
   "coomer.st",
-  "kemono.su",
-  "coomer.su",
   "img.kemono.cr",
   "img.coomer.st",
-  "img.kemono.su",
-  "img.coomer.su",
 ];
 
 function autoReferer(hostname: string): string {
@@ -83,10 +79,23 @@ async function extractFrame(videoUrl: string): Promise<Buffer | null> {
 async function _doExtract(videoUrl: string): Promise<Buffer | null> {
   const parsedUrl = new URL(videoUrl);
 
+  // 0. Resolve redirect (Coomer often redirects to load balancers like n1.coomer.st)
+  let resolvedUrl = parsedUrl.toString();
+  try {
+    const headResp = await axios.head(parsedUrl.toString(), {
+      maxRedirects: 5,
+      timeout: 5000,
+      validateStatus: () => true,
+    });
+    resolvedUrl = headResp.request?.res?.responseUrl || parsedUrl.toString();
+  } catch (err) {
+    console.warn("[video-thumbnail-proxy] Failed to resolve redirect for", parsedUrl.toString());
+  }
+
   // 1. Download first 2 MB of the video
   let videoBuffer: Buffer;
   try {
-    const resp = await axios.get(parsedUrl.toString(), {
+    const resp = await axios.get(resolvedUrl, {
       responseType: "arraybuffer",
       timeout: 10_000,
       headers: {
@@ -102,7 +111,7 @@ async function _doExtract(videoUrl: string): Promise<Buffer | null> {
     
     if (resp.status !== 200 && resp.status !== 206) {
       // Second attempt without Range header
-      const fallbackResp = await axios.get(parsedUrl.toString(), {
+      const fallbackResp = await axios.get(resolvedUrl, {
         responseType: "arraybuffer",
         timeout: 10_000,
         headers: {
@@ -216,7 +225,14 @@ export async function GET(req: NextRequest) {
     if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
       throw new Error("Bad protocol");
     }
-    if (!ALLOWED_HOSTS.some((h) => parsedUrl.hostname === h)) {
+    
+    // Check if hostname is exactly in ALLOWED_HOSTS or ends with one of the domains
+    const hostname = parsedUrl.hostname;
+    const isAllowed = ALLOWED_HOSTS.some((h) => hostname === h) ||
+                      hostname.endsWith(".kemono.cr") ||
+                      hostname.endsWith(".coomer.st");
+                      
+    if (!isAllowed) {
       return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
     }
   } catch {

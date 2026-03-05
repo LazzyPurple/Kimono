@@ -38,8 +38,6 @@ export default function MediaCard({
   const [hovered, setHovered] = useState(false);
   const [hasHovered, setHasHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
-  const [videoThumbError, setVideoThumbError] = useState(false);
-  const [fallbackThumbError, setFallbackThumbError] = useState(false);
   
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHoveredRef = useRef(hovered);
@@ -49,12 +47,10 @@ export default function MediaCard({
   const { isPostLiked } = useLikes();
   const liked = isPostLiked(site, service, postId);
 
-  // thumbnailUrl vient de getPostThumbnail() qui applique déjà le trick .jpg pour les vidéos
+  // thumbnailUrl vient de getPostThumbnail()
+  // Pour Kemono: trick .jpg direct (via img.kemono.cr)
+  // Pour Coomer (vidéos): api proxy video-thumbnail
   const showImg = !!thumbnailUrl && !imgError;
-  const showVideoThumb = type === "video" && !!videoThumbnailUrl && !videoThumbError;
-  
-  const ffmpegThumbSrc = videoUrl ? `/api/proxy/video-thumbnail?url=${encodeURIComponent(videoUrl)}` : undefined;
-  const showFallbackThumb = type === "video" && !!ffmpegThumbSrc && !fallbackThumbError;
 
   const handleMouseEnter = useCallback(() => {
     hoverTimerRef.current = setTimeout(() => {
@@ -97,6 +93,8 @@ export default function MediaCard({
   }, [hovered]);
 
   const previewSrc = videoUrl || thumbnailUrl;
+  const isCoomerVideo = type === "video" && site === "coomer";
+  const forceVideoStatic = isCoomerVideo && !showImg;
 
   return (
     <div
@@ -121,39 +119,21 @@ export default function MediaCard({
                   hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
                 }`}
               />
-            ) : showVideoThumb ? (
-              <img
-                src={videoThumbnailUrl}
-                alt={title}
-                loading="lazy"
-                onError={() => setVideoThumbError(true)}
-                className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
-                  hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
-                }`}
-              />
-            ) : showFallbackThumb ? (
-              <img
-                src={ffmpegThumbSrc}
-                alt={title}
-                loading="lazy"
-                onError={() => setFallbackThumbError(true)}
-                className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
-                  hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
-                }`}
-              />
             ) : (
-              <Film className="h-12 w-12 text-[#6b7280] absolute z-0" />
+              (!forceVideoStatic || !previewSrc) && (
+                <Film className="h-12 w-12 text-[#6b7280] absolute z-0" />
+              )
             )}
-            {hasHovered && previewSrc && (
+            {((forceVideoStatic && previewSrc) || (hasHovered && previewSrc)) && (
               <video
                 ref={videoRef}
                 src={previewSrc}
                 muted
                 loop
                 playsInline
-                preload="none"
+                preload={forceVideoStatic ? "metadata" : "none"}
                 className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
-                  hovered ? "opacity-100 z-10" : "opacity-0 -z-10"
+                  (forceVideoStatic || hovered) ? "opacity-100 z-10" : "opacity-0 -z-10"
                 }`}
               />
             )}

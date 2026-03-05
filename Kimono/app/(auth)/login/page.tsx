@@ -49,7 +49,7 @@ export default function LoginPage() {
       }
 
       // Pas de TOTP — connexion directe
-      router.push("/home");
+      router.push("/search");
       router.refresh();
     } catch {
       setError("Une erreur est survenue.");
@@ -76,7 +76,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/home");
+      router.push("/search");
       router.refresh();
     } catch {
       setError("Une erreur est survenue.");

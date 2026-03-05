@@ -222,7 +222,7 @@ export function getThumbnailUrl(site: Site, path: string): string {
  * Construit une URL full-res pour un chemin de fichier (proxifiée).
  */
 export function getFullImageUrl(site: Site, path: string): string {
-  const base = site === "kemono" ? "https://kemono.su" : "https://coomer.su";
+  const base = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
   return proxyUrl(`${base}/data${encodeURI(path)}`);
 }
 
@@ -250,10 +250,9 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
     return proxiedThumb(filePath);
   }
 
-  // 2. Fichier principal est une vidéo → remplacer extension par .jpg
-  //    Le CDN génère un .jpg pour chaque fichier uploadé (trick KemonoScrapper)
+  // 2. Fichier principal est une vidéo → ignorer les thumbnails statiques pour toutes les vidéos
   if (filePath && isVideo(filePath) && !filePath.startsWith("http")) {
-    return proxiedThumb(toJpgPath(filePath));
+    return undefined; // No static thumbnails for Kemono or Coomer videos
   }
 
   // 3. Fallback pour certains services : chercher dans les attachments
@@ -266,12 +265,12 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
       return proxiedThumb(imageAtt.path);
     }
 
-    // 3b. Essayer le trick .jpg sur un attachment vidéo
+    // 3b. Vidéo dans les attachments → ignorer les thumbnails statiques
     const videoAtt = post.attachments.find(
       (att) => att.path && isVideo(att.path) && !att.path.startsWith("http")
     );
-    if (videoAtt) {
-      return proxiedThumb(toJpgPath(videoAtt.path));
+    if (videoAtt?.path) {
+      return undefined;
     }
   }
 
@@ -285,7 +284,7 @@ export function getPostThumbnail(post: UnifiedPost): string | undefined {
         return proxiedThumb(anyAtt.path);
       }
       if (isVideo(anyAtt.path)) {
-        return proxiedThumb(toJpgPath(anyAtt.path));
+        return undefined;
       }
     }
   }
@@ -316,7 +315,7 @@ export function getPostType(post: UnifiedPost): "image" | "video" | "text" {
  * Retourne l'URL directe (source) de la vidéo d'un post (pas le thumbnail CDN)
  */
 export function getPostVideoUrl(post: UnifiedPost): string | undefined {
-  const base = post.site === "kemono" ? "https://kemono.su" : "https://coomer.su";
+  const base = post.site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
 
   if (post.file?.path && isVideo(post.file.path)) {
     return `${base}/data${encodeURI(post.file.path)}`;

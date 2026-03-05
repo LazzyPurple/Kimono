@@ -9,19 +9,19 @@ interface PaginationProps {
 export default function Pagination({ current, total, onChange }: PaginationProps) {
   if (total <= 1) return null;
 
-  const pages: (number | "...")[] = [];
-  pages.push(1);
-  if (current > 3) pages.push("...");
-  if (current > 2) pages.push(current - 1);
-  if (current > 1 && current < total) pages.push(current);
-  if (current < total - 1) pages.push(current + 1);
-  if (current < total - 2) pages.push("...");
-  if (total > 1) pages.push(total);
+  const maxPagesToShow = 5;
+  let startPage = Math.max(1, current - Math.floor(maxPagesToShow / 2));
+  let endPage = startPage + maxPagesToShow - 1;
 
-  // dédoublonnage
-  const deduped = pages.filter(
-    (p, i, arr) => p === "..." || arr.indexOf(p) === i
-  );
+  if (endPage > total) {
+    endPage = total;
+    startPage = Math.max(1, endPage - maxPagesToShow + 1);
+  }
+
+  const pages: number[] = [];
+  for (let i = startPage; i <= endPage; i++) {
+    pages.push(i);
+  }
 
   return (
     <div className="flex items-center justify-center gap-1 flex-wrap pt-2">
@@ -42,25 +42,19 @@ export default function Pagination({ current, total, onChange }: PaginationProps
         </>
       )}
 
-      {deduped.map((p, i) =>
-        p === "..." ? (
-          <span key={`d-${i}`} className="px-2 text-[#6b7280]">
-            …
-          </span>
-        ) : (
-          <button
-            key={p}
-            onClick={() => onChange(p)}
-            className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer flex items-center justify-center ${
-              p === current
-                ? "bg-[#7c3aed] text-white"
-                : "border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-            }`}
-          >
-            {p}
-          </button>
-        )
-      )}
+      {pages.map((p) => (
+        <button
+          key={p}
+          onClick={() => onChange(p)}
+          className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer flex items-center justify-center ${
+            p === current
+              ? "bg-[#7c3aed] text-white"
+              : "border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+          }`}
+        >
+          {p}
+        </button>
+      ))}
 
       {current < total && (
         <>

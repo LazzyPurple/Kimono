@@ -15,13 +15,9 @@ const ALLOWED_HOSTS = [
   // CDN thumbnails
   "img.kemono.cr",
   "img.coomer.st",
-  "img.kemono.su",
-  "img.coomer.su",
   // Data domains (images/vidéos originales)
   "kemono.cr",
   "coomer.st",
-  "kemono.su",
-  "coomer.su",
 ];
 
 function autoReferer(hostname: string): string {
