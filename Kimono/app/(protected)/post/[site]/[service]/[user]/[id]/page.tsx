@@ -293,7 +293,7 @@ export default function PostPage() {
             )}
           </div>
           <button
-            onClick={() => togglePostLike(site, service, id)}
+            onClick={() => togglePostLike(site, service, user, id)}
             className="flex items-center gap-1.5 text-sm transition-colors cursor-pointer"
           >
             <Heart

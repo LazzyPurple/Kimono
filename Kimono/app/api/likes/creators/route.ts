@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     await axios.post(
-      `${getBaseUrl(site)}/api/v1/favorites/artist/${service}/${creatorId}`,
+      `${getBaseUrl(site)}/api/v1/favorites/creator/${service}/${creatorId}`,
       null,
       {
         headers: {
@@ -88,7 +88,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     await axios.delete(
-      `${getBaseUrl(site)}/api/v1/favorites/artist/${service}/${creatorId}`,
+      `${getBaseUrl(site)}/api/v1/favorites/creator/${service}/${creatorId}`,
       {
         headers: {
           Cookie: cookie,
