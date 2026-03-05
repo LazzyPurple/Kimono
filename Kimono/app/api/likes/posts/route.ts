@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { site, service, postId } = body;
-    if (!site || !service || !postId) {
+    const { site, service, creatorId, postId } = body;
+    if (!site || !service || !creatorId || !postId) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
     }
 
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     }
 
     await axios.post(
-      `${getBaseUrl(site)}/api/v1/favorites/post/${service}/${postId}`,
+      `${getBaseUrl(site)}/api/v1/favorites/post/${service}/${creatorId}/${postId}`,
       null,
       {
         headers: {
@@ -77,8 +77,8 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { site, service, postId } = body;
-    if (!site || !service || !postId) {
+    const { site, service, creatorId, postId } = body;
+    if (!site || !service || !creatorId || !postId) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
     }
 
@@ -88,7 +88,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     await axios.delete(
-      `${getBaseUrl(site)}/api/v1/favorites/post/${service}/${postId}`,
+      `${getBaseUrl(site)}/api/v1/favorites/post/${service}/${creatorId}/${postId}`,
       {
         headers: {
           Cookie: cookie,

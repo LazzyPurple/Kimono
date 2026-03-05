@@ -14,7 +14,7 @@ interface LikesContextType {
   likedCreators: Set<string>;
   likedPosts: Set<string>;
   toggleCreatorLike: (site: Site, service: string, id: string) => Promise<void>;
-  togglePostLike: (site: Site, service: string, id: string) => Promise<void>;
+  togglePostLike: (site: Site, service: string, creatorId: string, id: string) => Promise<void>;
   isCreatorLiked: (site: Site, service: string, id: string) => boolean;
   isPostLiked: (site: Site, service: string, id: string) => boolean;
   refreshLikes: () => Promise<void>;
@@ -115,7 +115,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
   );
 
   const togglePostLike = useCallback(
-    async (site: Site, service: string, id: string) => {
+    async (site: Site, service: string, creatorId: string, id: string) => {
       const key = makeKey(site, service, id);
       const wasLiked = likedPosts.has(key);
 
@@ -132,7 +132,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
         const res = await fetch("/api/likes/posts", {
           method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ site, service, postId: id }),
+          body: JSON.stringify({ site, service, creatorId, postId: id }),
         });
         if (!res.ok) throw new Error("API error");
       } catch {
