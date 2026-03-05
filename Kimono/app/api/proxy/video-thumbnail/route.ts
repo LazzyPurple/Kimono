@@ -96,10 +96,36 @@ async function _doExtract(videoUrl: string): Promise<Buffer | null> {
         Referer: autoReferer(parsedUrl.hostname),
       },
       // Accept 200 (full) and 206 (partial)
-      validateStatus: (s) => s === 200 || s === 206,
+      validateStatus: () => true,
+      maxRedirects: 5,
     });
-    videoBuffer = Buffer.from(resp.data);
-  } catch {
+    
+    if (resp.status !== 200 && resp.status !== 206) {
+      // Second attempt without Range header
+      const fallbackResp = await axios.get(parsedUrl.toString(), {
+        responseType: "arraybuffer",
+        timeout: 10_000,
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          Referer: autoReferer(parsedUrl.hostname),
+        },
+        validateStatus: () => true,
+        maxRedirects: 5,
+      });
+      if (fallbackResp.status !== 200 && fallbackResp.status !== 206) {
+        throw new Error("Fallback request failed");
+      }
+      let buf = Buffer.from(fallbackResp.data);
+      if (buf.length > MAX_DOWNLOAD_BYTES) {
+        buf = buf.subarray(0, MAX_DOWNLOAD_BYTES);
+      }
+      videoBuffer = buf;
+    } else {
+      videoBuffer = Buffer.from(resp.data);
+    }
+  } catch (err) {
+    console.error("[video-thumbnail-proxy] Download error:", err);
     return null;
   }
 
