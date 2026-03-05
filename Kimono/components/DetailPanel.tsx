@@ -101,7 +101,7 @@ export default function DetailPanel({ post, open, onClose }: DetailPanelProps) {
               {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
               <video
                 src={firstMediaUrl}
-                poster={firstMediaType === "video" && firstMedia?.path ? getVideoThumbnailUrl(post.site, firstMedia.path) : undefined}
+                poster={firstMediaType === "video" && firstMedia?.path ? getVideoThumbnailUrl(post.site, firstMedia.path) || undefined : undefined}
                 controls
                 className="max-h-[300px] w-full rounded-lg"
               />
