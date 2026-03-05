@@ -7,8 +7,8 @@ export interface Creator {
   id: string;
   name: string;
   service: string;
-  indexed: number;
-  updated: number;
+  indexed: string;
+  updated: string;
   favorited: number;
   public_id?: string | null;
   relation_id?: number | null;

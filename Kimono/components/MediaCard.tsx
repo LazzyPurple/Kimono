@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Image, Film, FileText, Play } from "lucide-react";
@@ -10,6 +10,7 @@ interface MediaCardProps {
   title: string;
   thumbnailUrl?: string;
   videoUrl?: string;
+  videoThumbnailUrl?: string;
   type?: "image" | "video" | "text";
   site: Site;
   service: string;
@@ -23,6 +24,7 @@ export default function MediaCard({
   title,
   thumbnailUrl,
   videoUrl,
+  videoThumbnailUrl,
   type = "image",
   site,
   service,
@@ -33,15 +35,24 @@ export default function MediaCard({
 }: MediaCardProps) {
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
+  const [hasHovered, setHasHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [videoThumbError, setVideoThumbError] = useState(false);
+  
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isHoveredRef = useRef(hovered);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const playPromiseRef = useRef<Promise<void> | undefined>(undefined);
 
   // thumbnailUrl vient de getPostThumbnail() qui applique déjà le trick .jpg pour les vidéos
   const showImg = !!thumbnailUrl && !imgError;
-  const TypeIcon = type === "video" ? Film : type === "text" ? FileText : Image;
+  const showVideoThumb = type === "video" && !!videoThumbnailUrl && !videoThumbError;
 
   const handleMouseEnter = useCallback(() => {
-    hoverTimerRef.current = setTimeout(() => setHovered(true), 200);
+    hoverTimerRef.current = setTimeout(() => {
+      setHovered(true);
+      setHasHovered(true);
+    }, 200);
   }, []);
 
   const handleMouseLeave = useCallback(() => {
@@ -51,6 +62,31 @@ export default function MediaCard({
     }
     setHovered(false);
   }, []);
+
+  useEffect(() => {
+    isHoveredRef.current = hovered;
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (hovered) {
+      playPromiseRef.current = video.play();
+      if (playPromiseRef.current) {
+        playPromiseRef.current.catch(() => {});
+      }
+    } else {
+      if (playPromiseRef.current) {
+        playPromiseRef.current.then(() => {
+          if (!isHoveredRef.current) {
+            video.pause();
+            video.currentTime = 0;
+          }
+        }).catch(() => {});
+      } else {
+        video.pause();
+        video.currentTime = 0;
+      }
+    }
+  }, [hovered]);
 
   const previewSrc = videoUrl || thumbnailUrl;
 
@@ -63,35 +99,49 @@ export default function MediaCard({
     >
       {/* Aperçu */}
       <div className="relative aspect-square bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
-        {hovered && type === "video" && previewSrc ? (
-          <video
-            src={previewSrc}
-            autoPlay
-            muted
-            loop
-            playsInline
-            className="w-full h-full object-cover"
-          />
-        ) : hovered && type === "image" && showImg ? (
-          <img
-            src={thumbnailUrl}
-            alt={title}
-            referrerPolicy="no-referrer"
-            loading="lazy"
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover object-center transition-all duration-300"
-          />
-        ) : showImg ? (
-          <img
-            src={thumbnailUrl}
-            alt={title}
-            referrerPolicy="no-referrer"
-            loading="lazy"
-            onError={() => setImgError(true)}
-            className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
-          />
+        {type === "video" ? (
+          <>
+            {showVideoThumb ? (
+              <img
+                src={videoThumbnailUrl}
+                alt={title}
+                loading="lazy"
+                onError={() => setVideoThumbError(true)}
+                className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
+                  hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
+                }`}
+              />
+            ) : (
+              <Film className="h-12 w-12 text-[#6b7280] absolute z-0" />
+            )}
+            {hasHovered && previewSrc && (
+              <video
+                ref={videoRef}
+                src={previewSrc}
+                muted
+                loop
+                playsInline
+                preload="none"
+                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
+                  hovered ? "opacity-100 z-10" : "opacity-0 -z-10"
+                }`}
+              />
+            )}
+          </>
+        ) : type === "image" ? (
+          showImg ? (
+            <img
+              src={thumbnailUrl}
+              alt={title}
+              loading="lazy"
+              onError={() => setImgError(true)}
+              className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+            />
+          ) : (
+            <Image className="h-12 w-12 text-[#6b7280] absolute z-0" />
+          )
         ) : (
-          <TypeIcon className="h-12 w-12 text-[#6b7280]" />
+          <FileText className="h-12 w-12 text-[#6b7280] absolute z-0" />
         )}
 
         {/* Overlay vidéo */}

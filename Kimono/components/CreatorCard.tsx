@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Heart, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useLikes } from "@/contexts/LikesContext";
-import type { Site } from "@/lib/api/unified";
+import { proxyCdnUrl, type Site } from "@/lib/api/unified";
 
 interface CreatorCardProps {
   id: string;
@@ -29,9 +29,8 @@ export default function CreatorCard({
 
   const liked = isCreatorLiked(site, service, id);
 
-  const cdn = site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st";
-  const avatarUrl = `${cdn}/icons/${service}/${id}`;
-  const bannerUrl = `${cdn}/banners/${service}/${id}`;
+  const avatarUrl = proxyCdnUrl(site, `/icons/${service}/${id}`);
+  const bannerUrl = proxyCdnUrl(site, `/banners/${service}/${id}`);
 
   const siteColor = site === "kemono" ? "#7c3aed" : "#db2777";
   const siteBadgeClass =

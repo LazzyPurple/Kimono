@@ -9,7 +9,7 @@ import MediaCard from "@/components/MediaCard";
 import { User, ExternalLink, Loader2, Search } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/unified";
 import type { Creator } from "@/lib/api/kemono";
-import { getPostThumbnail, getPostType, getPostVideoUrl } from "@/lib/api/unified";
+import { getPostThumbnail, getPostType, getPostVideoUrl, getPostVideoThumbnailUrl, proxyCdnUrl } from "@/lib/api/unified";
 
 type MediaFilter = "tout" | "images" | "videos";
 
@@ -323,9 +323,8 @@ export default function CreatorPage() {
               <Loader2 className="h-7 w-7 animate-spin text-[#7c3aed]" />
             ) : !avatarError ? (
               <img
-                src={`${site === "kemono" ? "https://img.kemono.cr" : "https://img.coomer.st"}/icons/${service}/${id}`}
+              src={proxyCdnUrl(site, `/icons/${service}/${id}`)}
                 alt={displayName}
-                referrerPolicy="no-referrer"
                 onError={() => setAvatarError(true)}
                 className="h-full w-full object-cover"
               />
@@ -463,6 +462,7 @@ export default function CreatorPage() {
                 title={post.title}
                 thumbnailUrl={getPostThumbnail(post)}
                 videoUrl={getPostVideoUrl(post)}
+                videoThumbnailUrl={getPostVideoThumbnailUrl(post)}
                 type={getPostType(post)}
                 site={post.site}
                 service={post.service}
