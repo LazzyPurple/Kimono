@@ -107,7 +107,17 @@ export default function MediaCard({
       <div className="relative aspect-square bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
         {type === "video" ? (
           <>
-            {showVideoThumb ? (
+            {showImg ? (
+              <img
+                src={thumbnailUrl}
+                alt={title}
+                loading="lazy"
+                onError={() => setImgError(true)}
+                className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
+                  hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
+                }`}
+              />
+            ) : showVideoThumb ? (
               <img
                 src={videoThumbnailUrl}
                 alt={title}
