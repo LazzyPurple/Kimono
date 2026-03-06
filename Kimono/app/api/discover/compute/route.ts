@@ -103,7 +103,7 @@ export async function POST() {
     let allFavorites: Favorite[] = [];
 
     // 1. Fetch all favorites from Kemono and Coomer
-    const favPromises = sessions.map((s) => fetchSiteFavorites(s.site as "kemono" | "coomer", s.cookie));
+    const favPromises = sessions.map((s: any) => fetchSiteFavorites(s.site as "kemono" | "coomer", s.cookie));
     const favResults = await Promise.all(favPromises);
     allFavorites = favResults.flat();
 

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
-import type { Site } from "@/lib/api/unified";
+import type { Site } from "@/lib/api/helpers";
 
 interface DiscoveryCreator {
   id: string;

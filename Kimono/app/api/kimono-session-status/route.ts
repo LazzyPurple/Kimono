@@ -1,7 +1,9 @@
-import { NextResponse } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 
-export async function GET() {
+export const dynamic = "force-dynamic";
+
+export async function GET(request: NextRequest) {
   try {
     const [kSession, cSession] = await Promise.all([
       prisma.kimonoSession.findFirst({ where: { site: "kemono" }, orderBy: { savedAt: "desc" } }),

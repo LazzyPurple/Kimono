@@ -3,6 +3,8 @@ import { fetchCreatorPostsBySite } from "@/lib/api/unified";
 import type { Site } from "@/lib/api/unified";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const site = searchParams.get("site") as Site;
