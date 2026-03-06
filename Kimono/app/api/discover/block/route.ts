@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
     }
 
-    await (prisma as any).discoveryBlock.upsert({
+    await prisma.discoveryBlock.upsert({
       where: { 
         site_service_creatorId: { site, service, creatorId } 
       },
@@ -40,7 +40,7 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
     }
 
-    await (prisma as any).discoveryBlock.deleteMany({
+    await prisma.discoveryBlock.deleteMany({
       where: { site, service, creatorId },
     });
 

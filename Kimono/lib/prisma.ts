@@ -12,6 +12,7 @@ function createPrismaClient(): PrismaClient {
 
 /**
  * Client Prisma v7 singleton avec driver adapter LibSQL (SQLite).
+ * LibSQL utilise un build WASM compatible avec les hébergements mutualisés.
  */
 export const prisma: PrismaClient =
   globalForPrisma.prisma ?? createPrismaClient();

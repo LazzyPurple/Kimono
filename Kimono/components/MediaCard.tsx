@@ -44,7 +44,7 @@ export default function MediaCard({
   const videoRef = useRef<HTMLVideoElement>(null);
   const playPromiseRef = useRef<Promise<void> | undefined>(undefined);
 
-  const { isPostLiked } = useLikes();
+  const { isPostLiked, togglePostLike } = useLikes();
   const liked = isPostLiked(site, service, postId);
 
   // thumbnailUrl vient de getPostThumbnail()
@@ -161,35 +161,41 @@ export default function MediaCard({
           </div>
         )}
 
-        {/* Badge type */}
-        <div className="absolute top-2 left-2">
-          <Badge
-            className={`text-xs ${
+        {/* Like button top-left — visible si liké ou au survol */}
+        <div className={`absolute top-2 left-2 z-20 transition-opacity duration-200 ${liked ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              togglePostLike(site, service, user, postId);
+            }}
+            className="p-1.5 rounded-full bg-black/40 hover:bg-black/60 transition-colors cursor-pointer"
+          >
+            <Heart
+              className={`h-4 w-4 transition-colors ${
+                liked ? "text-red-500 fill-red-500" : "text-white/80"
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Badge type top-right — visible sur l'aperçu */}
+        <div className="absolute top-2 right-2 flex items-center gap-2 z-20">
+          <div
+            className={`p-1.5 rounded-md backdrop-blur-sm ${
               type === "video"
                 ? "bg-pink-600/80 text-white"
                 : "bg-[#7c3aed]/80 text-white"
             }`}
           >
-            {type === "video" ? "Vidéo" : type === "text" ? "Texte" : "Image"}
-          </Badge>
-        </div>
-
-        {/* Badge Site */}
-        <div className="absolute top-2 right-2 flex items-center gap-2">
-          {liked && (
-            <div className="bg-red-500/80 p-1 rounded backdrop-blur-sm">
-              <Heart className="h-4 w-4 text-white fill-white" />
-            </div>
-          )}
-          <Badge
-            className={`text-xs ${
-              site === "kemono"
-                ? "bg-[#7c3aed]/80 text-white"
-                : "bg-pink-600/80 text-white"
-            }`}
-          >
-            {site}
-          </Badge>
+            {type === "video" ? (
+              <Film className="h-4 w-4" />
+            ) : type === "text" ? (
+              <FileText className="h-4 w-4" />
+            ) : (
+              <Image className="h-4 w-4" />
+            )}
+          </div>
         </div>
       </div>
 

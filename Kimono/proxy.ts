@@ -48,5 +48,8 @@ export const config = {
     "/api/kimono-favorites",
     "/api/kimono-login",
     "/api/kimono-session-status",
+    "/api/likes/:path*",
+    "/api/discover/:path*",
+    "/api/proxy/:path*",
   ],
 };

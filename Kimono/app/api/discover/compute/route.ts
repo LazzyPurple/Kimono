@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // 5 minutes max (if deployed on Vercel)
+
+const MAX_FAVORITES = 50;
 
 interface Favorite {
   id: string;
@@ -110,6 +111,12 @@ export async function POST() {
       return NextResponse.json({ error: "Aucun favori trouvé." }, { status: 400 });
     }
 
+    const totalFavorites = allFavorites.length;
+    const wasTruncated = totalFavorites > MAX_FAVORITES;
+    if (wasTruncated) {
+      allFavorites = allFavorites.slice(0, MAX_FAVORITES);
+    }
+
     const favoriteKeys = new Set(allFavorites.map((f) => `${f.site}-${f.service}-${f.id}`));
 
     // 2. Compute recommendations by batching requests (max 15 concurrent)
@@ -147,7 +154,7 @@ export async function POST() {
     }
 
     // 3. Filter out existing favorites and blocked creators
-    const blocks = await (prisma as any).discoveryBlock.findMany();
+    const blocks = await prisma.discoveryBlock.findMany();
     const blockedKeys = new Set(blocks.map((b: any) => `${b.site}-${b.service}-${b.creatorId}`));
 
     const finalRecommendations = Array.from(scoreMap.values())
@@ -159,7 +166,7 @@ export async function POST() {
 
     // 4. Save to Cache
     // We use a fixed ID 'global' to only store one recent cache
-    await (prisma as any).discoveryCache.upsert({
+    await prisma.discoveryCache.upsert({
       where: { id: "global" },
       update: {
         data: JSON.stringify(finalRecommendations),
@@ -174,6 +181,9 @@ export async function POST() {
     return NextResponse.json({
       total: finalRecommendations.length,
       updatedAt: new Date().toISOString(),
+      ...(wasTruncated && {
+        warning: `Seuls ${MAX_FAVORITES} favoris sur ${totalFavorites} ont été traités pour respecter les limites du serveur.`,
+      }),
     });
 
   } catch (error) {
