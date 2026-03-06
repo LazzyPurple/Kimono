@@ -1,0 +1,17 @@
+# Logs
+*.log
+
+# Tests
+test_*.js
+test_*.ts
+test_*.json
+test_*.log
+debug.log
+next_error.log
+ts_errors.txt
+
+# Base de données locale
+*.db
+prisma/*.db
+prisma/*.db-shm
+prisma/*.db-wal
