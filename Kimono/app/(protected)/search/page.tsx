@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
-import type { UnifiedCreator } from "@/lib/api/unified";
+import type { UnifiedCreator } from "@/lib/api/helpers";
 
 type Filter = "tous" | "kemono" | "coomer" | "liked";
 

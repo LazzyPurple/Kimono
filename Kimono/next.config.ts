@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["otplib", "qrcode", "@simplewebauthn/server", "@prisma/client", "@prisma/adapter-libsql", "@libsql/client"],
+  output: 'standalone',
+  serverExternalPackages: ["otplib", "qrcode", "@simplewebauthn/server", "@prisma/client"],
 };
 
 export default nextConfig;

@@ -8,7 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
-import type { Site } from "@/lib/api/unified";
+import type { Site } from "@/lib/api/helpers";
 
 interface LikesContextType {
   likedCreators: Set<string>;

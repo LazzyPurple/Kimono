@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import MediaCard from "@/components/MediaCard";
 import { Loader2 } from "lucide-react";
-import type { UnifiedPost } from "@/lib/api/unified";
-import { getPostThumbnail, getPostType, getPostVideoThumbnailUrl } from "@/lib/api/unified";
+import type { UnifiedPost } from "@/lib/api/helpers";
+import { getPostThumbnail, getPostType, getPostVideoThumbnailUrl } from "@/lib/api/helpers";
 
 function SkeletonGrid() {
   return (

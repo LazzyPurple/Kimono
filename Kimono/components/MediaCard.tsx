@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Image, Film, FileText, Play, Heart } from "lucide-react";
-import type { Site } from "@/lib/api/unified";
+import type { Site } from "@/lib/api/helpers";
 import { useLikes } from "@/contexts/LikesContext";
 
 interface MediaCardProps {

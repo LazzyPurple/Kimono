@@ -13,9 +13,9 @@ import {
   Heart,
   User,
 } from "lucide-react";
-import type { UnifiedPost, Site } from "@/lib/api/unified";
+import type { UnifiedPost, Site } from "@/lib/api/helpers";
 import type { Creator } from "@/lib/api/kemono";
-import { proxyCdnUrl, getVideoThumbnailUrl } from "@/lib/api/unified";
+import { proxyCdnUrl, getVideoThumbnailUrl } from "@/lib/api/helpers";
 import VideoPlayer from "@/components/VideoPlayer";
 import Lightbox from "@/components/Lightbox";
 import { useLikes } from "@/contexts/LikesContext";

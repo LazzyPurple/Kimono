@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
-import type { UnifiedCreator, Site } from "@/lib/api/unified";
+import type { UnifiedCreator, Site } from "@/lib/api/helpers";
 import type { Creator } from "@/lib/api/kemono";
 
 interface SiteState {

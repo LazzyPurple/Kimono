@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Heart, User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { useLikes } from "@/contexts/LikesContext";
-import { proxyCdnUrl, type Site } from "@/lib/api/unified";
+import { proxyCdnUrl, type Site } from "@/lib/api/helpers";
 
 interface CreatorCardProps {
   id: string;

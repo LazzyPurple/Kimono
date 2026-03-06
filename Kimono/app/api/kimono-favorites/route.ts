@@ -4,6 +4,8 @@ import * as kemono from "@/lib/api/kemono";
 import * as coomer from "@/lib/api/coomer";
 import type { Site } from "@/lib/api/unified";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   const site = request.nextUrl.searchParams.get("site") as Site | null;
 
