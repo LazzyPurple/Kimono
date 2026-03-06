@@ -1,19 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
-import ffmpegPath from "ffmpeg-static";
-import ffmpeg from "fluent-ffmpeg";
 import { Readable } from "stream";
 import { tmpdir } from "os";
 import { join } from "path";
-import { writeFile, unlink } from "fs/promises";
+import { writeFile, unlink, access } from "fs/promises";
+import { constants as fsConstants } from "fs";
 import { randomBytes } from "crypto";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-if (ffmpegPath) {
-  ffmpeg.setFfmpegPath(ffmpegPath);
-}
+/* ── Detect ffmpeg availability ─────────────────────────────── */
+let ffmpegPath: string | null = null;
+let ffmpeg: typeof import("fluent-ffmpeg") | null = null;
+
+const ffmpegAvailable = (() => {
+  try {
+    ffmpegPath = require("ffmpeg-static");
+    if (!ffmpegPath) return false;
+    require("fs").accessSync(ffmpegPath, require("fs").constants.X_OK);
+    ffmpeg = require("fluent-ffmpeg");
+    ffmpeg!.setFfmpegPath(ffmpegPath);
+    return true;
+  } catch {
+    return false;
+  }
+})();
 
 /* ── Config ─────────────────────────────────────────────────── */
 const FFMPEG_CONCURRENCY_LIMIT = 5;
@@ -108,7 +120,7 @@ async function _doExtract(videoUrl: string): Promise<Buffer | null> {
       validateStatus: () => true,
       maxRedirects: 5,
     });
-    
+
     if (resp.status !== 200 && resp.status !== 206) {
       // Second attempt without Range header
       const fallbackResp = await axios.get(resolvedUrl, {
@@ -152,7 +164,7 @@ async function _doExtract(videoUrl: string): Promise<Buffer | null> {
       const buf = await new Promise<Buffer | null>((resolve) => {
         let resolved = false;
 
-        const command = ffmpeg(tmpFile)
+        const command = ffmpeg!(tmpFile)
           .seekInput(3)
           .frames(1)
           .outputOptions(["-f", "image2", "-vcodec", "mjpeg", "-q:v", "5"])
@@ -213,6 +225,13 @@ async function _doExtract(videoUrl: string): Promise<Buffer | null> {
 
 /* ── Route handler ──────────────────────────────────────────── */
 export async function GET(req: NextRequest) {
+  if (!ffmpegAvailable) {
+    return NextResponse.json(
+      { error: "Video thumbnail extraction not available on this server" },
+      { status: 503 }
+    );
+  }
+
   const rawUrl = req.nextUrl.searchParams.get("url");
 
   if (!rawUrl) {
@@ -225,13 +244,13 @@ export async function GET(req: NextRequest) {
     if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
       throw new Error("Bad protocol");
     }
-    
+
     // Check if hostname is exactly in ALLOWED_HOSTS or ends with one of the domains
     const hostname = parsedUrl.hostname;
     const isAllowed = ALLOWED_HOSTS.some((h) => hostname === h) ||
                       hostname.endsWith(".kemono.cr") ||
                       hostname.endsWith(".coomer.st");
-                      
+
     if (!isAllowed) {
       return NextResponse.json({ error: "Host not allowed" }, { status: 403 });
     }

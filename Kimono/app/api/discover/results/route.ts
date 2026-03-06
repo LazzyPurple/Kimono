@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const cache = await (prisma as any).discoveryCache.findUnique({
+    const cache = await prisma.discoveryCache.findUnique({
       where: { id: "global" },
     });
 
@@ -16,7 +16,7 @@ export async function GET() {
     const allRecommendations = JSON.parse(cache.data);
 
     // Filter dynamically in case blocks were added since the last compute
-    const blocks = await (prisma as any).discoveryBlock.findMany();
+    const blocks = await prisma.discoveryBlock.findMany();
     const blockedKeys = new Set(blocks.map((b: any) => `${b.site}-${b.service}-${b.creatorId}`));
 
     const filtered = allRecommendations.filter((rec: any) => {

@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:\\\\Users\\\\lilsm\\\\Workspace\\\\Kimono\" log --oneline -5)",
+      "WebFetch(domain:kemono.su)",
+      "WebFetch(domain:kemono.cr)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(curl -s \"https://raw.githubusercontent.com/mikf/gallery-dl/master/gallery_dl/extractor/kemono.py\")",
+      "WebFetch(domain:www.slingacademy.com)",
+      "WebFetch(domain:authjs.dev)",
+      "WebFetch(domain:dev.to)",
+      "Bash(npx tsc:*)"
+    ]
+  }
+}
