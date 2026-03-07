@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import p1 from "@/app/assets/1month_36px.svg";
-import p2 from "@/app/assets/2month_36px.svg";
-import p3 from "@/app/assets/3month_36px.svg";
-import p6 from "@/app/assets/6month_36px.svg";
-import p9 from "@/app/assets/9month_36px.svg";
-import p12 from "@/app/assets/12month_36px.svg";
 
-const SAKURA_ASSETS = [p1, p2, p3, p6, p9, p12];
+const SAKURA_ASSETS = [
+  "/assets/1month_36px.svg",
+  "/assets/2month_36px.svg",
+  "/assets/3month_36px.svg",
+  "/assets/6month_36px.svg",
+  "/assets/9month_36px.svg",
+  "/assets/12month_36px.svg"
+];
 
 export default function SakuraDecor() {
   const [petals, setPetals] = useState<any[]>([]);
