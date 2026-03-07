@@ -19,7 +19,7 @@ export default function SearchPage() {
   const [allCreators, setAllCreators] = useState<UnifiedCreator[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("tous");
-  const [sortBy, setSortBy] = useState<"date" | "favorites" | "az">("date");
+  const [sortBy, setSortBy] = useState<"date" | "favorites" | "az">("favorites");
   const [serviceFilter, setServiceFilter] = useState("Tous");
   const [currentPage, setCurrentPage] = useState(1);
   const { isCreatorLiked } = useLikes();
