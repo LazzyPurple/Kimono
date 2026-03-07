@@ -7,6 +7,8 @@ import Link from "next/link";
 import { Shield, LogOut, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import TotpSetupDialog from "@/components/TotpSetupDialog";
+import Logo from "@/components/Logo";
+import SakuraDecor from "@/components/SakuraDecor";
 import { LikesProvider } from "@/contexts/LikesContext";
 
 export default function ProtectedLayout({
@@ -33,12 +35,13 @@ export default function ProtectedLayout({
 
   return (
     <LikesProvider>
-      <div className="min-h-screen bg-[#0a0a0f]">
+      <div className="min-h-screen relative">
+        <SakuraDecor />
         {/* Barre de navigation */}
-        <nav className="sticky top-0 z-50 border-b border-[#1e1e2e] bg-[#0a0a0f]/80 backdrop-blur-md">
-          <div className="container mx-auto flex h-14 items-center justify-between px-4">
-            <Link href="/search" className="text-xl font-bold text-[#7c3aed]">
-              Kimono
+        <nav className="sticky top-0 z-50 border-b border-[#ffb7c5]/20 bg-[#0a0a0f]/80 backdrop-blur-md">
+          <div className="container mx-auto flex h-14 items-center justify-between px-4 relative z-10">
+            <Link href="/search" className="shrink-0 flex items-center hover:opacity-80 transition-opacity">
+              <Logo className="h-5 sm:h-6 w-auto" />
             </Link>
             <div className="flex items-center gap-4">
               <Link
@@ -86,7 +89,7 @@ export default function ProtectedLayout({
         </nav>
 
         {/* Contenu */}
-        <main className="container mx-auto px-4 py-6">{children}</main>
+        <main className="container mx-auto px-4 py-6 relative z-10">{children}</main>
 
         {/* Dialog setup TOTP */}
         <TotpSetupDialog

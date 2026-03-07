@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { LogIn, KeyRound, Shield, Loader2 } from "lucide-react";
+import Logo from "@/components/Logo";
 
 type LoginStep = "password" | "totp";
 
@@ -88,8 +89,8 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f] px-4">
       <Card className="w-full max-w-md bg-[#12121a] border-[#1e1e2e]">
         <CardHeader className="text-center space-y-2">
-          <CardTitle className="text-3xl font-bold text-[#f0f0f5]">
-            Kimono
+          <CardTitle className="flex justify-center py-2">
+            <Logo className="h-8 sm:h-10 w-auto" />
           </CardTitle>
           <p className="text-[#6b7280] text-sm">
             {step === "password"
