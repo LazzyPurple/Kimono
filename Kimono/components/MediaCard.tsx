@@ -97,11 +97,11 @@ export default function MediaCard({
   const forceVideoStatic = isCoomerVideo && !showImg;
 
   return (
-    <div
-      className={`bg-[#12121a] rounded-xl overflow-hidden group transition-all duration-300 cursor-pointer border ${
+    <a
+      href={`/post/${site}/${service}/${user}/${postId}`}
+      className={`block bg-[#12121a] rounded-xl overflow-hidden group transition-all duration-300 cursor-pointer border ${
         liked ? "border-red-500/50 hover:border-red-500 shadow-[0_0_15px_-5px_theme(colors.red.500)]" : "border-[#1e1e2e] hover:border-[#7c3aed]/50"
       }`}
-      onClick={() => router.push(`/post/${site}/${service}/${user}/${postId}`)}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
@@ -219,6 +219,6 @@ export default function MediaCard({
           )}
         </div>
       </div>
-    </div>
+    </a>
   );
 }

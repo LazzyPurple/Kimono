@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
 import { Compass, Loader2, Play, Search, SlidersHorizontal, Ban } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,8 @@ import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
 import type { Site } from "@/lib/api/helpers";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 interface DiscoveryCreator {
   id: string;
@@ -19,19 +21,63 @@ interface DiscoveryCreator {
   updated?: string;
 }
 
-export default function DiscoverPage() {
+function DiscoverPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  const qParam = searchParams.get("q") ?? "";
+  const sortParam = (searchParams.get("sort") as "score" | "az") ?? "score";
+  const serviceParam = searchParams.get("service") ?? "Tous";
+  const pageParam = Number(searchParams.get("page") ?? "1");
+
   const [creators, setCreators] = useState<DiscoveryCreator[]>([]);
   const [loading, setLoading] = useState(true);
   const [computing, setComputing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   
-  const [search, setSearch] = useState("");
-  const [sortBy, setSortBy] = useState<"score" | "az">("score");
-  const [filterService, setFilterService] = useState("Tous");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchQuery, setSearchQuery] = useState(qParam);
 
   const { isCreatorLiked } = useLikes();
+
+  useScrollRestoration(`discover-${pageParam}`, !loading);
+
+  const updateParams = useCallback((updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    let resettingPage = false;
+    
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key !== "page" && key !== "q") resettingPage = true;
+      if (key === "q" && value !== qParam) resettingPage = true;
+
+      if (value === null) {
+        params.delete(key);
+      } else {
+        if (key === "q" && value === "") params.delete(key);
+        else if (key === "sort" && value === "score") params.delete(key);
+        else if (key === "service" && value === "Tous") params.delete(key);
+        else if (key === "page" && value === "1") params.delete(key);
+        else params.set(key, value);
+      }
+    });
+
+    if (resettingPage && !updates.hasOwnProperty("page")) {
+      params.delete("page");
+    }
+
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, pathname, router, qParam]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery !== qParam) {
+        updateParams({ q: searchQuery || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, qParam, updateParams]);
+
 
   // On mount, load cache if exists
   useEffect(() => {
@@ -123,24 +169,24 @@ export default function DiscoverPage() {
       // 1. Filter out inherently liked
       if (isCreatorLiked(c.site, c.service, c.id)) return false;
       // 2. Filter by service
-      if (filterService !== "Tous" && c.service !== filterService) return false;
+      if (serviceParam !== "Tous" && c.service !== serviceParam) return false;
       // 3. Filter by search text
-      if (search && !c.name.toLowerCase().includes(search.toLowerCase())) return false;
+      if (qParam && !c.name.toLowerCase().includes(qParam.toLowerCase())) return false;
       return true;
     });
 
     result.sort((a, b) => {
-      if (sortBy === "az") return a.name.localeCompare(b.name);
+      if (sortParam === "az") return a.name.localeCompare(b.name);
       return b.score - a.score; // default "score"
     });
 
     return result;
-  }, [creators, search, filterService, sortBy, isCreatorLiked]);
+  }, [creators, qParam, serviceParam, sortParam, isCreatorLiked]);
 
   const paginatedResults = useMemo(() => {
-    const startIndex = (currentPage - 1) * 50;
+    const startIndex = (pageParam - 1) * 50;
     return filteredAndSorted.slice(startIndex, startIndex + 50);
-  }, [filteredAndSorted, currentPage]);
+  }, [filteredAndSorted, pageParam]);
 
 
   return (
@@ -208,11 +254,8 @@ export default function DiscoverPage() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
               <Input
                 placeholder="Rechercher un créateur..."
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
-                  setCurrentPage(1);
-                }}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280]"
               />
             </div>
@@ -221,9 +264,9 @@ export default function DiscoverPage() {
               <SlidersHorizontal className="h-4 w-4 text-[#6b7280]" />
               <div className="flex bg-[#12121a] border border-[#1e1e2e] rounded-lg p-1">
                 <button
-                  onClick={() => setSortBy("score")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    sortBy === "score"
+                  onClick={() => updateParams({ sort: "score" })}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
+                    sortParam === "score"
                       ? "bg-[#1e1e2e] text-[#f0f0f5]"
                       : "text-[#6b7280] hover:text-[#f0f0f5]"
                   }`}
@@ -231,9 +274,9 @@ export default function DiscoverPage() {
                   Pertinence
                 </button>
                 <button
-                  onClick={() => setSortBy("az")}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                    sortBy === "az"
+                  onClick={() => updateParams({ sort: "az" })}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
+                    sortParam === "az"
                       ? "bg-[#1e1e2e] text-[#f0f0f5]"
                       : "text-[#6b7280] hover:text-[#f0f0f5]"
                   }`}
@@ -247,13 +290,10 @@ export default function DiscoverPage() {
               {dynamicServices.map((service) => (
                 <Badge
                   key={service}
-                  onClick={() => {
-                    setFilterService(service);
-                    setCurrentPage(1);
-                  }}
-                  variant={filterService === service ? "default" : "outline"}
+                  onClick={() => updateParams({ service: service })}
+                  variant={serviceParam === service ? "default" : "outline"}
                   className={`cursor-pointer ${
-                    filterService === service
+                    serviceParam === service
                       ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9] border-transparent"
                       : "border-[#1e1e2e] text-[#6b7280] hover:border-[#7c3aed]/50 hover:text-[#f0f0f5] bg-[#12121a]"
                   }`}
@@ -281,7 +321,7 @@ export default function DiscoverPage() {
                 <button
                   onClick={(e) => handleBlock(creator, e)}
                   title="Masquer ce créateur"
-                  className="absolute bottom-2 left-2 p-2 rounded-full bg-black/40 hover:bg-black/80 text-[#6b7280] hover:text-red-500 transition-all z-10 opacity-0 group-hover:opacity-100 backdrop-blur-sm"
+                  className="absolute bottom-2 left-2 p-2 rounded-full bg-black/40 hover:bg-black/80 text-[#6b7280] hover:text-red-500 transition-all z-10 opacity-0 group-hover:opacity-100 backdrop-blur-sm cursor-pointer"
                 >
                   <Ban className="h-4 w-4" />
                 </button>
@@ -292,10 +332,10 @@ export default function DiscoverPage() {
           {filteredAndSorted.length > 0 && (
             <div className="py-6">
               <Pagination 
-                current={currentPage}
+                current={pageParam}
                 total={Math.ceil(filteredAndSorted.length / 50)}
                 onChange={(p) => {
-                  setCurrentPage(p);
+                  updateParams({ page: String(p) });
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
               />
@@ -305,4 +345,12 @@ export default function DiscoverPage() {
       )}
     </div>
   );
+}
+
+export default function DiscoverPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center min-h-[50vh] items-center"><Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" /></div>}>
+      <DiscoverPageContent />
+    </Suspense>
+  )
 }

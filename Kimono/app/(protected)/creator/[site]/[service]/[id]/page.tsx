@@ -55,12 +55,27 @@ export default function CreatorPage() {
 
   const [inputValue, setInputValue] = useState(query);
   const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, page));
-  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("tout");
+  const mediaFilter = (searchParams.get("media") as MediaFilter) || "tout";
+  const activeTab = (searchParams.get("tab") as "posts" | "recommended") || "posts";
+
+  const handleTabChange = (tab: "posts" | "recommended") => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (tab === "posts") params.delete("tab");
+    else params.set("tab", tab);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  const handleMediaFilterChange = (media: MediaFilter) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (media === "tout") params.delete("media");
+    else params.set("media", media);
+    params.delete("page");
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
-  
-  const [activeTab, setActiveTab] = useState<"posts" | "recommended">("posts");
 
   // Construction de la clé unique pour ce créateur (site-service-id)
   const creatorPageKey = `${site}-${service}-${id}`;
@@ -456,7 +471,7 @@ export default function CreatorPage() {
       {/* Onglets */}
       <div className="flex bg-[#12121a] border border-[#1e1e2e] rounded-xl p-1 gap-1 w-full max-w-sm">
         <button
-          onClick={() => setActiveTab("posts")}
+          onClick={() => handleTabChange("posts")}
           className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
             activeTab === "posts"
               ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
@@ -472,7 +487,7 @@ export default function CreatorPage() {
           )}
         </button>
         <button
-          onClick={() => setActiveTab("recommended")}
+          onClick={() => handleTabChange("recommended")}
           className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
             activeTab === "recommended"
               ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
@@ -493,7 +508,7 @@ export default function CreatorPage() {
             key={f}
             variant="outline"
             size="sm"
-            onClick={() => setMediaFilter(f)}
+            onClick={() => handleMediaFilterChange(f)}
             className={`border-[#1e1e2e] cursor-pointer transition-colors ${
               mediaFilter === f
                 ? "bg-[#7c3aed] border-[#7c3aed] text-white hover:bg-[#6d28d9]"

@@ -9,21 +9,67 @@ import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
 import type { UnifiedCreator } from "@/lib/api/helpers";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
 type Filter = "tous" | "kemono" | "coomer" | "liked";
 
 const PER_PAGE = 50;
 
-export default function SearchPage() {
-  const [query, setQuery] = useState("");
+function SearchPageContent() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const filter = (searchParams.get("filter") as Filter) ?? "tous";
+  const sortBy = (searchParams.get("sort") as "date" | "favorites" | "az") ?? "favorites";
+  const serviceFilter = searchParams.get("service") ?? "Tous";
+  const currentPage = Number(searchParams.get("page") ?? "1");
+  const qParam = searchParams.get("q") ?? "";
+
+  const [query, setQuery] = useState(qParam);
   const [allCreators, setAllCreators] = useState<UnifiedCreator[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<Filter>("tous");
-  const [sortBy, setSortBy] = useState<"date" | "favorites" | "az">("favorites");
-  const [serviceFilter, setServiceFilter] = useState("Tous");
-  const [currentPage, setCurrentPage] = useState(1);
   const { isCreatorLiked } = useLikes();
-  const deferredQuery = useDeferredValue(query);
+
+  const updateParams = (updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    let resettingPage = false;
+
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key !== "page" && key !== "q") resettingPage = true;
+      if (key === "q" && value !== qParam) resettingPage = true;
+
+      if (value === null) {
+        params.delete(key);
+      } else {
+        if (key === "q" && value === "") params.delete(key);
+        else if (key === "filter" && value === "tous") params.delete(key);
+        else if (key === "sort" && value === "favorites") params.delete(key);
+        else if (key === "service" && value === "Tous") params.delete(key);
+        else if (key === "page" && value === "1") params.delete(key);
+        else params.set(key, value);
+      }
+    });
+
+    if (resettingPage && !updates.hasOwnProperty("page")) {
+      params.delete("page");
+    }
+
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (query !== qParam) {
+        updateParams({ q: query || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useScrollRestoration(`search-${currentPage}-${filter}-${sortBy}`, !loading);
 
   /* Fetch all creators on mount */
   useEffect(() => {
@@ -46,10 +92,26 @@ export default function SearchPage() {
     loadAll();
   }, []);
 
-  /* Reset page on filter or query change */
+  /* Fetch all creators on mount */
   useEffect(() => {
-    setCurrentPage(1);
-  }, [filter, deferredQuery, sortBy, serviceFilter]);
+    async function loadAll() {
+      setLoading(true);
+      try {
+        const res = await fetch("/api/search-creators?q=");
+        if (!res.ok) throw new Error("Erreur réseau");
+        const data: UnifiedCreator[] = await res.json();
+        if (!Array.isArray(data)) throw new Error("L'API n'a pas retourné de tableau");
+        // Sort by favorited DESC
+        data.sort((a, b) => (b.favorited ?? 0) - (a.favorited ?? 0));
+        setAllCreators(data);
+      } catch {
+        setAllCreators([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadAll();
+  }, []);
 
   const services = useMemo(() => {
     const s = new Set(allCreators.map((c) => c.service));
@@ -61,8 +123,8 @@ export default function SearchPage() {
     let list = allCreators;
 
     // Text filter
-    if (deferredQuery.trim()) {
-      const q = deferredQuery.trim().toLowerCase();
+    if (qParam.trim()) {
+      const q = qParam.trim().toLowerCase();
       list = list.filter((c) => c.name.toLowerCase().includes(q));
     }
 
@@ -94,7 +156,7 @@ export default function SearchPage() {
     });
 
     return list;
-  }, [allCreators, deferredQuery, filter, isCreatorLiked, serviceFilter, sortBy]);
+  }, [allCreators, qParam, filter, isCreatorLiked, serviceFilter, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(displayed.length / PER_PAGE));
   const paginated = displayed.slice(
@@ -103,8 +165,7 @@ export default function SearchPage() {
   );
 
   const goToPage = (p: number) => {
-    setCurrentPage(p);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    updateParams({ page: String(p) });
   };
 
   return (
@@ -129,7 +190,7 @@ export default function SearchPage() {
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              onClick={() => setSortBy("favorites")}
+              onClick={() => updateParams({ sort: "favorites" })}
               className={`cursor-pointer text-xs h-8 transition-colors ${
                 sortBy === "favorites"
                   ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
@@ -140,7 +201,7 @@ export default function SearchPage() {
             </Button>
             <Button
               size="sm"
-              onClick={() => setSortBy("date")}
+              onClick={() => updateParams({ sort: "date" })}
               className={`cursor-pointer text-xs h-8 transition-colors ${
                 sortBy === "date"
                   ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
@@ -151,7 +212,7 @@ export default function SearchPage() {
             </Button>
             <Button
               size="sm"
-              onClick={() => setSortBy("az")}
+              onClick={() => updateParams({ sort: "az" })}
               className={`cursor-pointer text-xs h-8 transition-colors ${
                 sortBy === "az"
                   ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
@@ -170,7 +231,7 @@ export default function SearchPage() {
               key={f}
               variant="outline"
               size="sm"
-              onClick={() => setFilter(f)}
+              onClick={() => updateParams({ filter: f })}
               className={`border-[#1e1e2e] cursor-pointer text-xs h-7 transition-colors px-3 ${
                 filter === f
                   ? f === "liked"
@@ -190,7 +251,7 @@ export default function SearchPage() {
           {services.map((s) => (
             <Badge
               key={s}
-              onClick={() => setServiceFilter(s)}
+              onClick={() => updateParams({ service: s })}
               className={`cursor-pointer px-3 py-1 text-xs transition-colors ${
                 serviceFilter === s
                   ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
@@ -273,4 +334,12 @@ export default function SearchPage() {
       )}
     </div>
   );
+}
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center min-h-[50vh] items-center"><Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" /></div>}>
+      <SearchPageContent />
+    </Suspense>
+  )
 }

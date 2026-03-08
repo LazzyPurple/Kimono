@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
 import { Heart, Loader2, X, LogOut, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,8 @@ import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
 import type { UnifiedCreator, Site } from "@/lib/api/helpers";
 import type { Creator } from "@/lib/api/kemono";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 interface SiteState {
   loggedIn: boolean;
@@ -36,7 +38,16 @@ interface LoginModal {
   site: Site | null;
 }
 
-export default function FavoritesPage() {
+function FavoritesPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+
+  const qParam = searchParams.get("q") ?? "";
+  const sortParam = (searchParams.get("sort") as "date" | "favorites" | "az") ?? "date";
+  const serviceParam = searchParams.get("service") ?? "Tous";
+  const pageParam = Number(searchParams.get("page") ?? "1");
+
   const [kemono, setKemono] = useState<SiteState>(defaultState);
   const [coomer, setCoomer] = useState<SiteState>(defaultState);
   const [loginModal, setLoginModal] = useState<LoginModal>({
@@ -48,14 +59,49 @@ export default function FavoritesPage() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
 
-  const { likedCreatorsOrder } = useLikes();
-
   const [kemonoActive, setKemonoActive] = useState(true);
   const [coomerActive, setCoomerActive] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState<"date" | "favorites" | "az">("date");
-  const [serviceFilter, setServiceFilter] = useState("Tous");
-  const [currentPage, setCurrentPage] = useState(1);
+  
+  // Local input for debouncing
+  const [searchQuery, setSearchQuery] = useState(qParam);
+
+  const { likedCreatorsOrder } = useLikes();
+
+  const updateParams = useCallback((updates: Record<string, string | null>) => {
+    const params = new URLSearchParams(searchParams.toString());
+    let resettingPage = false;
+    
+    Object.entries(updates).forEach(([key, value]) => {
+      if (key !== "page" && key !== "q") resettingPage = true;
+      if (key === "q" && value !== qParam) resettingPage = true;
+
+      if (value === null) {
+        params.delete(key);
+      } else {
+        if (key === "q" && value === "") params.delete(key);
+        else if (key === "sort" && value === "date") params.delete(key);
+        else if (key === "service" && value === "Tous") params.delete(key);
+        else if (key === "page" && value === "1") params.delete(key);
+        else params.set(key, value);
+      }
+    });
+
+    if (resettingPage && !updates.hasOwnProperty("page")) {
+      params.delete("page");
+    }
+
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [searchParams, pathname, router, qParam]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery !== qParam) {
+        updateParams({ q: searchQuery || null });
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, qParam, updateParams]);
+
 
   const fetchFavorites = useCallback(async (site: Site) => {
     const setter = site === "kemono" ? setKemono : setCoomer;
@@ -83,6 +129,9 @@ export default function FavoritesPage() {
     fetchFavorites("kemono");
     fetchFavorites("coomer");
   }, [fetchFavorites]);
+
+  const isFullyLoaded = !kemono.loading && !coomer.loading;
+  useScrollRestoration(`favorites-${pageParam}`, isFullyLoaded);
 
   function openLoginModal(site: Site) {
     setLoginModal({ open: true, site });
@@ -147,29 +196,29 @@ export default function FavoritesPage() {
     if (kemonoActive) result.push(...kemono.favorites);
     if (coomerActive) result.push(...coomer.favorites);
 
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
+    if (qParam) {
+      const q = qParam.toLowerCase();
       result = result.filter((c) => c.name.toLowerCase().includes(q));
     }
 
-    if (serviceFilter !== "Tous") {
-      result = result.filter((c) => c.service === serviceFilter);
+    if (serviceParam !== "Tous") {
+      result = result.filter((c) => c.service === serviceParam);
     }
 
     result.sort((a, b) => {
-      if (sortBy === "date") {
+      if (sortParam === "date") {
         const dateA = new Date(a.updated || 0).getTime();
         const dateB = new Date(b.updated || 0).getTime();
         return dateB - dateA;
       }
-      if (sortBy === "favorites") {
+      if (sortParam === "favorites") {
         const orderA = likedCreatorsOrder.get(`${a.site}-${a.service}-${a.id}`) ?? Infinity;
         const orderB = likedCreatorsOrder.get(`${b.site}-${b.service}-${b.id}`) ?? Infinity;
         if (orderA !== orderB) return orderA - orderB;
         // fallback au favoris global si jamais
         return (b.favorited || 0) - (a.favorited || 0);
       }
-      if (sortBy === "az") {
+      if (sortParam === "az") {
         return a.name.localeCompare(b.name);
       }
       return 0;
@@ -181,22 +230,19 @@ export default function FavoritesPage() {
     coomer.favorites,
     kemonoActive,
     coomerActive,
-    searchQuery,
-    serviceFilter,
-    sortBy,
+    qParam,
+    serviceParam,
+    sortParam,
     likedCreatorsOrder,
   ]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, serviceFilter, sortBy, kemonoActive, coomerActive]);
-
-  const isFullyLoaded = !kemono.loading && !coomer.loading;
   const ITEMS_PER_PAGE = 50;
   const paginatedFavorites = filteredFavorites.slice(
-    (currentPage - 1) * ITEMS_PER_PAGE,
-    currentPage * ITEMS_PER_PAGE
+    (pageParam - 1) * ITEMS_PER_PAGE,
+    pageParam * ITEMS_PER_PAGE
   );
+  
+  const totalPages = Math.max(1, Math.ceil(filteredFavorites.length / ITEMS_PER_PAGE));
 
   return (
     <div className="space-y-6">
@@ -223,7 +269,11 @@ export default function FavoritesPage() {
           return (
             <div
               key={site}
-              onClick={toggleActive}
+              onClick={() => {
+                toggleActive();
+                // Reset page to 1 when toggling sites since the count changes
+                updateParams({ page: "1" });
+              }}
               className={`rounded-xl border p-4 space-y-3 cursor-pointer transition-all duration-200 ${siteColor} ${
                 !isActive && "opacity-50 grayscale hover:opacity-75"
               }`}
@@ -250,7 +300,7 @@ export default function FavoritesPage() {
                   {state.loading ? (
                     <Loader2 className="h-4 w-4 animate-spin text-[#6b7280]" />
                   ) : state.loggedIn ? (
-                    <Button
+                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleLogout(site)}
@@ -313,9 +363,9 @@ export default function FavoritesPage() {
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                onClick={() => setSortBy("date")}
+                onClick={() => updateParams({ sort: "date" })}
                 className={`cursor-pointer text-xs h-8 transition-colors ${
-                  sortBy === "date"
+                  sortParam === "date"
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
                     : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
@@ -324,9 +374,9 @@ export default function FavoritesPage() {
               </Button>
               <Button
                 size="sm"
-                onClick={() => setSortBy("favorites")}
+                onClick={() => updateParams({ sort: "favorites" })}
                 className={`cursor-pointer text-xs h-8 transition-colors ${
-                  sortBy === "favorites"
+                  sortParam === "favorites"
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
                     : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
@@ -335,9 +385,9 @@ export default function FavoritesPage() {
               </Button>
               <Button
                 size="sm"
-                onClick={() => setSortBy("az")}
+                onClick={() => updateParams({ sort: "az" })}
                 className={`cursor-pointer text-xs h-8 transition-colors ${
-                  sortBy === "az"
+                  sortParam === "az"
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
                     : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
@@ -352,9 +402,9 @@ export default function FavoritesPage() {
             {services.map((s) => (
               <Badge
                 key={s}
-                onClick={() => setServiceFilter(s)}
+                onClick={() => updateParams({ service: s })}
                 className={`cursor-pointer px-3 py-1 text-xs transition-colors ${
-                  serviceFilter === s
+                  serviceParam === s
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
                     : "bg-[#0a0a0f] text-[#6b7280] border border-[#1e1e2e] hover:bg-[#1e1e2e]"
                 }`}
@@ -402,9 +452,9 @@ export default function FavoritesPage() {
           </div>
 
           <Pagination
-            current={currentPage}
-            total={Math.ceil(filteredFavorites.length / ITEMS_PER_PAGE)}
-            onChange={setCurrentPage}
+            current={pageParam}
+            total={totalPages}
+            onChange={(p) => updateParams({ page: String(p) })}
           />
         </div>
       )}
@@ -487,4 +537,12 @@ export default function FavoritesPage() {
       </Dialog>
     </div>
   );
+}
+
+export default function FavoritesPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center min-h-[50vh] items-center"><Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" /></div>}>
+      <FavoritesPageContent />
+    </Suspense>
+  )
 }
