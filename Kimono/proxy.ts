@@ -38,9 +38,11 @@ export const config = {
     // Pages protégées
     "/home/:path*",
     "/favorites/:path*",
+    "/popular/:path*",
     "/search/:path*",
     "/creator/:path*",
     // Routes API protégées (sauf /api/auth/* qui doit rester public)
+    "/api/popular-posts",
     "/api/search-creators",
     "/api/recent-posts",
     "/api/creator-posts",

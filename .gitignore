@@ -15,3 +15,6 @@ ts_errors.txt
 prisma/*.db
 prisma/*.db-shm
 prisma/*.db-wal
+
+# Prisma debug
+prisma_debug.txt

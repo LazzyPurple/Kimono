@@ -385,7 +385,7 @@ export default function PostPage() {
       )}
 
       {/* ── 6. Footer ──────────────────────────────────────── */}
-      <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-4">
+      <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-4 flex items-center justify-between">
         <a
           href={`${baseUrl}/${service}/user/${user}/post/${id}`}
           target="_blank"
@@ -395,6 +395,16 @@ export default function PostPage() {
           <ExternalLink className="h-4 w-4" />
           Voir le post original sur {site}
         </a>
+        
+        <Button
+          onClick={() => router.back()}
+          variant="outline"
+          size="sm"
+          className="border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] cursor-pointer"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Retour
+        </Button>
       </div>
     </div>
   );

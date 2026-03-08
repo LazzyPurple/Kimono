@@ -57,6 +57,12 @@ export default function ProtectedLayout({
                 Favoris
               </Link>
               <Link
+                href="/popular/kemono"
+                className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors"
+              >
+                Populaires
+              </Link>
+              <Link
                 href="/discover"
                 className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors flex items-center gap-1"
               >
