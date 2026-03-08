@@ -1,10 +1,10 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -22,7 +22,7 @@ model Passkey {
   id           String   @id @default(cuid())
   userId       String
   credentialId String   @unique
-  publicKey    String
+  publicKey    String   @db.Text
   counter      BigInt
   deviceName   String?
   user         User     @relation(fields: [userId], references: [id])
@@ -40,14 +40,14 @@ model Session {
 model KimonoSession {
   id       String   @id @default(cuid())
   site     String
-  cookie   String
+  cookie   String   @db.Text
   username String
   savedAt  DateTime @default(now())
 }
 
 model CreatorsCache {
   site      String   @id
-  data      String
+  data      String   @db.LongText
   updatedAt DateTime @updatedAt
 }
 
@@ -63,6 +63,6 @@ model DiscoveryBlock {
 
 model DiscoveryCache {
   id        String   @id @default(cuid())
-  data      String
+  data      String   @db.LongText
   updatedAt DateTime @default(now())
 }
