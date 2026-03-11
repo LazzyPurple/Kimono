@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { query, execute } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -94,8 +94,7 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 
 export async function POST() {
   try {
-    console.log("[DISCOVER] Prisma models:", Object.keys(prisma).filter(k => !k.startsWith("_")));
-    const sessions = await prisma.kimonoSession.findMany();
+    const sessions = await query<any>("SELECT * FROM KimonoSession");
     if (sessions.length === 0) {
       return NextResponse.json({ error: "Aucune session trouvée. Veuillez vous connecter." }, { status: 400 });
     }
@@ -154,7 +153,7 @@ export async function POST() {
     }
 
     // 3. Filter out existing favorites and blocked creators
-    const blocks = await prisma.discoveryBlock.findMany();
+    const blocks = await query<any>("SELECT * FROM DiscoveryBlock");
     const blockedKeys = new Set(blocks.map((b: any) => `${b.site}-${b.service}-${b.creatorId}`));
 
     const finalRecommendations = Array.from(scoreMap.values())
@@ -166,17 +165,12 @@ export async function POST() {
 
     // 4. Save to Cache
     // We use a fixed ID 'global' to only store one recent cache
-    await prisma.discoveryCache.upsert({
-      where: { id: "global" },
-      update: {
-        data: JSON.stringify(finalRecommendations),
-        updatedAt: new Date(),
-      },
-      create: {
-        id: "global",
-        data: JSON.stringify(finalRecommendations),
-      },
-    });
+    const now = new Date();
+    const jsonData = JSON.stringify(finalRecommendations);
+    await execute(
+      "INSERT INTO DiscoveryCache (id, data, updatedAt) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE data = ?, updatedAt = ?",
+      ["global", jsonData, now, jsonData, now]
+    );
 
     return NextResponse.json({
       total: finalRecommendations.length,

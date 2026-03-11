@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchCreatorPostsBySite } from "@/lib/api/unified";
 import type { Site } from "@/lib/api/unified";
-import { prisma } from "@/lib/prisma";
+import { query as dbQuery } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -19,10 +19,11 @@ export async function GET(request: NextRequest) {
 
   try {
     // Récupérer le cookie de session si disponible (pour le contenu restreint)
-    const session = await prisma.kimonoSession.findFirst({
-      where: { site },
-      orderBy: { savedAt: "desc" },
-    });
+    const sessions = await dbQuery<any>(
+      "SELECT * FROM KimonoSession WHERE site = ? ORDER BY savedAt DESC LIMIT 1",
+      [site]
+    );
+    const session = sessions[0];
 
     const posts = await fetchCreatorPostsBySite(site, service, id, offset, session?.cookie, query);
     // Guard: s'assurer qu'on retourne toujours un tableau

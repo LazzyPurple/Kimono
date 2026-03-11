@@ -1,6 +1,6 @@
-import NextAuth from "next-auth";
+﻿import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { prisma } from "@/lib/prisma";
+import { query, execute } from "@/lib/db";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
@@ -11,13 +11,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         password: { label: "Mot de passe", type: "password" },
       },
       async authorize(credentials) {
-        // Log complet des credentials pour voir exactement la structure reçue
-        console.log("[AUTH] Credentials reçus:", JSON.stringify(credentials));
-
         const password = credentials?.password || credentials?.["password"];
-        
+
         if (!password) {
-          console.log("[AUTH] Pas de mot de passe trouvé dans l'objet");
           return null;
         }
 
@@ -25,30 +21,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const adminPassword = process.env.ADMIN_PASSWORD?.trim();
 
         if (!adminPassword || passwordStr !== adminPassword) {
-          console.log("[AUTH] Erreur correspondance mot de passe");
           return null;
         }
 
-        console.log("[AUTH] Mot de passe OK, vérification de l'utilisateur en base...");
-
         try {
           // Récupérer ou créer l'utilisateur unique admin
-          let user = await prisma.user.findFirst();
+          let users = await query<any>("SELECT * FROM User LIMIT 1");
+          let user = users[0];
 
           if (!user) {
-            console.log("[AUTH] Création du premier utilisateur admin...");
-            user = await prisma.user.create({
-              data: {
-                email: "admin@kimono.local",
-              },
-            });
+            const id = crypto.randomUUID();
+            await execute("INSERT INTO User (id, email) VALUES (?, ?)", [id, "admin@kimono.local"]);
+            users = await query<any>("SELECT * FROM User WHERE id = ?", [id]);
+            user = users[0];
           }
-
-          console.log("[AUTH] Utilisateur trouvé/créé:", user.email);
 
           // Si le TOTP est activé, on ne connecte pas encore —
           // on renvoie l'user avec un flag indiquant qu'il faut vérifier le TOTP
-          if (user.totpEnabled) {
+          if (Boolean(user.totpEnabled)) {
             return {
               id: user.id,
               email: user.email,
@@ -79,9 +69,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!userId || !code) return null;
 
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-        });
+        const users = await query<any>("SELECT * FROM User WHERE id = ?", [userId]);
+        const user = users[0];
 
         if (!user || !user.totpSecret) return null;
 
@@ -122,5 +111,5 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     signIn: "/login",
   },
   trustHost: true,
-  debug: true,
+  debug: process.env.NODE_ENV === "development",
 });

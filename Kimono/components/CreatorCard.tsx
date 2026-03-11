@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { Heart, User } from "lucide-react";
@@ -31,7 +31,7 @@ export default function CreatorCard({
 
   const avatarUrl = proxyCdnUrl(site, `/icons/${service}/${id}`);
   const bannerUrl = proxyCdnUrl(site, `/banners/${service}/${id}`);
-  
+
   const isGumroad = service.toLowerCase() === "gumroad";
   const displayBannerUrl = isGumroad ? avatarUrl : bannerUrl;
 
@@ -57,14 +57,14 @@ export default function CreatorCard({
             liked ? "#ef444488" : "rgba(124,58,237,0.25)")
         }
       >
-        {/* ── Banner ───────────────────────────────────────────── */}
         <div className="relative" style={{ aspectRatio: "16/9" }}>
-          {/* Wrapper image avec overflow-hidden pour ne pas que l'image dépasse au hover */}
           <div className="absolute inset-0 overflow-hidden">
             {!bannerError ? (
               <img
                 src={displayBannerUrl}
                 alt=""
+                loading="lazy"
+                decoding="async"
                 referrerPolicy="no-referrer"
                 onError={() => setBannerError(true)}
                 className={`w-full h-full transition-transform duration-500 group-hover:scale-105 ${
@@ -80,11 +80,9 @@ export default function CreatorCard({
               />
             )}
 
-            {/* Voile dégradé */}
             <div className="absolute inset-0 bg-gradient-to-t from-[#12121a] via-transparent to-transparent pointer-events-none" />
           </div>
 
-          {/* Like button top-left */}
           <div className="absolute top-2 left-2 z-10">
             <button
               onClick={(e) => {
@@ -102,12 +100,10 @@ export default function CreatorCard({
             </button>
           </div>
 
-          {/* Badge site top-right */}
           <div className="absolute top-2 right-2 z-10">
             <Badge className={`text-xs ${siteBadgeClass}`}>{site}</Badge>
           </div>
 
-          {/* Avatar circulaire */}
           {!isGumroad && (
             <div className="absolute -bottom-5 left-4 z-10">
               <div
@@ -120,6 +116,8 @@ export default function CreatorCard({
                   <img
                     src={avatarUrl}
                     alt={name}
+                    loading="lazy"
+                    decoding="async"
                     referrerPolicy="no-referrer"
                     onError={() => setAvatarError(true)}
                     className="h-full w-full object-contain"
@@ -132,7 +130,6 @@ export default function CreatorCard({
           )}
         </div>
 
-        {/* ── Footer info ──────────────────────────────────────── */}
         <div className={`px-4 pb-4 space-y-1.5 ${isGumroad ? "pt-4" : "pt-7"}`}>
           <h3 className="text-sm font-bold text-[#f0f0f5] truncate leading-tight">
             {name}

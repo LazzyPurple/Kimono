@@ -3,7 +3,7 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
+import { query, execute } from "@/lib/db";
 import { generateTotpSetup } from "@/lib/auth/totp";
 
 /**
@@ -17,9 +17,8 @@ export async function GET() {
     return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-  });
+  const users = await query<any>("SELECT * FROM User WHERE id = ?", [session.user.id]);
+  const user = users[0];
 
   if (!user) {
     return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
@@ -32,10 +31,7 @@ export async function GET() {
   const { secret, qrCodeDataUrl } = await generateTotpSetup(user.email);
 
   // Sauvegarder le secret temporairement (pas encore activé)
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { totpSecret: secret },
-  });
+  await execute("UPDATE User SET totpSecret = ? WHERE id = ?", [secret, user.id]);
 
   return NextResponse.json({ qrCodeDataUrl });
 }
@@ -57,9 +53,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Code requis" }, { status: 400 });
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-  });
+  const users = await query<any>("SELECT * FROM User WHERE id = ?", [session.user.id]);
+  const user = users[0];
 
   if (!user || !user.totpSecret) {
     return NextResponse.json({ error: "Aucun secret TOTP trouvé" }, { status: 400 });
@@ -73,10 +68,7 @@ export async function POST(request: Request) {
   }
 
   // Activer le TOTP
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { totpEnabled: true },
-  });
+  await execute("UPDATE User SET totpEnabled = 1 WHERE id = ?", [user.id]);
 
   return NextResponse.json({ success: true, message: "2FA activé avec succès" });
 }

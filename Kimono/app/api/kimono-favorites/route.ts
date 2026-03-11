@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+﻿import { NextRequest, NextResponse } from "next/server";
+import { query, execute } from "@/lib/db";
 import * as kemono from "@/lib/api/kemono";
 import * as coomer from "@/lib/api/coomer";
 import type { Site } from "@/lib/api/unified";
@@ -13,13 +13,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Site invalide" }, { status: 400 });
   }
 
-  const session = await prisma.kimonoSession.findFirst({
-    where: { site },
-    orderBy: { savedAt: "desc" },
-  });
-
-  console.log("[FAV] Session found:", !!session);
-  console.log("[FAV] Cookie stored:", session?.cookie?.substring(0, 100));
+  const sessions = await query<any>(
+    "SELECT * FROM KimonoSession WHERE site = ? ORDER BY savedAt DESC LIMIT 1",
+    [site]
+  );
+  const session = sessions[0];
 
   if (!session) {
     return NextResponse.json({ loggedIn: false, favorites: [] });
@@ -31,7 +29,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ loggedIn: true, favorites, username: session.username });
   } catch (err) {
     console.error("kimono-favorites error:", err);
-    // Session probablement expirée
+    // Session probablement expirÃ©e
     return NextResponse.json({
       loggedIn: false,
       favorites: [],
@@ -45,6 +43,7 @@ export async function DELETE(request: NextRequest) {
   if (!site) {
     return NextResponse.json({ error: "Site manquant" }, { status: 400 });
   }
-  await prisma.kimonoSession.deleteMany({ where: { site } });
+  await execute("DELETE FROM KimonoSession WHERE site = ?", [site]);
   return NextResponse.json({ success: true });
 }
+

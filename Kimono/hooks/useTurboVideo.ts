@@ -1,112 +1,318 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 
 interface TurboConfig {
-  initialChunkSize?: number; // 512Ko pour un démarrage instantané
-  maxChunkSize?: number; // 4Mo max pour la vitesse de croisière
-  concurrentRequests?: number; // 3 requêtes max
-  maxBufferAhead?: number; // 50Mo d'avance maximum en RAM
-  maxRetries?: number; // Nombre de tentatives en cas d'erreur serveur (Cold Storage)
+  initialChunkSize?: number;
+  maxChunkSize?: number;
+  concurrentRequests?: number;
+  maxBufferAhead?: number;
+  maxRetries?: number;
 }
 
-interface TurboState {
-  src: string;
+interface ChunkEntry {
+  offset: number;
+  data: ArrayBuffer;
+}
+
+interface UseTurboVideoResult {
+  sourceUrl: string;
   isPreloaded: boolean;
-  progress: number; // 0 à 100
-  loading: boolean;
-  isFallback: boolean; // True si on tombe sur le chargement classique (serveur ne supporte pas Range)
+  progress: number;
+  isLoading: boolean;
+  isFallback: boolean;
+  playTurbo: () => Promise<void>;
 }
 
 export function useTurboVideo(
   originalUrl: string | undefined,
+  videoRef: RefObject<HTMLVideoElement | null>,
   config: TurboConfig = {}
-) {
-  const { 
-    initialChunkSize = 512 * 1024, 
+): UseTurboVideoResult {
+  const {
+    initialChunkSize = 512 * 1024,
     maxChunkSize = 4 * 1024 * 1024,
     concurrentRequests = 3,
     maxBufferAhead = 50 * 1024 * 1024,
-    maxRetries = 5 
+    maxRetries = 5,
   } = config;
 
-  const videoRef = useRef<HTMLVideoElement>(null);
-
-  const [state, setState] = useState<TurboState>({
-    src: originalUrl || "",
-    isPreloaded: false,
-    progress: 0,
-    loading: false,
-    isFallback: false,
-  });
+  const [sourceUrl, setSourceUrl] = useState(originalUrl || "");
+  const [isPreloaded, setIsPreloaded] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isFallback, setIsFallback] = useState(false);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const mediaSourceRef = useRef<MediaSource | null>(null);
   const sourceBufferRef = useRef<SourceBuffer | null>(null);
-
-  // État interne pour la progression du téléchargement
   const totalSizeRef = useRef<number | null>(null);
   const preloadedChunkRef = useRef<ArrayBuffer | null>(null);
-  const nextByteOffsetRef = useRef<number>(0);
-  const chunksQueueRef = useRef<{ offset: number; data: ArrayBuffer }[]>([]);
+  const nextByteOffsetRef = useRef(0);
+  const chunksQueueRef = useRef<ChunkEntry[]>([]);
+  const objectUrlRef = useRef<string | null>(null);
+  const retryTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
-  // Nettoyage au démontage
+  const clearRetryTimeouts = useCallback(() => {
+    retryTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
+    retryTimeoutsRef.current.clear();
+  }, []);
+
+  const cleanupResources = useCallback(() => {
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = null;
+    clearRetryTimeouts();
+    mediaSourceRef.current = null;
+    sourceBufferRef.current = null;
+    totalSizeRef.current = null;
+    preloadedChunkRef.current = null;
+    nextByteOffsetRef.current = 0;
+    chunksQueueRef.current = [];
+
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }, [clearRetryTimeouts]);
+
   useEffect(() => {
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      if (state.src.startsWith("blob:")) {
-        URL.revokeObjectURL(state.src);
-      }
-    };
-  }, [state.src]);
+    cleanupResources();
+    setSourceUrl(originalUrl || "");
+    setIsPreloaded(false);
+    setProgress(0);
+    setIsLoading(false);
+    setIsFallback(false);
 
-  // Fallback classique si les requêtes Range échouent ou si MSE n'est pas supporté
+    return cleanupResources;
+  }, [cleanupResources, originalUrl]);
+
   const fallbackToNative = useCallback(() => {
-    if (abortControllerRef.current) abortControllerRef.current.abort();
-    setState((s) => ({
-      ...s,
-      src: originalUrl || "",
-      isFallback: true,
-      loading: false,
-    }));
-  }, [originalUrl]);
+    cleanupResources();
+    setSourceUrl(originalUrl || "");
+    setIsPreloaded(false);
+    setProgress(0);
+    setIsLoading(false);
+    setIsFallback(true);
+  }, [cleanupResources, originalUrl]);
 
-  // Préchargement avec Intersection Observer
-  useEffect(() => {
-    if (!originalUrl || state.isFallback || state.isPreloaded) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) {
-          preloadFirstChunk();
-          observer.disconnect(); // On ne précharge qu'une fois
-        }
-      },
-      { threshold: 0.1 }
-    );
-
-    if (videoRef.current) {
-      observer.observe(videoRef.current);
+  const appendToSourceBuffer = useCallback(async (buffer: ArrayBuffer) => {
+    const sourceBuffer = sourceBufferRef.current;
+    if (!sourceBuffer) {
+      return;
     }
 
-    return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [originalUrl, state.isFallback, state.isPreloaded]);
+    await new Promise<void>((resolve, reject) => {
+      const onUpdateEnd = () => {
+        sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+        sourceBuffer.removeEventListener("error", onError);
+        resolve();
+      };
 
-  const preloadFirstChunk = async () => {
+      const onError = (event: Event) => {
+        sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+        sourceBuffer.removeEventListener("error", onError);
+        reject(event);
+      };
+
+      sourceBuffer.addEventListener("updateend", onUpdateEnd);
+      sourceBuffer.addEventListener("error", onError);
+
+      try {
+        sourceBuffer.appendBuffer(buffer);
+      } catch (error) {
+        sourceBuffer.removeEventListener("updateend", onUpdateEnd);
+        sourceBuffer.removeEventListener("error", onError);
+        reject(error);
+      }
+    });
+  }, []);
+
+  const processQueue = useCallback(async () => {
+    const sourceBuffer = sourceBufferRef.current;
+    if (!sourceBuffer || sourceBuffer.updating || chunksQueueRef.current.length === 0) {
+      return;
+    }
+
+    chunksQueueRef.current.sort((left, right) => left.offset - right.offset);
+    const nextChunk = chunksQueueRef.current.shift();
+    if (!nextChunk) {
+      return;
+    }
+
+    try {
+      await appendToSourceBuffer(nextChunk.data);
+      if (chunksQueueRef.current.length > 0) {
+        void processQueue();
+      }
+    } catch (error) {
+      console.error("Erreur durant l'assemblage MSE :", error);
+      fallbackToNative();
+    }
+  }, [appendToSourceBuffer, fallbackToNative]);
+
+  const fetchChunk = useCallback(
+    async (start: number, end: number, attempt = 1): Promise<ArrayBuffer> => {
+      if (!originalUrl) {
+        throw new Error("Missing video source URL");
+      }
+
+      try {
+        const response = await fetch(originalUrl, {
+          headers: { Range: `bytes=${start}-${end}` },
+          signal: abortControllerRef.current?.signal,
+        });
+
+        if (!response.ok) {
+          if (response.status >= 500 && response.status <= 504) {
+            throw new Error(`Cold Storage Error: HTTP ${response.status}`);
+          }
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        return await response.arrayBuffer();
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          throw error;
+        }
+
+        if (attempt < maxRetries) {
+          const waitTime = Math.pow(2, attempt - 1) * 1000;
+          console.warn(
+            `Cold storage detecte pour le chunk ${start}-${end}, retry ${attempt}/${maxRetries} dans ${waitTime}ms...`
+          );
+
+          await new Promise<void>((resolve) => {
+            const timeoutId = setTimeout(() => {
+              retryTimeoutsRef.current.delete(timeoutId);
+              resolve();
+            }, waitTime);
+            retryTimeoutsRef.current.add(timeoutId);
+          });
+
+          return fetchChunk(start, end, attempt + 1);
+        }
+
+        throw error;
+      }
+    },
+    [maxRetries, originalUrl]
+  );
+
+  const startParallelWorkers = useCallback(() => {
+    const totalSize = totalSizeRef.current;
+    if (!totalSize) {
+      return;
+    }
+
+    const signal = abortControllerRef.current?.signal;
+    let activeRequests = 0;
+    let hasFailed = false;
+    let currentChunkSize = initialChunkSize;
+
+    const queueWorker = (worker: () => Promise<void>) => {
+      const timeoutId = setTimeout(() => {
+        retryTimeoutsRef.current.delete(timeoutId);
+        void worker();
+      }, 1000);
+      retryTimeoutsRef.current.add(timeoutId);
+    };
+
+    const worker = async () => {
+      const videoElement = videoRef.current;
+      if (videoElement && totalSizeRef.current) {
+        const bytesPlayed =
+          videoElement.duration > 0
+            ? (videoElement.currentTime / videoElement.duration) * totalSizeRef.current
+            : 0;
+        const bufferedAhead = nextByteOffsetRef.current - bytesPlayed;
+
+        if (bufferedAhead > maxBufferAhead) {
+          queueWorker(worker);
+          return;
+        }
+      }
+
+      if (hasFailed || nextByteOffsetRef.current >= totalSize || signal?.aborted) {
+        return;
+      }
+
+      activeRequests += 1;
+      const start = nextByteOffsetRef.current;
+      const end = Math.min(start + currentChunkSize - 1, totalSize - 1);
+      nextByteOffsetRef.current = end + 1;
+
+      if (currentChunkSize < maxChunkSize) {
+        currentChunkSize = Math.min(currentChunkSize * 2, maxChunkSize);
+      }
+
+      try {
+        const buffer = await fetchChunk(start, end);
+        chunksQueueRef.current.push({ offset: start, data: buffer });
+        setProgress((Math.min(totalSize, nextByteOffsetRef.current) / totalSize) * 100);
+        void processQueue();
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+
+        console.error(
+          `Erreur fatale telechargement chunk ${start}-${end} apres ${maxRetries} tentatives`,
+          error
+        );
+        hasFailed = true;
+        fallbackToNative();
+      } finally {
+        activeRequests -= 1;
+
+        if (!hasFailed && nextByteOffsetRef.current < totalSize) {
+          void worker();
+        } else if (
+          activeRequests === 0 &&
+          !hasFailed &&
+          mediaSourceRef.current?.readyState === "open"
+        ) {
+          mediaSourceRef.current.endOfStream();
+          setProgress(100);
+        }
+      }
+    };
+
+    for (let index = 0; index < concurrentRequests; index += 1) {
+      void worker();
+    }
+  }, [
+    concurrentRequests,
+    fetchChunk,
+    fallbackToNative,
+    initialChunkSize,
+    maxBufferAhead,
+    maxChunkSize,
+    maxRetries,
+    processQueue,
+    videoRef,
+  ]);
+
+  const preloadFirstChunk = useCallback(async () => {
+    if (!originalUrl || isFallback || isPreloaded) {
+      return;
+    }
+
     try {
       abortControllerRef.current = new AbortController();
-      const response = await fetch(originalUrl!, {
+      const response = await fetch(originalUrl, {
         headers: { Range: `bytes=0-${initialChunkSize - 1}` },
         signal: abortControllerRef.current.signal,
       });
 
-      // Si le serveur renvoie 200 au lieu de 206, il ne supporte pas les Range requests
       if (response.status !== 206) {
-        return fallbackToNative();
+        fallbackToNative();
+        return;
       }
 
-      // Récupérer la taille totale de la vidéo
       const contentRange = response.headers.get("content-range");
       if (contentRange) {
         const match = contentRange.match(/\/(\d+)/);
@@ -118,227 +324,96 @@ export function useTurboVideo(
       const buffer = await response.arrayBuffer();
       preloadedChunkRef.current = buffer;
       nextByteOffsetRef.current = buffer.byteLength;
-
-      setState((s) => ({
-        ...s,
-        isPreloaded: true,
-        progress: totalSizeRef.current
-          ? (buffer.byteLength / totalSizeRef.current) * 100
-          : 0,
-      }));
-    } catch (err) {
-      if (err instanceof Error && err.name !== "AbortError") {
-        console.warn("Préchargement échoué, fallback vers mode classique");
+      setIsPreloaded(true);
+      setProgress(
+        totalSizeRef.current ? (buffer.byteLength / totalSizeRef.current) * 100 : 0
+      );
+    } catch (error) {
+      if (!(error instanceof Error) || error.name !== "AbortError") {
+        console.warn("Prechargement echoue, fallback vers mode classique");
         fallbackToNative();
       }
     }
-  };
+  }, [fallbackToNative, initialChunkSize, isFallback, isPreloaded, originalUrl]);
 
-  /**
-   * Ajoute un buffer dans le MediaSource de façon asynchrone pour respecter le flux
-   */
-  const appendToSourceBuffer = async (buffer: ArrayBuffer) => {
-    const sb = sourceBufferRef.current;
-    if (!sb) return;
+  useEffect(() => {
+    if (!originalUrl || isFallback || isPreloaded || !videoRef.current) {
+      return;
+    }
 
-    return new Promise<void>((resolve, reject) => {
-      const onUpdateEnd = () => {
-        sb.removeEventListener("updateend", onUpdateEnd);
-        sb.removeEventListener("error", onError);
-        resolve();
-      };
-      const onError = (e: Event) => {
-        sb.removeEventListener("updateend", onUpdateEnd);
-        sb.removeEventListener("error", onError);
-        reject(e);
-      };
+    const videoElement = videoRef.current;
+    if (!videoElement) {
+      return;
+    }
 
-      sb.addEventListener("updateend", onUpdateEnd);
-      sb.addEventListener("error", onError);
-
-      try {
-        sb.appendBuffer(buffer);
-      } catch (e) {
-        reject(e);
-      }
-    });
-  };
-
-  /**
-   * Gère la boucle de lecture de la queue pour garantir que les chunks
-   * soient ajoutés au SourceBuffer dans le bon ordre (MSE exige l'ordre strict avec 'sequence' ou timestamp)
-   */
-  const processQueue = async () => {
-    if (chunksQueueRef.current.length === 0 || !sourceBufferRef.current) return;
-    if (sourceBufferRef.current.updating) return;
-
-    // Trier les chunks par offset et prendre le premier
-    chunksQueueRef.current.sort((a, b) => a.offset - b.offset);
-    const nextChunk = chunksQueueRef.current.shift();
-
-    if (nextChunk) {
-      try {
-        await appendToSourceBuffer(nextChunk.data);
-        if (chunksQueueRef.current.length > 0) {
-          processQueue();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void preloadFirstChunk();
+          observer.disconnect();
         }
-      } catch (e) {
-        console.error("Erreur durant l'assemblage MSE :", e);
-        fallbackToNative();
-      }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(videoElement);
+    return () => observer.disconnect();
+  }, [isFallback, isPreloaded, originalUrl, preloadFirstChunk, videoRef]);
+
+  const playTurbo = useCallback(async () => {
+    if (isFallback || isLoading || !originalUrl || !totalSizeRef.current || objectUrlRef.current) {
+      return;
     }
-  };
 
-  /**
-   * Action appelée au clic sur "Play"
-   */
-  const playTurbo = async () => {
-    // Si fallback déjà actif, on a rien à faire, la balise <video> classique prend le relais
-    if (state.isFallback || !originalUrl || !totalSizeRef.current) return;
-
-    // Vérifier support MSE (généralement video/mp4 avec codecs H264/AAC standard)
     const mimeCodec = 'video/mp4; codecs="avc1.4D401E, mp4a.40.2"';
     if (!window.MediaSource || !MediaSource.isTypeSupported(mimeCodec)) {
-      console.warn("MediaSource / codec non supporté, fallback natif.");
-      return fallbackToNative();
+      console.warn("MediaSource / codec non supporte, fallback natif.");
+      fallbackToNative();
+      return;
     }
 
-    setState((s) => ({ ...s, loading: true }));
+    setIsLoading(true);
 
     try {
-      const ms = new MediaSource();
-      mediaSourceRef.current = ms;
-      const objectUrl = URL.createObjectURL(ms);
-      
-      // Injecter la fausse URL blob: dans la balise vidéo
-      setState((s) => ({ ...s, src: objectUrl }));
+      const mediaSource = new MediaSource();
+      mediaSourceRef.current = mediaSource;
+      const objectUrl = URL.createObjectURL(mediaSource);
+      objectUrlRef.current = objectUrl;
+      setSourceUrl(objectUrl);
 
       await new Promise<void>((resolve) => {
-        ms.addEventListener(
-          "sourceopen",
-          () => {
-            resolve();
-          },
-          { once: true }
-        );
+        mediaSource.addEventListener("sourceopen", () => resolve(), { once: true });
       });
 
-      const sb = ms.addSourceBuffer(mimeCodec);
-      // 'sequence' permet au navigateur de coller les segments vidéos de bout en bout
-      // même si on ne fournit pas les timestamps exacts du fMP4 manuel
-      sb.mode = "sequence";
-      sourceBufferRef.current = sb;
+      const sourceBuffer = mediaSource.addSourceBuffer(mimeCodec);
+      sourceBuffer.mode = "sequence";
+      sourceBufferRef.current = sourceBuffer;
 
-      // Ajouter le segment préchargé d'abord
       if (preloadedChunkRef.current) {
         await appendToSourceBuffer(preloadedChunkRef.current);
       }
 
-      // Démarrer les workers parallèles pour la suite
       startParallelWorkers();
-
-    } catch (e) {
-      console.error("MSE initialization failed", e);
+      setIsLoading(false);
+    } catch (error) {
+      console.error("MSE initialization failed", error);
       fallbackToNative();
     }
+  }, [
+    appendToSourceBuffer,
+    fallbackToNative,
+    isFallback,
+    isLoading,
+    originalUrl,
+    startParallelWorkers,
+  ]);
+
+  return {
+    sourceUrl,
+    isPreloaded,
+    progress,
+    isLoading,
+    isFallback,
+    playTurbo,
   };
-
-  const fetchChunk = async (start: number, end: number, attempt = 1): Promise<ArrayBuffer> => {
-    try {
-      const res = await fetch(originalUrl!, {
-        headers: { Range: `bytes=${start}-${end}` },
-        signal: abortControllerRef.current?.signal,
-      });
-
-      if (!res.ok) {
-        // Erreurs 502/503/504 typiques d'un serveur object storage en réveil (Cold Storage)
-        if (res.status >= 500 && res.status <= 504) {
-          throw new Error(`Cold Storage Error: HTTP ${res.status}`);
-        }
-        throw new Error(`HTTP ${res.status}`);
-      }
-      return await res.arrayBuffer();
-    } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw error; // L'annulation via AbortController n'est pas une vraie erreur réseau
-      }
-      if (attempt < maxRetries) {
-        // Backoff exponentiel : 1s, 2s, 4s, 8s, 16s
-        const waitTime = Math.pow(2, attempt - 1) * 1000;
-        console.warn(`Cold storage detecté pour le chunk ${start}-${end}, retry ${attempt}/${maxRetries} dans ${waitTime}ms...`);
-        await new Promise(r => setTimeout(r, waitTime));
-        return fetchChunk(start, end, attempt + 1);
-      }
-      throw error;
-    }
-  };
-
-  const startParallelWorkers = () => {
-    const totalSize = totalSizeRef.current!;
-    const signal = abortControllerRef.current?.signal;
-
-    let activeRequests = 0;
-    let hasFailed = false;
-    let currentChunkSize = initialChunkSize;
-
-    const worker = async () => {
-      // Pause si on a trop d'avance en mémoire pour soulager la RAM et la bande passante
-      if (videoRef.current && totalSizeRef.current) {
-        const bytesPlayed = (videoRef.current.currentTime / videoRef.current.duration) * totalSizeRef.current || 0;
-        const bufferedAhead = nextByteOffsetRef.current - bytesPlayed;
-        
-        if (bufferedAhead > maxBufferAhead) {
-          // Attendre 1 seconde avant de revérifier
-          setTimeout(worker, 1000);
-          return;
-        }
-      }
-
-      if (hasFailed || nextByteOffsetRef.current >= totalSize || signal?.aborted) {
-        return;
-      }
-
-      activeRequests++;
-      
-      const start = nextByteOffsetRef.current;
-      const end = Math.min(start + currentChunkSize - 1, totalSize - 1);
-      nextByteOffsetRef.current = end + 1;
-
-      // Augmentation progressive de la taille des chunks (TCP Slow Start style)
-      if (currentChunkSize < maxChunkSize) {
-        currentChunkSize = Math.min(currentChunkSize * 2, maxChunkSize);
-      }
-
-      try {
-        const buffer = await fetchChunk(start, end);
-        chunksQueueRef.current.push({ offset: start, data: buffer });
-        
-        const loadedBytes = nextByteOffsetRef.current; 
-        setState((s) => ({ ...s, progress: (loadedBytes / totalSize) * 100 }));
-
-        processQueue();
-
-      } catch (e) {
-        if (e instanceof Error && e.name === "AbortError") return; // Annulation normale
-        console.error(`Erreur fatale téléchargement chunk ${start}-${end} après ${maxRetries} tentatives`, e);
-        hasFailed = true;
-        fallbackToNative();
-      } finally {
-        activeRequests--;
-        
-        if (!hasFailed && nextByteOffsetRef.current < totalSize) {
-          worker();
-        } else if (activeRequests === 0 && !hasFailed && mediaSourceRef.current?.readyState === "open") {
-          mediaSourceRef.current.endOfStream();
-          setState((s) => ({ ...s, loading: false }));
-        }
-      }
-    };
-
-    for (let i = 0; i < concurrentRequests; i++) {
-      worker();
-    }
-  };
-
-  return { videoRef, state, playTurbo };
 }
