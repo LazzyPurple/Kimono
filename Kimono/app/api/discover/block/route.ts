@@ -1,5 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { execute } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -11,19 +11,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
     }
 
-    await prisma.discoveryBlock.upsert({
-      where: { 
-        site_service_creatorId: { site, service, creatorId } 
-      },
-      update: {
-        blockedAt: new Date(),
-      },
-      create: {
-        site,
-        service,
-        creatorId,
-      },
-    });
+    const now = new Date();
+    await execute(
+      "INSERT INTO DiscoveryBlock (id, site, service, creatorId, blockedAt) VALUES (?, ?, ?, ?, ?) " +
+      "ON DUPLICATE KEY UPDATE blockedAt = ?",
+      [crypto.randomUUID(), site, service, creatorId, now, now]
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -40,9 +33,10 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
     }
 
-    await prisma.discoveryBlock.deleteMany({
-      where: { site, service, creatorId },
-    });
+    await execute(
+      "DELETE FROM DiscoveryBlock WHERE site = ? AND service = ? AND creatorId = ?",
+      [site, service, creatorId]
+    );
 
     return NextResponse.json({ success: true });
   } catch (error) {

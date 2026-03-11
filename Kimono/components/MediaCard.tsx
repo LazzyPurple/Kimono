@@ -1,44 +1,42 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Image, Film, FileText, Play, Heart } from "lucide-react";
+import { FileText, Film, Heart, Image as ImageIcon, Play } from "lucide-react";
 import type { Site } from "@/lib/api/helpers";
 import { useLikes } from "@/contexts/LikesContext";
 
 interface MediaCardProps {
   title: string;
-  thumbnailUrl?: string;
+  previewImageUrl?: string;
   videoUrl?: string;
-  videoThumbnailUrl?: string;
   type?: "image" | "video" | "text";
   site: Site;
   service: string;
   postId: string;
   user: string;
-  creatorName?: string;
-  publishedAt?: string;
+  publishedAt?: string | number;
+  videoPreviewMode?: "hover" | "viewport";
 }
 
 export default function MediaCard({
   title,
-  thumbnailUrl,
+  previewImageUrl,
   videoUrl,
-  videoThumbnailUrl,
   type = "image",
   site,
   service,
   postId,
   user,
-  creatorName,
   publishedAt,
+  videoPreviewMode = "hover",
 }: MediaCardProps) {
-  const router = useRouter();
   const [hovered, setHovered] = useState(false);
   const [hasHovered, setHasHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
-  
+  const [shouldWarmVideo, setShouldWarmVideo] = useState(false);
+
+  const cardRef = useRef<HTMLAnchorElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHoveredRef = useRef(hovered);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -46,16 +44,36 @@ export default function MediaCard({
 
   const { isPostLiked, togglePostLike } = useLikes();
   const liked = isPostLiked(site, service, postId);
+  const showImage = Boolean(previewImageUrl) && !imgError;
 
-  // thumbnailUrl vient de getPostThumbnail()
-  // Pour Kemono: trick .jpg direct (via img.kemono.cr)
-  // Pour Coomer (vidéos): api proxy video-thumbnail
-  const showImg = !!thumbnailUrl && !imgError;
+  useEffect(() => {
+    if (videoPreviewMode !== "viewport" || !videoUrl || !cardRef.current) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setShouldWarmVideo(true);
+          observer.disconnect();
+        }
+      },
+      {
+        rootMargin: "320px 0px",
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(cardRef.current);
+
+    return () => observer.disconnect();
+  }, [videoPreviewMode, videoUrl]);
 
   const handleMouseEnter = useCallback(() => {
     hoverTimerRef.current = setTimeout(() => {
       setHovered(true);
       setHasHovered(true);
+      setShouldWarmVideo(true);
     }, 200);
   }, []);
 
@@ -64,125 +82,133 @@ export default function MediaCard({
       clearTimeout(hoverTimerRef.current);
       hoverTimerRef.current = null;
     }
+
     setHovered(false);
   }, []);
 
+  const shouldMountVideo =
+    type === "video" &&
+    Boolean(videoUrl) &&
+    (hasHovered || shouldWarmVideo || (!showImage && videoPreviewMode === "viewport"));
+
   useEffect(() => {
     isHoveredRef.current = hovered;
+
     const video = videoRef.current;
-    if (!video) return;
+    if (!video) {
+      return;
+    }
 
     if (hovered) {
       playPromiseRef.current = video.play();
-      if (playPromiseRef.current) {
-        playPromiseRef.current.catch(() => {});
-      }
-    } else {
-      if (playPromiseRef.current) {
-        playPromiseRef.current.then(() => {
+      playPromiseRef.current?.catch(() => {});
+      return;
+    }
+
+    if (playPromiseRef.current) {
+      playPromiseRef.current
+        .then(() => {
           if (!isHoveredRef.current) {
             video.pause();
             video.currentTime = 0;
           }
-        }).catch(() => {});
-      } else {
-        video.pause();
-        video.currentTime = 0;
-      }
+        })
+        .catch(() => {});
+      return;
     }
-  }, [hovered]);
 
-  const previewSrc = videoUrl || thumbnailUrl;
-  const isCoomerVideo = type === "video" && site === "coomer";
-  const forceVideoStatic = isCoomerVideo && !showImg;
+    video.pause();
+    video.currentTime = 0;
+  }, [hovered, shouldMountVideo]);
+
+  const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
+  const videoPreload = videoPreviewMode === "viewport" || !showImage ? "metadata" : "none";
 
   return (
     <a
+      ref={cardRef}
       href={`/post/${site}/${service}/${user}/${postId}`}
-      className={`block bg-[#12121a] rounded-xl overflow-hidden group transition-all duration-300 cursor-pointer border ${
-        liked ? "border-red-500/50 hover:border-red-500 shadow-[0_0_15px_-5px_theme(colors.red.500)]" : "border-[#1e1e2e] hover:border-[#7c3aed]/50"
+      className={`block overflow-hidden rounded-xl border bg-[#12121a] transition-all duration-300 group cursor-pointer ${
+        liked
+          ? "border-red-500/50 shadow-[0_0_15px_-5px_theme(colors.red.500)] hover:border-red-500"
+          : "border-[#1e1e2e] hover:border-[#7c3aed]/50"
       }`}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      {/* Aperçu */}
-      <div className="relative aspect-square bg-[#0a0a0f] flex items-center justify-center overflow-hidden">
+      <div className="relative aspect-square overflow-hidden bg-[#0a0a0f] flex items-center justify-center">
         {type === "video" ? (
           <>
-            {showImg ? (
+            {showImage ? (
               <img
-                src={thumbnailUrl}
+                src={previewImageUrl}
                 alt={title}
                 loading="lazy"
+                decoding="async"
                 onError={() => setImgError(true)}
-                className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-300 ${
-                  hovered ? "opacity-0" : "opacity-100 group-hover:scale-105"
+                className={`absolute inset-0 h-full w-full object-cover object-center transition-all duration-300 ${
+                  hovered ? "scale-105 opacity-0" : "opacity-100 group-hover:scale-105"
                 }`}
               />
-            ) : (
-              (!forceVideoStatic || !previewSrc) && (
-                <Film className="h-12 w-12 text-[#6b7280] absolute z-0" />
-              )
-            )}
-            {((forceVideoStatic && previewSrc) || (hasHovered && previewSrc)) && (
+            ) : !shouldMountVideo ? (
+              <Film className="absolute z-0 h-12 w-12 text-[#6b7280]" />
+            ) : null}
+
+            {shouldMountVideo && videoUrl ? (
               <video
                 ref={videoRef}
-                src={previewSrc}
+                src={videoUrl}
                 muted
                 loop
                 playsInline
-                preload={forceVideoStatic ? "metadata" : "none"}
-                className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${
-                  (forceVideoStatic || hovered) ? "opacity-100 z-10" : "opacity-0 -z-10"
+                preload={videoPreload}
+                className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
+                  shouldShowVideo ? "z-10 opacity-100" : "-z-10 opacity-0"
                 }`}
               />
-            )}
+            ) : null}
           </>
         ) : type === "image" ? (
-          showImg ? (
+          showImage ? (
             <img
-              src={thumbnailUrl}
+              src={previewImageUrl}
               alt={title}
               loading="lazy"
+              decoding="async"
               onError={() => setImgError(true)}
-              className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+              className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
             />
           ) : (
-            <Image className="h-12 w-12 text-[#6b7280] absolute z-0" />
+            <ImageIcon className="absolute z-0 h-12 w-12 text-[#6b7280]" />
           )
         ) : (
-          <FileText className="h-12 w-12 text-[#6b7280] absolute z-0" />
+          <FileText className="absolute z-0 h-12 w-12 text-[#6b7280]" />
         )}
 
-        {/* Overlay vidéo */}
         {type === "video" && !hovered && (
-          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
             <Play className="h-10 w-10 text-white drop-shadow" />
           </div>
         )}
 
-        {/* Like button top-left — visible si liké ou au survol */}
         <div className={`absolute top-2 left-2 z-20 transition-opacity duration-200 ${liked ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
           <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
               togglePostLike(site, service, user, postId);
             }}
-            className="p-1.5 rounded-full bg-black/40 hover:bg-black/60 transition-colors cursor-pointer"
+            className="cursor-pointer rounded-full bg-black/40 p-1.5 transition-colors hover:bg-black/60"
           >
             <Heart
-              className={`h-4 w-4 transition-colors ${
-                liked ? "text-red-500 fill-red-500" : "text-white/80"
-              }`}
+              className={`h-4 w-4 transition-colors ${liked ? "fill-red-500 text-red-500" : "text-white/80"}`}
             />
           </button>
         </div>
 
-        {/* Badge type top-right — visible sur l'aperçu */}
-        <div className="absolute top-2 right-2 flex items-center gap-2 z-20">
+        <div className="absolute top-2 right-2 z-20 flex items-center gap-2">
           <div
-            className={`p-1.5 rounded-md backdrop-blur-sm ${
+            className={`rounded-md p-1.5 backdrop-blur-sm ${
               type === "video"
                 ? "bg-pink-600/80 text-white"
                 : "bg-[#7c3aed]/80 text-white"
@@ -193,28 +219,23 @@ export default function MediaCard({
             ) : type === "text" ? (
               <FileText className="h-4 w-4" />
             ) : (
-              <Image className="h-4 w-4" />
+              <ImageIcon className="h-4 w-4" />
             )}
           </div>
         </div>
       </div>
 
-      {/* Texte */}
-      <div className="p-3 space-y-1">
-        <h3 className="text-sm font-medium text-[#f0f0f5] truncate">
+      <div className="space-y-1 p-3">
+        <h3 className="truncate text-sm font-medium text-[#f0f0f5]">
           {title || "Sans titre"}
         </h3>
         <div className="flex items-center gap-2 text-xs text-[#6b7280]">
-          <Badge variant="outline" className="border-[#1e1e2e] text-[#6b7280] text-xs">
+          <Badge variant="outline" className="border-[#1e1e2e] text-xs text-[#6b7280]">
             {service}
           </Badge>
           {publishedAt && (
             <span>
-              {new Date(
-                typeof publishedAt === "number"
-                  ? (publishedAt as number) * 1000
-                  : publishedAt
-              ).toLocaleDateString("fr-FR")}
+              {new Date(typeof publishedAt === "number" ? publishedAt * 1000 : publishedAt).toLocaleDateString("fr-FR")}
             </span>
           )}
         </div>

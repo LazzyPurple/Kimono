@@ -1,11 +1,9 @@
-import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 
 /**
- * Middleware de protection des routes.
- * Ne charge PAS auth.ts pour éviter les imports Node.js en Edge.
- * Vérifie simplement l'existence d'un token JWT valide.
+ * Protects private routes without importing auth.ts in the Edge runtime.
  */
 export async function proxy(request: NextRequest) {
   const token = await getToken({
@@ -15,15 +13,12 @@ export async function proxy(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
-  // Si pas de token, rediriger vers la page de login
   if (!token) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  // Si le token indique que le TOTP est requis mais pas encore vérifié,
-  // bloquer l'accès aux routes protégées
   if (token.needsTotp) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("step", "totp");
@@ -35,14 +30,16 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Pages protégées
     "/home/:path*",
+    "/discover/:path*",
     "/favorites/:path*",
     "/popular/:path*",
     "/search/:path*",
     "/creator/:path*",
-    // Routes API protégées (sauf /api/auth/* qui doit rester public)
+    "/post/:path*",
+    "/api/post",
     "/api/popular-posts",
+    "/api/recommended",
     "/api/search-creators",
     "/api/recent-posts",
     "/api/creator-posts",

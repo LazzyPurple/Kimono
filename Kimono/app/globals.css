@@ -46,7 +46,7 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  /* Couleurs personnalisées Kimino */
+  /* Couleurs personnalisÃ©es Kimino */
   --color-kimono-bg: #0a0a0f;
   --color-kimino-card: #12121a;
   --color-kimino-accent: #7c3aed;
@@ -57,8 +57,10 @@
 }
 
 :root {
+  --font-geist-sans: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
+  --font-geist-mono: "Consolas", "SFMono-Regular", "Liberation Mono", monospace;
   --radius: 0.625rem;
-  /* Thème sombre par défaut pour Kimino */
+  /* ThÃ¨me sombre par dÃ©faut pour Kimino */
   --background: #0a0a0f;
   --foreground: #f0f0f5;
   --card: #12121a;

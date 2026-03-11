@@ -1,14 +1,17 @@
 import { NextResponse, NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { query } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const [kSession, cSession] = await Promise.all([
-      prisma.kimonoSession.findFirst({ where: { site: "kemono" }, orderBy: { savedAt: "desc" } }),
-      prisma.kimonoSession.findFirst({ where: { site: "coomer" }, orderBy: { savedAt: "desc" } }),
+    const [kSessions, cSessions] = await Promise.all([
+      query<any>("SELECT * FROM KimonoSession WHERE site = 'kemono' ORDER BY savedAt DESC LIMIT 1"),
+      query<any>("SELECT * FROM KimonoSession WHERE site = 'coomer' ORDER BY savedAt DESC LIMIT 1"),
     ]);
+
+    const kSession = kSessions[0];
+    const cSession = cSessions[0];
 
     return NextResponse.json({
       kemono: {

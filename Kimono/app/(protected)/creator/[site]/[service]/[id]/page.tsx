@@ -9,7 +9,7 @@ import MediaCard from "@/components/MediaCard";
 import { User, ExternalLink, Loader2, Search, Heart, Users, LayoutGrid } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/helpers";
 import type { Creator } from "@/lib/api/kemono";
-import { getPostThumbnail, getPostType, getPostVideoUrl, getPostVideoThumbnailUrl, proxyCdnUrl } from "@/lib/api/helpers";
+import { getPostType, proxyCdnUrl, resolvePostMedia } from "@/lib/api/helpers";
 import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import CreatorCard from "@/components/CreatorCard";
@@ -32,7 +32,7 @@ export default function CreatorPage() {
   const service = params.service;
   const id = params.id;
 
-  // Fix #6: Validation des paramètres
+  // Fix #6: Validation des paramÃƒÂ¨tres
   const isValidSite = site === "kemono" || site === "coomer";
   const isValid = isValidSite && service && id;
 
@@ -77,11 +77,11 @@ export default function CreatorPage() {
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
 
-  // Construction de la clé unique pour ce créateur (site-service-id)
+  // Construction de la clÃƒÂ© unique pour ce crÃƒÂ©ateur (site-service-id)
   const creatorPageKey = `${site}-${service}-${id}`;
   
-  // Le scroll sera restauré uniquement quand les posts ne sont plus en cours de chargement
-  // (On suppose ici que loadingPosts à false veut dire "données chargées et prêtes")
+  // Le scroll sera restaurÃƒÂ© uniquement quand les posts ne sont plus en cours de chargement
+  // (On suppose ici que loadingPosts ÃƒÂ  false veut dire "donnÃƒÂ©es chargÃƒÂ©es et prÃƒÂªtes")
   const isDataReady = !loadingPosts && !loadingProfile;
   useScrollRestoration(creatorPageKey, isDataReady);
 
@@ -179,51 +179,6 @@ export default function CreatorPage() {
     }
   }, [fetchPosts, page, query]);
 
-  // Prefetching to find the max page (up to 10)
-  useEffect(() => {
-    if (!isValid) return;
-    
-    let isCancelled = false;
-
-    async function prefetchNextPages() {
-      let currentCheckPage = knownMaxPage;
-      const targetMaxPage = page + 4;
-      
-      while (currentCheckPage < targetMaxPage && !isCancelled) {
-        try {
-          const checkOffset = currentCheckPage * 50;
-          const res = await fetch(
-            `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${checkOffset}`
-          );
-          const raw = await res.json();
-          const pData: UnifiedPost[] = Array.isArray(raw) ? raw : [];
-          
-          if (pData.length > 0) {
-            currentCheckPage++;
-            setKnownMaxPage(currentCheckPage);
-            if (pData.length < 50) {
-              // We found the actual last page
-              break;
-            }
-          } else {
-            // Empty page means the previous page was the last
-            break;
-          }
-        } catch (err) {
-          console.error("Error prefetching page", currentCheckPage + 1, err);
-          break;
-        }
-      }
-    }
-
-    if (hasNextPage && knownMaxPage < page + 4) {
-      prefetchNextPages();
-    }
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [hasNextPage, knownMaxPage, page, site, service, id, isValid]);
 
   // Recherche server-side via ?q= (loop complet)
   useEffect(() => {
@@ -261,7 +216,7 @@ export default function CreatorPage() {
     return () => { cancelled = true; };
   }, [query, site, service, id]);
 
-  // Reset recherche quand on change de créateur
+  // Reset recherche quand on change de crÃƒÂ©ateur
   useEffect(() => {
     setSearchResults([]);
   }, [site, service, id]);
@@ -269,8 +224,8 @@ export default function CreatorPage() {
   const isSearching = query.length > 0;
   const basePosts = isSearching ? searchResults : posts;
 
-  // Si l'API renvoie des résultats non filtrés, ou juste pour être sûr,
-  // on applique aussi un filtre local supplémentaire sur les résultats paginés
+  // Si l'API renvoie des rÃƒÂ©sultats non filtrÃƒÂ©s, ou juste pour ÃƒÂªtre sÃƒÂ»r,
+  // on applique aussi un filtre local supplÃƒÂ©mentaire sur les rÃƒÂ©sultats paginÃƒÂ©s
   // (Coomer a parfois du mal avec ?q=)
   const filteredPosts = basePosts.filter((post) => {
     if (mediaFilter === "images" && getPostType(post) !== "image") return false;
@@ -287,14 +242,14 @@ export default function CreatorPage() {
   });
 
   const displayName =
-    profile?.name ?? (loadingProfile ? "…" : `Créateur ${id}`);
+    profile?.name ?? (loadingProfile ? "Ã¢â‚¬Â¦" : `CrÃƒÂ©ateur ${id}`);
 
   if (!isValid) {
     return (
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center space-y-2">
-        <p className="text-red-400 text-lg font-medium">Paramètres invalides</p>
+        <p className="text-red-400 text-lg font-medium">ParamÃƒÂ¨tres invalides</p>
         <p className="text-[#6b7280] text-sm">
-          Le site doit être « kemono » ou « coomer », et le service/ID ne peuvent pas être vides.
+          Le site doit ÃƒÂªtre Ã‚Â« kemono Ã‚Â» ou Ã‚Â« coomer Ã‚Â», et le service/ID ne peuvent pas ÃƒÂªtre vides.
         </p>
       </div>
     );
@@ -341,18 +296,18 @@ export default function CreatorPage() {
       <div className="flex items-center justify-center gap-1 pt-4 flex-wrap">
         {page > 1 && (
           <button onClick={() => goToPage(1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
-            «
+            Ã‚Â«
           </button>
         )}
         {page > 1 && (
           <button onClick={() => goToPage(page - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
-            ‹
+            Ã¢â‚¬Â¹
           </button>
         )}
         {pages.map((p, i) =>
           p === "..." ? (
             <span key={`dots-${i}`} className="px-2 text-[#6b7280]">
-              …
+              Ã¢â‚¬Â¦
             </span>
           ) : (
             <button
@@ -370,7 +325,7 @@ export default function CreatorPage() {
         )}
         {hasNextPage && (
           <button onClick={() => goToPage(page + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
-            ›
+            Ã¢â‚¬Âº
           </button>
         )}
       </div>
@@ -379,7 +334,7 @@ export default function CreatorPage() {
 
   return (
     <div className="space-y-6">
-      {/* En-tête créateur */}
+      {/* En-tÃƒÂªte crÃƒÂ©ateur */}
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-6">
         <div className="flex items-start gap-4">
           <div className="h-16 w-16 rounded-full bg-[#7c3aed]/20 flex items-center justify-center shrink-0 overflow-hidden">
@@ -429,7 +384,7 @@ export default function CreatorPage() {
                   }`}
                 />
                 <span className={liked ? "text-red-500 font-medium" : "text-[#6b7280]"}>
-                  {liked ? "Abonné" : "S'abonner"}
+                  {liked ? "AbonnÃƒÂ©" : "S'abonner"}
                 </span>
               </button>
             </div>
@@ -449,14 +404,14 @@ export default function CreatorPage() {
             {profile && (
               <div className="flex gap-4 text-xs text-[#6b7280]">
                 {profile.post_count !== undefined && (
-                  <span>📝 {profile.post_count.toLocaleString()} posts</span>
+                  <span>Ã°Å¸â€œÂ {profile.post_count.toLocaleString()} posts</span>
                 )}
                 {profile.favorited !== undefined && (
-                  <span>❤ {profile.favorited.toLocaleString()} favoris</span>
+                  <span>Ã¢ÂÂ¤ {profile.favorited.toLocaleString()} favoris</span>
                 )}
                 {(profile.updated !== undefined || profile.indexed !== undefined) && (
                   <span>
-                    Mis à jour le{" "}
+                    Mis ÃƒÂ  jour le{" "}
                     {new Date(profile.updated ?? profile.indexed ?? 0).toLocaleDateString(
                       "fr-FR"
                     )}
@@ -501,7 +456,7 @@ export default function CreatorPage() {
 
       {activeTab === "posts" ? (
         <>
-          {/* Filtres médias */}
+          {/* Filtres mÃƒÂ©dias */}
           <div className="flex gap-2">
         {(["tout", "images", "videos"] as MediaFilter[]).map((f) => (
           <Button
@@ -531,18 +486,18 @@ export default function CreatorPage() {
               setInputValue(val);
               updateURL(val, 1);
             }}
-            placeholder="Chercher dans les posts…"
+            placeholder="Chercher dans les postsÃ¢â‚¬Â¦"
             className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
           />
         </div>
         {loadingPosts && isSearching ? (
           <div className="flex items-center text-xs text-[#7c3aed]">
             <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-            Recherche en cours…
+            Recherche en coursÃ¢â‚¬Â¦
           </div>
         ) : isSearching ? (
           <p className="text-xs text-[#6b7280]">
-            {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé{filteredPosts.length > 1 ? "s" : ""}
+            {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvÃƒÂ©{filteredPosts.length > 1 ? "s" : ""}
           </p>
         ) : null}
       </div>
@@ -560,7 +515,7 @@ export default function CreatorPage() {
       ) : filteredPosts.length === 0 ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
           <p className="text-[#6b7280] text-lg">
-            {isSearching ? "Aucun post trouvé pour cette recherche." : "Aucun post disponible."}
+            {isSearching ? "Aucun post trouvÃƒÂ© pour cette recherche." : "Aucun post disponible."}
           </p>
         </div>
       ) : (
@@ -572,21 +527,24 @@ export default function CreatorPage() {
           )}
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {filteredPosts.map((post) => (
-              <MediaCard
-                key={`${post.site}-${post.service}-${post.id}`}
-                title={post.title}
-                thumbnailUrl={getPostThumbnail(post)}
-                videoUrl={getPostVideoUrl(post)}
-                videoThumbnailUrl={getPostVideoThumbnailUrl(post)}
-                type={getPostType(post)}
-                site={post.site}
-                service={post.service}
-                postId={post.id}
-                user={post.user}
-                publishedAt={post.published}
-              />
-            ))}
+            {filteredPosts.map((post) => {
+              const media = resolvePostMedia(post);
+
+              return (
+                <MediaCard
+                  key={`${post.site}-${post.service}-${post.id}`}
+                  title={post.title}
+                  previewImageUrl={media.previewImageUrl}
+                  videoUrl={media.videoUrl}
+                  type={media.type}
+                  site={post.site}
+                  service={post.service}
+                  postId={post.id}
+                  user={post.user}
+                  publishedAt={post.published}
+                />
+              );
+            })}
           </div>
 
           {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
@@ -598,7 +556,7 @@ export default function CreatorPage() {
       )}
       </>
       ) : (
-        /* Créateurs similaires */
+        /* CrÃƒÂ©ateurs similaires */
         <div className="pt-2">
           {loadingRecommended ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -611,7 +569,7 @@ export default function CreatorPage() {
             </div>
           ) : recommended.length === 0 ? (
             <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
-              <p className="text-[#6b7280] text-sm">Aucun créateur similaire trouvé.</p>
+              <p className="text-[#6b7280] text-sm">Aucun crÃƒÂ©ateur similaire trouvÃƒÂ©.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -633,3 +591,4 @@ export default function CreatorPage() {
     </div>
   );
 }
+

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { query } from "@/lib/db";
 import axios from "axios";
 
 export const dynamic = "force-dynamic";
@@ -9,10 +9,11 @@ function getBaseUrl(site: string) {
 }
 
 async function getSessionCookie(site: string): Promise<string | null> {
-  const session = await prisma.kimonoSession.findFirst({
-    where: { site },
-    orderBy: { savedAt: "desc" },
-  });
+  const sessions = await query<any>(
+    "SELECT * FROM KimonoSession WHERE site = ? ORDER BY savedAt DESC LIMIT 1",
+    [site]
+  );
+  const session = sessions[0];
   return session?.cookie ?? null;
 }
 

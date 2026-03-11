@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useState, useEffect, useMemo, useDeferredValue } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Search as SearchIcon, Loader2, SlidersHorizontal } from "lucide-react";
@@ -33,7 +33,7 @@ function SearchPageContent() {
   const [loading, setLoading] = useState(true);
   const { isCreatorLiked } = useLikes();
 
-  const updateParams = (updates: Record<string, string | null>) => {
+  const updateParams = useCallback((updates: Record<string, string | null>) => {
     const params = new URLSearchParams(searchParams.toString());
     let resettingPage = false;
 
@@ -58,7 +58,7 @@ function SearchPageContent() {
     }
 
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
+  }, [pathname, qParam, router, searchParams]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -67,7 +67,7 @@ function SearchPageContent() {
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [qParam, query, updateParams]);
 
   useScrollRestoration(`search-${currentPage}-${filter}-${sortBy}`, !loading);
 
@@ -77,9 +77,9 @@ function SearchPageContent() {
       setLoading(true);
       try {
         const res = await fetch("/api/search-creators?q=");
-        if (!res.ok) throw new Error("Erreur réseau");
+        if (!res.ok) throw new Error("Erreur rÃ©seau");
         const data: UnifiedCreator[] = await res.json();
-        if (!Array.isArray(data)) throw new Error("L'API n'a pas retourné de tableau");
+        if (!Array.isArray(data)) throw new Error("L'API n'a pas retournÃ© de tableau");
         // Sort by favorited DESC
         data.sort((a, b) => (b.favorited ?? 0) - (a.favorited ?? 0));
         setAllCreators(data);
@@ -92,26 +92,6 @@ function SearchPageContent() {
     loadAll();
   }, []);
 
-  /* Fetch all creators on mount */
-  useEffect(() => {
-    async function loadAll() {
-      setLoading(true);
-      try {
-        const res = await fetch("/api/search-creators?q=");
-        if (!res.ok) throw new Error("Erreur réseau");
-        const data: UnifiedCreator[] = await res.json();
-        if (!Array.isArray(data)) throw new Error("L'API n'a pas retourné de tableau");
-        // Sort by favorited DESC
-        data.sort((a, b) => (b.favorited ?? 0) - (a.favorited ?? 0));
-        setAllCreators(data);
-      } catch {
-        setAllCreators([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadAll();
-  }, []);
 
   const services = useMemo(() => {
     const s = new Set(allCreators.map((c) => c.service));
@@ -120,7 +100,7 @@ function SearchPageContent() {
 
   /* Client-side filtering */
   const displayed = useMemo(() => {
-    let list = allCreators;
+    let list = [...allCreators];
 
     // Text filter
     if (qParam.trim()) {
@@ -181,7 +161,7 @@ function SearchPageContent() {
             <Input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher un créateur…"
+              placeholder="Rechercher un crÃ©ateurâ€¦"
               className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9 text-sm h-9"
             />
           </div>
@@ -197,7 +177,7 @@ function SearchPageContent() {
                   : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
               }`}
             >
-              Popularité
+              PopularitÃ©
             </Button>
             <Button
               size="sm"
@@ -240,7 +220,7 @@ function SearchPageContent() {
                   : "bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
               }`}
             >
-              {f === "liked" ? "❤ Likés" : f.charAt(0).toUpperCase() + f.slice(1)}
+              {f === "liked" ? "â¤ LikÃ©s" : f.charAt(0).toUpperCase() + f.slice(1)}
             </Button>
           ))}
         </div>
@@ -278,7 +258,7 @@ function SearchPageContent() {
       ) : displayed.length === 0 ? (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
           <SearchIcon className="h-12 w-12 text-[#6b7280] mx-auto mb-4" />
-          <p className="text-[#6b7280] text-lg">Aucun résultat</p>
+          <p className="text-[#6b7280] text-lg">Aucun rÃ©sultat</p>
           {(filter !== "tous" || query !== "" || serviceFilter !== "Tous") && (
             <p className="text-[#6b7280] text-sm mt-1">
               Modifiez vos filtres ou votre recherche.
@@ -290,10 +270,10 @@ function SearchPageContent() {
           {/* Counter + top pagination */}
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm text-[#6b7280]">
-              {displayed.length} résultat{displayed.length > 1 ? "s" : ""}
+              {displayed.length} rÃ©sultat{displayed.length > 1 ? "s" : ""}
               {totalPages > 1 && (
                 <span className="ml-2 text-[#4b5563]">
-                  — page {currentPage}/{totalPages}
+                  â€” page {currentPage}/{totalPages}
                 </span>
               )}
             </p>
@@ -343,3 +323,4 @@ export default function SearchPage() {
     </Suspense>
   )
 }
+

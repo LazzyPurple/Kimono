@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
-import { prisma } from "@/lib/prisma";
+import { execute } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,10 @@ export async function POST(request: NextRequest) {
       { error: "Paramètres manquants" },
       { status: 400 }
     );
+  }
+
+  if (site !== "kemono" && site !== "coomer") {
+    return NextResponse.json({ error: "Site invalide" }, { status: 400 });
   }
 
   const baseUrl =
@@ -37,12 +41,8 @@ export async function POST(request: NextRequest) {
       }
     );
 
-    console.log("[LOGIN] status:", res.status);
-    console.log("[LOGIN] set-cookie:", res.headers["set-cookie"]);
-
     // Vérifier explicitement le status avant de chercher les cookies
     if (res.status !== 200) {
-      console.log("[LOGIN] Non-200 response:", res.status, "body:", JSON.stringify(res.data));
       return NextResponse.json(
         { error: res.data?.error || `Connexion échouée (${res.status})` },
         { status: 401 }
@@ -51,7 +51,6 @@ export async function POST(request: NextRequest) {
 
     const rawCookies = res.headers["set-cookie"];
     if (!rawCookies || rawCookies.length === 0) {
-      console.log("[LOGIN] No cookies received - response body:", JSON.stringify(res.data));
       return NextResponse.json(
         { error: "Identifiants incorrects" },
         { status: 401 }
@@ -64,13 +63,9 @@ export async function POST(request: NextRequest) {
       ? sessionMatch.split(";")[0]
       : rawCookies.map((c) => c.split(";")[0].trim()).join("; ");
 
-    console.log("[LOGIN] Cookie extracted:", cookie);
-
     // Supprimer l'ancienne session et créer la nouvelle
-    await prisma.kimonoSession.deleteMany({ where: { site } });
-    await prisma.kimonoSession.create({
-      data: { site, cookie, username },
-    });
+    await execute("DELETE FROM KimonoSession WHERE site = ?", [site]);
+    await execute("INSERT INTO KimonoSession (id, site, cookie, username) VALUES (?, ?, ?, ?)", [crypto.randomUUID(), site, cookie, username]);
 
     return NextResponse.json({ success: true });
   } catch (err) {

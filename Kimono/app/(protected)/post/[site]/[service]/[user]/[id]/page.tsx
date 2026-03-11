@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import type { UnifiedPost, Site } from "@/lib/api/helpers";
 import type { Creator } from "@/lib/api/kemono";
-import { proxyCdnUrl, getVideoThumbnailUrl } from "@/lib/api/helpers";
+import { proxyCdnUrl, resolvePostMedia } from "@/lib/api/helpers";
 import VideoPlayer from "@/components/VideoPlayer";
 import Lightbox from "@/components/Lightbox";
 import { useLikes } from "@/contexts/LikesContext";
@@ -118,7 +118,7 @@ export default function PostPage() {
   if (!isValid) {
     return (
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center space-y-2">
-        <p className="text-red-400 text-lg font-medium">Paramètres invalides</p>
+        <p className="text-red-400 text-lg font-medium">ParamÃ¨tres invalides</p>
       </div>
     );
   }
@@ -151,6 +151,7 @@ export default function PostPage() {
   }
 
   const liked = isPostLiked(site, service, id);
+  const postMedia = post ? resolvePostMedia(post) : null;
 
   /* Build media list */
   const allMedia = [
@@ -213,7 +214,7 @@ export default function PostPage() {
     );
   }
 
-  const displayName = creatorProfile?.name ?? `Créateur`;
+  const displayName = creatorProfile?.name ?? `CrÃ©ateur`;
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
@@ -227,7 +228,7 @@ export default function PostPage() {
         Retour
       </Button>
 
-      {/* ── 1. Header ──────────────────────────────────────── */}
+      {/* â”€â”€ 1. Header â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-6 space-y-4">
         {/* Creator info line */}
         <div className="flex items-center gap-3">
@@ -304,20 +305,20 @@ export default function PostPage() {
               }`}
             />
             <span className={liked ? "text-red-500" : "text-[#6b7280]"}>
-              {liked ? "Liké" : "Liker"}
+              {liked ? "LikÃ©" : "Liker"}
             </span>
           </button>
         </div>
       </div>
 
-      {/* ── 2. Videos ──────────────────────────────────────── */}
+      {/* â”€â”€ 2. Videos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {videos.length > 0 && (
         <div className="flex flex-col gap-4">
           {videos.map((item, index) => (
             <VideoPlayer
               key={`vid-${index}`}
               src={makeUrl(item.path)}
-              poster={getVideoThumbnailUrl(site, item.path) || undefined}
+              poster={postMedia?.previewImageUrl}
               filename={item.name || item.path}
               className="w-full"
             />
@@ -325,14 +326,14 @@ export default function PostPage() {
         </div>
       )}
 
-      {/* ── 3. Description ─────────────────────────────────── */}
+      {/* â”€â”€ 3. Description â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {post.content && (
         <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-6">
           {renderDescription(post.content)}
         </div>
       )}
 
-      {/* ── 4. Photo gallery ───────────────────────────────── */}
+      {/* â”€â”€ 4. Photo gallery â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {images.length > 0 && (
         <div className="max-w-4xl mx-auto">
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
@@ -364,7 +365,7 @@ export default function PostPage() {
         />
       )}
 
-      {/* ── 5. Download links ──────────────────────────────── */}
+      {/* â”€â”€ 5. Download links â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       {others.length > 0 && (
         <div className="flex flex-col gap-3">
           {others.map((item, index) => (
@@ -384,7 +385,7 @@ export default function PostPage() {
         </div>
       )}
 
-      {/* ── 6. Footer ──────────────────────────────────────── */}
+      {/* â”€â”€ 6. Footer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-4 flex items-center justify-between">
         <a
           href={`${baseUrl}/${service}/user/${user}/post/${id}`}

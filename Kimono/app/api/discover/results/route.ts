@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { query } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const cache = await prisma.discoveryCache.findUnique({
-      where: { id: "global" },
-    });
+    const caches = await query<any>("SELECT * FROM DiscoveryCache WHERE id = 'global'");
+    const cache = caches[0];
 
     if (!cache) {
       return NextResponse.json({ creators: [], updatedAt: null, total: 0 });
@@ -16,7 +15,7 @@ export async function GET() {
     const allRecommendations = JSON.parse(cache.data);
 
     // Filter dynamically in case blocks were added since the last compute
-    const blocks = await prisma.discoveryBlock.findMany();
+    const blocks = await query<any>("SELECT * FROM DiscoveryBlock");
     const blockedKeys = new Set(blocks.map((b: any) => `${b.site}-${b.service}-${b.creatorId}`));
 
     const filtered = allRecommendations.filter((rec: any) => {
@@ -26,7 +25,7 @@ export async function GET() {
 
     return NextResponse.json({
       creators: filtered,
-      updatedAt: cache.updatedAt.toISOString(),
+      updatedAt: typeof cache.updatedAt === "string" ? new Date(cache.updatedAt).toISOString() : cache.updatedAt.toISOString(),
       total: filtered.length,
     });
   } catch (error) {

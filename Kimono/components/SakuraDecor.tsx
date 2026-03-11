@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Image from "next/image";
 
 const SAKURA_ASSETS = [
@@ -9,37 +9,46 @@ const SAKURA_ASSETS = [
   "/assets/3month_36px.svg",
   "/assets/6month_36px.svg",
   "/assets/9month_36px.svg",
-  "/assets/12month_36px.svg"
+  "/assets/12month_36px.svg",
 ];
 
-export default function SakuraDecor() {
-  const [petals, setPetals] = useState<any[]>([]);
-  const [mounted, setMounted] = useState(false);
+interface Petal {
+  id: number;
+  asset: string;
+  left: string;
+  animationDuration: string;
+  animationDelay: string;
+  animationName: "float-petal" | "float-petal-reverse";
+  transform: string;
+}
 
-  useEffect(() => {
-    setMounted(true);
-    // Generate some random petals using the custom SVGs for the whole page
-    const newPetals = Array.from({ length: 45 }).map((_, i) => {
-      const randomAsset = SAKURA_ASSETS[Math.floor(Math.random() * SAKURA_ASSETS.length)];
+export default function SakuraDecor() {
+  const [petals] = useState<Petal[]>(() =>
+    Array.from({ length: 24 }, (_, i) => {
+      const randomAsset =
+        SAKURA_ASSETS[Math.floor(Math.random() * SAKURA_ASSETS.length)];
+
       return {
         id: i,
         asset: randomAsset,
-        left: `${-5 + Math.random() * 110}%`, // Spread across the width, allowing starting slightly off-screen
-        animationDuration: `${12 + Math.random() * 18}s`, // Slower fall (12-30s) for background ambient effect
+        left: `${-5 + Math.random() * 110}%`,
+        animationDuration: `${16 + Math.random() * 20}s`,
         animationDelay: `-${Math.random() * 30}s`,
-        animationName: Math.random() > 0.5 ? 'float-petal' : 'float-petal-reverse',
-        transform: `scale(${0.25 + Math.random() * 0.4})`, // Noticeably smaller petals for rain effect
+        animationName:
+          Math.random() > 0.5 ? "float-petal" : "float-petal-reverse",
+        transform: `scale(${0.2 + Math.random() * 0.35})`,
       };
-    });
-    setPetals(newPetals);
-  }, []);
-
-  if (!mounted) return null;
+    })
+  );
 
   return (
-    <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
-      
-      <style dangerouslySetInnerHTML={{__html: `
+    <div
+      className="fixed inset-0 overflow-hidden pointer-events-none z-0 motion-reduce:hidden"
+      aria-hidden="true"
+    >
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
         @keyframes float-petal {
           0% { transform: translateY(-10vh) translateX(0px) rotate(0deg); opacity: 0; }
           10% { opacity: 0.8; }
@@ -52,12 +61,14 @@ export default function SakuraDecor() {
           90% { opacity: 0.8; }
           100% { transform: translateY(110vh) translateX(-120px) rotate(-720deg); opacity: 0; }
         }
-      `}} />
-      
+      `,
+        }}
+      />
+
       {petals.map((petal) => (
         <div
           key={petal.id}
-          className="absolute drop-shadow-[0_0_8px_rgba(255,183,197,0.4)]"
+          className="absolute drop-shadow-[0_0_8px_rgba(255,183,197,0.4)] will-change-transform"
           style={{
             left: petal.left,
             animation: `${petal.animationName} ${petal.animationDuration} linear infinite`,
