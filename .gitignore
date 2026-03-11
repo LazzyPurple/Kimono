@@ -10,7 +10,7 @@ debug.log
 next_error.log
 ts_errors.txt
 
-# Base de données locale
+# Base de donnees locale
 *.db
 prisma/*.db
 prisma/*.db-shm
@@ -18,3 +18,8 @@ prisma/*.db-wal
 
 # Prisma debug
 prisma_debug.txt
+
+# Deployment artifacts
+Kimono/deploy-package/
+Kimono/*.zip
+Kimono/deploy/*.zip
