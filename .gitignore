@@ -10,7 +10,7 @@ debug.log
 next_error.log
 ts_errors.txt
 
-# Base de données locale
+# Base de donnees locale
 *.db
 prisma/*.db
 prisma/*.db-shm
@@ -18,3 +18,14 @@ prisma/*.db-wal
 
 # Prisma debug
 prisma_debug.txt
+
+# Build and packaging artifacts
+Kimono/.npm-cache/
+Kimono/deploy/*.zip
+Kimono/deploy/.o2switch-runtime-stage/
+# Derived deployment package
+Kimono/deploy-package/
+
+# Local test suite kept out of GitHub for now
+Kimono/tests/
+

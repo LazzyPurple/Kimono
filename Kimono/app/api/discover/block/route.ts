@@ -1,22 +1,22 @@
 import { NextResponse, NextRequest } from "next/server";
-import { execute } from "@/lib/db";
+import { getDataStore, type SupportedSite } from "@/lib/data-store";
 
 export const dynamic = "force-dynamic";
+
+function isSupportedSite(site: string): site is SupportedSite {
+  return site === "kemono" || site === "coomer";
+}
 
 export async function POST(request: NextRequest) {
   try {
     const { site, service, creatorId } = await request.json();
 
-    if (!site || !service || !creatorId) {
-      return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
+    if (!site || !service || !creatorId || !isSupportedSite(site)) {
+      return NextResponse.json({ error: "Parametres manquants" }, { status: 400 });
     }
 
-    const now = new Date();
-    await execute(
-      "INSERT INTO DiscoveryBlock (id, site, service, creatorId, blockedAt) VALUES (?, ?, ?, ?, ?) " +
-      "ON DUPLICATE KEY UPDATE blockedAt = ?",
-      [crypto.randomUUID(), site, service, creatorId, now, now]
-    );
+    const store = await getDataStore();
+    await store.blockDiscoveryCreator({ site, service, creatorId });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -29,14 +29,12 @@ export async function DELETE(request: NextRequest) {
   try {
     const { site, service, creatorId } = await request.json();
 
-    if (!site || !service || !creatorId) {
-      return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
+    if (!site || !service || !creatorId || !isSupportedSite(site)) {
+      return NextResponse.json({ error: "Parametres manquants" }, { status: 400 });
     }
 
-    await execute(
-      "DELETE FROM DiscoveryBlock WHERE site = ? AND service = ? AND creatorId = ?",
-      [site, service, creatorId]
-    );
+    const store = await getDataStore();
+    await store.unblockDiscoveryCreator({ site, service, creatorId });
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -1,8 +1,6 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   serverExternalPackages: ["otplib", "qrcode", "@simplewebauthn/server"],
-  output: "standalone",
 };
 
 export default nextConfig;

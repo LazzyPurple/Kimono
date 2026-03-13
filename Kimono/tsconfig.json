@@ -3,6 +3,7 @@
     "target": "ES2017",
     "lib": ["dom", "dom.iterable", "esnext"],
     "allowJs": true,
+    "allowImportingTsExtensions": true,
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
@@ -32,3 +33,4 @@
   ],
   "exclude": ["node_modules", "test_*.ts", "test_*.js"]
 }
+
