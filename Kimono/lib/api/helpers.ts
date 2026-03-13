@@ -6,8 +6,10 @@ export interface UnifiedPost extends Post {
   site: Site;
 }
 
-export interface UnifiedCreator extends Creator {
+export interface UnifiedCreator extends Omit<Creator, "indexed" | "updated"> {
   site: Site;
+  indexed?: string;
+  updated?: string;
 }
 
 const SITE_BASE_URLS = {

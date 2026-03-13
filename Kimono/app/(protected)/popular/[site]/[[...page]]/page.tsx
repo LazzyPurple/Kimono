@@ -8,6 +8,8 @@ import MediaCard from "@/components/MediaCard";
 import Pagination from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
+import { buildPopularCacheKey, type PopularPeriod } from "@/lib/perf-cache";
 import type { UnifiedPost } from "@/lib/api/helpers";
 import { resolvePostMedia } from "@/lib/api/helpers";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
@@ -35,10 +37,12 @@ interface PopularResponse {
   info: PopularInfo | null;
   props: PopularProps | null;
   posts: UnifiedPost[];
+  source?: string;
 }
 
 type SiteType = "kemono" | "coomer";
-type PeriodType = "recent" | "day" | "week" | "month";
+
+const POPULAR_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 
 function SkeletonGrid() {
   return (
@@ -67,7 +71,7 @@ function PopularPageContent() {
   const pageNumber = pageParam && pageParam.length > 0 ? parseInt(pageParam[0], 10) : 1;
   const offset = (pageNumber - 1) * 50;
 
-  const urlPeriod = searchParams.get("period") as PeriodType | null;
+  const urlPeriod = searchParams.get("period") as PopularPeriod | null;
   const period = urlPeriod || "recent";
   const date = searchParams.get("date");
 
@@ -81,28 +85,32 @@ function PopularPageContent() {
       setLoading(true);
 
       try {
-        let url = `/api/popular-posts?site=${site}&period=${period}`;
-        if (date) {
-          url += `&date=${date}`;
-        }
-        if (offset > 0) {
-          url += `&offset=${offset}`;
-        }
+        const data = await fetchJsonWithBrowserCache<PopularResponse>({
+          key: buildPopularCacheKey({ site, period, date, offset }),
+          ttlMs: POPULAR_BROWSER_CACHE_TTL_MS,
+          loader: async () => {
+            const params = new URLSearchParams({
+              site,
+              period,
+            });
+            if (date) {
+              params.set("date", date);
+            }
+            if (offset > 0) {
+              params.set("offset", String(offset));
+            }
 
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error("API responded with an error");
-        }
+            const response = await fetch(`/api/popular-posts?${params.toString()}`);
+            if (!response.ok) {
+              throw new Error("API responded with an error");
+            }
 
-        const json: PopularResponse = await response.json();
+            return response.json();
+          },
+        });
 
         if (active) {
-          setData({
-            ...json,
-            posts: Array.isArray(json.posts)
-              ? json.posts.map((post) => ({ ...post, site }))
-              : [],
-          });
+          setData(data);
         }
       } catch (error) {
         console.error("Failed to fetch popular posts:", error);
@@ -116,14 +124,14 @@ function PopularPageContent() {
       }
     };
 
-    fetchData();
+    void fetchData();
 
     return () => {
       active = false;
     };
   }, [site, period, date, offset]);
 
-  useScrollRestoration(`popular-${site}-${pageNumber}-${period}`, !loading);
+  useScrollRestoration(`popular-${site}-${pageNumber}-${period}-${date ?? "recent"}`, !loading);
 
   const handlePageChange = (newPage: number) => {
     let url = `/popular/${site}/${newPage}`;
@@ -144,7 +152,7 @@ function PopularPageContent() {
     router.push(url);
   };
 
-  const handlePeriodChange = (nextPeriod: PeriodType) => {
+  const handlePeriodChange = (nextPeriod: PopularPeriod) => {
     let url = `/popular/${site}/1`;
     if (nextPeriod !== "recent") {
       url += `?period=${nextPeriod}`;
@@ -205,8 +213,8 @@ function PopularPageContent() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {(["recent", "day", "week", "month"] as PeriodType[]).map((currentPeriod) => {
-            const labels: Record<PeriodType, string> = {
+          {(["recent", "day", "week", "month"] as PopularPeriod[]).map((currentPeriod) => {
+            const labels: Record<PopularPeriod, string> = {
               recent: "Recents",
               day: "Jour",
               week: "Semaine",

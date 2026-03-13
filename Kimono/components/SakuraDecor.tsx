@@ -1,46 +1,11 @@
 ﻿"use client";
 
-import { useState } from "react";
 import Image from "next/image";
+import { createSakuraPetals } from "@/lib/sakura-petals";
 
-const SAKURA_ASSETS = [
-  "/assets/1month_36px.svg",
-  "/assets/2month_36px.svg",
-  "/assets/3month_36px.svg",
-  "/assets/6month_36px.svg",
-  "/assets/9month_36px.svg",
-  "/assets/12month_36px.svg",
-];
-
-interface Petal {
-  id: number;
-  asset: string;
-  left: string;
-  animationDuration: string;
-  animationDelay: string;
-  animationName: "float-petal" | "float-petal-reverse";
-  transform: string;
-}
+const petals = createSakuraPetals();
 
 export default function SakuraDecor() {
-  const [petals] = useState<Petal[]>(() =>
-    Array.from({ length: 24 }, (_, i) => {
-      const randomAsset =
-        SAKURA_ASSETS[Math.floor(Math.random() * SAKURA_ASSETS.length)];
-
-      return {
-        id: i,
-        asset: randomAsset,
-        left: `${-5 + Math.random() * 110}%`,
-        animationDuration: `${16 + Math.random() * 20}s`,
-        animationDelay: `-${Math.random() * 30}s`,
-        animationName:
-          Math.random() > 0.5 ? "float-petal" : "float-petal-reverse",
-        transform: `scale(${0.2 + Math.random() * 0.35})`,
-      };
-    })
-  );
-
   return (
     <div
       className="fixed inset-0 overflow-hidden pointer-events-none z-0 motion-reduce:hidden"
@@ -82,7 +47,7 @@ export default function SakuraDecor() {
             alt="Sakura"
             width={16}
             height={16}
-            className="w-full h-full opacity-60"
+            className="h-full w-full opacity-60"
           />
         </div>
       ))}

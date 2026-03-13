@@ -1,30 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
-import { query } from "@/lib/db";
+﻿import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
+import { logAppError } from "@/lib/app-logger";
+import { loadStoredKimonoSessionCookie } from "@/lib/remote-session";
+import type { SupportedSite } from "@/lib/data-store";
 
 export const dynamic = "force-dynamic";
 
-function getBaseUrl(site: string) {
+function getBaseUrl(site: SupportedSite) {
   return site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
-}
-
-async function getSessionCookie(site: string): Promise<string | null> {
-  const sessions = await query<any>(
-    "SELECT * FROM KimonoSession WHERE site = ? ORDER BY savedAt DESC LIMIT 1",
-    [site]
-  );
-  const session = sessions[0];
-  return session?.cookie ?? null;
 }
 
 export async function GET(request: NextRequest) {
   const site = request.nextUrl.searchParams.get("site");
-  if (!site || (site !== "kemono" && site !== "coomer")) {
+  if (site !== "kemono" && site !== "coomer") {
     return NextResponse.json([]);
   }
 
-  const cookie = await getSessionCookie(site);
-  if (!cookie) return NextResponse.json([]);
+  const cookie = await loadStoredKimonoSessionCookie(site);
+  if (!cookie) {
+    return NextResponse.json([]);
+  }
 
   try {
     const { data } = await axios.get(
@@ -38,8 +33,14 @@ export async function GET(request: NextRequest) {
       }
     );
     return NextResponse.json(Array.isArray(data) ? data : []);
-  } catch (err) {
-    console.error("likes/posts GET error:", err);
+  } catch (error) {
+    await logAppError("api", "likes/posts GET error", error, {
+      details: {
+        route: "/api/likes/posts",
+        method: "GET",
+        site,
+      },
+    });
     return NextResponse.json([]);
   }
 }
@@ -48,11 +49,11 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const { site, service, creatorId, postId } = body;
-    if (!site || !service || !creatorId || !postId) {
+    if (!service || !creatorId || !postId || (site !== "kemono" && site !== "coomer")) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
     }
 
-    const cookie = await getSessionCookie(site);
+    const cookie = await loadStoredKimonoSessionCookie(site);
     if (!cookie) {
       return NextResponse.json({ error: "No session" }, { status: 401 });
     }
@@ -69,8 +70,13 @@ export async function POST(request: NextRequest) {
       }
     );
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("likes/posts POST error:", err);
+  } catch (error) {
+    await logAppError("api", "likes/posts POST error", error, {
+      details: {
+        route: "/api/likes/posts",
+        method: "POST",
+      },
+    });
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }
@@ -79,11 +85,11 @@ export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
     const { site, service, creatorId, postId } = body;
-    if (!site || !service || !creatorId || !postId) {
+    if (!service || !creatorId || !postId || (site !== "kemono" && site !== "coomer")) {
       return NextResponse.json({ error: "Missing params" }, { status: 400 });
     }
 
-    const cookie = await getSessionCookie(site);
+    const cookie = await loadStoredKimonoSessionCookie(site);
     if (!cookie) {
       return NextResponse.json({ error: "No session" }, { status: 401 });
     }
@@ -99,8 +105,13 @@ export async function DELETE(request: NextRequest) {
       }
     );
     return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("likes/posts DELETE error:", err);
+  } catch (error) {
+    await logAppError("api", "likes/posts DELETE error", error, {
+      details: {
+        route: "/api/likes/posts",
+        method: "DELETE",
+      },
+    });
     return NextResponse.json({ error: "Failed" }, { status: 500 });
   }
 }

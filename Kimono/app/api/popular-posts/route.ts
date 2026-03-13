@@ -1,60 +1,52 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
+
+import { createHybridContentService } from "@/lib/hybrid-content";
+import { logAppError } from "@/lib/app-logger";
+import type { PopularPeriod } from "@/lib/perf-cache";
 
 export const dynamic = "force-dynamic";
+
+const hybridContent = createHybridContentService();
+
+function parsePeriod(value: string | null): PopularPeriod {
+  return value === "day" || value === "week" || value === "month" ? value : "recent";
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const site = searchParams.get("site");
-  const period = searchParams.get("period");
+  const period = parsePeriod(searchParams.get("period"));
   const date = searchParams.get("date");
-  const offset = searchParams.get("offset");
+  const offset = Number(searchParams.get("offset") ?? 0) || 0;
 
   if (site !== "kemono" && site !== "coomer") {
-    return NextResponse.json(
-      { error: "Invalid site" },
-      { status: 400 }
-    );
-  }
-
-  const baseUrl = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
-  const targetUrl = new URL(`${baseUrl}/api/v1/posts/popular`);
-
-  // period is always sent
-  if (period) {
-    targetUrl.searchParams.set("period", period);
-  } else {
-    targetUrl.searchParams.set("period", "recent");
-  }
-
-  if (date && period !== "recent") {
-    targetUrl.searchParams.set("date", date);
-  }
-
-  if (offset && Number(offset) > 0) {
-    targetUrl.searchParams.set("o", offset);
+    return NextResponse.json({ error: "Invalid site" }, { status: 400 });
   }
 
   try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const response = await fetch(targetUrl.toString(), {
-      headers: {
-        Accept: "text/css",
-      },
-      signal: controller.signal,
+    const result = await hybridContent.getPopularPosts({
+      site,
+      period,
+      date,
+      offset,
     });
 
-    clearTimeout(timeoutId);
-
-    if (!response.ok) {
-      throw new Error(`API responded with status ${response.status}`);
-    }
-
-    const data = await response.json();
-    return NextResponse.json(data);
+    return NextResponse.json(result, {
+      headers: {
+        "x-kimono-source": result.source,
+      },
+    });
   } catch (error) {
-    console.error("Error fetching popular posts:", error);
-    return NextResponse.json({ posts: [], info: null, props: null });
+    await logAppError("api", "popular-posts error", error, {
+      details: {
+        route: "/api/popular-posts",
+        site,
+        period,
+        date: date ?? null,
+        offset,
+      },
+    });
+
+    return NextResponse.json({ posts: [], info: null, props: null, source: "empty" });
   }
 }

@@ -1,77 +1,172 @@
-# Kimono 👘
+# Kimono
 
-Kimono est un frontend personnel unifié (Dashboard) permettant de consulter et gérer le contenu en provenance de Kemono.cr et Coomer.st au sein d'une même interface élégante et sécurisée.
+Kimono est un frontend personnel unifie pour consulter du contenu provenant de `Kemono` et `Coomer` dans une seule interface Next.js.
 
-## 🚀 Fonctionnalités Principales
+Le projet supporte maintenant deux modes distincts :
 
-- **Authentification Single-User :** Sécurisation forte via un mot de passe maître défini au niveau du serveur. Aucune inscription publique possible.
-- **Double Facteur & Passkeys :** Support TOTP (Google Authenticator) via un profil admin robuste.
-- **Interface Unifiée :** Recherche croisée entre Kemono et Coomer. Gestionnaire intelligent de requêtes asynchrones en arrière-plan.
-- **Téléchargements Intégrés :** Système asynchrone côté serveur pour enchaîner vos téléchargements.
-- **Pagination et Navigation :** L'intégralité du site utilise du state URL-based pour une parfaite conservation de l'historique et des partages d'adresse.
-- **Design Moderne :** Thème sombre en mode "glassmorphism", conçu avec Tailwind CSS v4 et shadcn/ui.
+- `LOCAL_DEV_MODE=true` : mode local de developpement avec Prisma + SQLite
+- production : mode MySQL + SQL brut pour o2switch / cPanel
 
-## 🛠️ Stack Technique
+Les routes applicatives restent identiques entre les deux modes. Seules la couche d'acces aux donnees et la logique d'entree changent.
 
-- **Framework :** [Next.js 16](https://nextjs.org/) (App Router, mode Standalone pour déploiement cPanel / o2switch)
-- **Langage :** TypeScript
-- **Style :** Tailwind CSS v4, [shadcn/ui](https://ui.shadcn.com/)
-- **Base de données :** MySQL
-- **ORM :** [Prisma v7](https://www.prisma.io/)
-- **Authentification :** NextAuth.js v5 (Provider Custom Credentials), `otplib` pour le TOTP
+## Etat actuel
 
-## 💻 Installation en local
+### Authentification
 
-### Prérequis
+- auth single-user via `ADMIN_PASSWORD`
+- support TOTP / 2FA en production
+- bypass total de l'auth en mode local avec `LOCAL_DEV_MODE=true`
+- routes et layouts adaptes pour ne pas emuler de session NextAuth en local
+- route de debug auth temporaire pour diagnostic serveur
 
-- Node.js (v20+)
-- Serveur MySQL actif
+### Donnees et cache
+
+- couche partagee `data-store` pour eviter que les routes parlent directement a MySQL
+- backend local Prisma / SQLite sur `Kimono/prisma/dev.db`
+- backend production MySQL via SQL brut
+- cache hybride serveur + navigateur pour accelerer la recherche, les pages createur, les pages post et les previews
+- stockage indexe des createurs
+- cache canonique des posts
+- snapshots des posts populaires
+- jobs de prechauffage prevus pour cron cPanel
+
+### UI / experience
+
+- lecteur video avec icones Lucide
+- correction du decor Sakura pour supprimer les mismatches d'hydratation
+- correction de plusieurs textes moji-bakes
+- page `/logs` pour centraliser le debug runtime, auth, DB, API et client
+
+### Deploiement
+
+- build de production force en Webpack
+- packaging Linux prebuild via WSL pour o2switch
+- artefact genere dans `Kimono/deploy/`
+- bootstrap Node.js via `Kimono/server.js`
+
+## Structure du repo
+
+- `Kimono/` : application principale Next.js
+- `Kimono/prisma/` : schema Prisma local SQLite
+- `Kimono/deploy/` : SQL et artefacts de deploiement
+- `Kimono/scripts/` : packaging o2switch, generation runtime package, utilitaires
+- `Kimono/tests/` : tests unitaires et integration legere
+
+## Lancement en local
+
+### Prerequis
+
+- Node.js 22 recommande
 - npm
 
-### Étapes
+### Installation
 
-1. **Cloner le projet**
+```bash
+git clone <votre-url>
+cd Kimono/Kimono
+npm install
+```
 
-   ```bash
-   git clone <votre-url-github>
-   cd Kimono/Kimono
-   ```
+### Variables d'environnement locales
 
-2. **Installer les dépendances**
+Le mode local ne s'active jamais automatiquement. Il faut un flag explicite.
 
-   ```bash
-   npm install
-   ```
+Exemple de `.env.local` :
 
-3. **Configurer les variables d'environnement**
-   Copiez `.env.example` vers `.env` (`cp ../.env.example .env`) et remplissez les informations :
+```env
+LOCAL_DEV_MODE=true
+DATABASE_URL="file:./prisma/dev.db"
+AUTH_SECRET="dev-secret"
+AUTH_URL="http://localhost:3000"
+ADMIN_PASSWORD="dev-password"
+WEBAUTHN_ORIGIN="http://localhost:3000"
+WEBAUTHN_RP_ID="localhost"
+WEBAUTHN_RP_NAME="Kimono"
+```
 
-   ```env
-   DATABASE_URL="mysql://user:password@localhost:3306/kimono"
-   AUTH_SECRET="votre-secret-complexe-ici"
-   NEXTAUTH_URL="http://localhost:3000"
-   ADMIN_PASSWORD="votre-mot-de-passe-maitre"
-   WEBAUTHN_ORIGIN="http://localhost:3000"
-   ```
+### Commandes utiles
 
-4. **Initialiser la base de données (MySQL)**
+```bash
+npm run dev
+npm test
+npm run build
+npm run prisma:generate
+npm run prisma:push
+```
 
-   ```bash
-   npx prisma db push
-   npx prisma generate
-   ```
+En mode local :
 
-5. **Lancer le serveur de développement**
-   ```bash
-   npm run dev
-   ```
+- l'entree est bypass
+- `/login` redirige vers `/search`
+- l'app utilise SQLite via Prisma
 
-Le projet sera accessible sur `http://localhost:3000`.
+## Production o2switch
 
-## 📦 Déploiement
+La production continue de fonctionner en MySQL avec la couche SQL brute.
 
-Kimono est configuré en mode `standalone` pour un déploiement optimal sur un hébergeur mutualisé (comme o2switch). Vous pouvez consulter le fichier `Kimono/DEPLOY.md` pour un guide technique complet sur ce sujet.
+Variables principales cote serveur :
 
----
+```env
+NODE_ENV=production
+DATABASE_URL=mysql://user:password@localhost:3306/database
+AUTH_SECRET=...
+AUTH_URL=https://kimono.paracosm.fr
+ADMIN_PASSWORD=...
+WEBAUTHN_ORIGIN=https://kimono.paracosm.fr
+WEBAUTHN_RP_ID=kimono.paracosm.fr
+WEBAUTHN_RP_NAME=Kimono
+```
 
-_Projet personnel - Non affilié à Kemono.cr ou Coomer.st_
+Important :
+
+- ne pas activer `LOCAL_DEV_MODE` en production
+- si le mot de passe MySQL contient des caracteres speciaux, preferer un mot de passe URL-safe pour `DATABASE_URL`
+
+## Packaging o2switch
+
+Le build de deploiement se fait localement en Linux via WSL, puis l'artefact est uploade sur le serveur.
+
+Commande :
+
+```powershell
+cd C:\Users\lilsm\Workspace\Kimono\Kimono
+npm run build:o2switch-package
+```
+
+Le zip final attendu est :
+
+- `C:\Users\lilsm\Workspace\Kimono\Kimono\deploy\kimono-o2switch-linux-prebuilt.zip`
+
+Ensuite sur o2switch :
+
+1. uploader le zip dans le dossier applicatif
+2. extraire
+3. lancer `Run NPM Install`
+4. redemarrer l'application Node.js
+
+## Debug temporaire
+
+Des surfaces de debug temporaires existent pendant la phase de stabilisation :
+
+- `/logs`
+- `/api/logs`
+- `/api/debug/auth-check`
+
+Ces routes doivent etre re-securisees ou supprimees une fois le debug termine.
+
+## Documentation complementaire
+
+- guide de deploiement : `Kimono/DEPLOY.md`
+- resume de progression : `Checkpoint.md`
+
+## Statut
+
+Le projet a ete fortement refactorise ces dernieres sessions :
+
+- split local / prod
+- perf hybride
+- packaging o2switch
+- logging central
+- correction de plusieurs regressions auth / DB / hydration
+
+Il reste encore des correctifs de stabilisation et de finition UI a faire, documentes dans `Checkpoint.md`.

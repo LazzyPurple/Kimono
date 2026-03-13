@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   useCallback,
@@ -10,14 +10,13 @@ import {
 } from "react";
 import {
   Download,
-  Expand,
   Loader2,
+  Maximize,
   Maximize2,
   Minimize2,
   Pause,
   Play,
-  RotateCw,
-  Shrink,
+  RotateCwSquare,
   Volume1,
   Volume2,
   VolumeX,
@@ -363,6 +362,11 @@ export default function VideoPlayer({
   const VolumeIcon =
     effectiveVolume === 0 ? VolumeX : effectiveVolume < 0.5 ? Volume1 : Volume2;
 
+  const fitLabel =
+    fit === "contain" ? "Zoom pour remplir" : "Adapter \u00e0 l'\u00e9cran";
+  const fullscreenLabel =
+    vpFullscreen ? "Quitter le plein \u00e9cran" : "Plein \u00e9cran";
+
   return (
     <>
       {vpFullscreen && (
@@ -376,7 +380,7 @@ export default function VideoPlayer({
           }}
         >
           <span className="select-none text-sm text-[#6b7280]">
-            Lecture en plein ecran viewport...
+            {"Lecture en plein \u00e9cran..."}
           </span>
         </div>
       )}
@@ -451,7 +455,7 @@ export default function VideoPlayer({
             <div className="relative space-y-2 px-4 pb-4 pt-8">
               <div
                 ref={barRef}
-                className="relative h-1.5 cursor-pointer rounded-full group/bar"
+                className="group/bar relative h-1.5 cursor-pointer rounded-full"
                 style={{ backgroundColor: "rgba(255,255,255,0.25)" }}
                 onClick={(event) => seekToPointer(event.clientX)}
                 onMouseDown={(event) => {
@@ -495,11 +499,13 @@ export default function VideoPlayer({
 
               <div className="flex items-center gap-1">
                 <button
+                  aria-label={playing ? "Pause" : "Lecture"}
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
                   onClick={(event) => {
                     event.stopPropagation();
                     togglePlay();
                   }}
+                  title={playing ? "Pause" : "Lecture"}
                 >
                   {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                 </button>
@@ -512,6 +518,7 @@ export default function VideoPlayer({
 
                 <div className="group/vol flex items-center gap-1">
                   <button
+                    aria-label={effectiveVolume === 0 ? "Activer le son" : "Couper le son"}
                     className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -522,6 +529,7 @@ export default function VideoPlayer({
                       videoElement.muted = !videoElement.muted;
                       setMuted(videoElement.muted);
                     }}
+                    title={effectiveVolume === 0 ? "Activer le son" : "Couper le son"}
                   >
                     <VolumeIcon className="h-4 w-4" />
                   </button>
@@ -548,8 +556,9 @@ export default function VideoPlayer({
                 </div>
 
                 <button
+                  aria-label="T\u00e9l\u00e9charger"
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
-                  title="Telecharger"
+                  title="T\u00e9l\u00e9charger"
                   onClick={(event) => {
                     event.stopPropagation();
                     handleDownload();
@@ -559,17 +568,23 @@ export default function VideoPlayer({
                 </button>
 
                 <button
+                  aria-label={fitLabel}
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
-                  title={fit === "contain" ? "Remplir" : "Contenir"}
+                  title={fitLabel}
                   onClick={(event) => {
                     event.stopPropagation();
                     setFit((currentFit) => (currentFit === "contain" ? "cover" : "contain"));
                   }}
                 >
-                  {fit === "contain" ? <Expand className="h-4 w-4" /> : <Shrink className="h-4 w-4" />}
+                  {fit === "contain" ? (
+                    <Maximize2 className="h-4 w-4" />
+                  ) : (
+                    <Minimize2 className="h-4 w-4" />
+                  )}
                 </button>
 
                 <button
+                  aria-label="Pivoter"
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
                   title="Pivoter"
                   onClick={(event) => {
@@ -577,18 +592,19 @@ export default function VideoPlayer({
                     setRotation((currentRotation) => (currentRotation + 90) % 360);
                   }}
                 >
-                  <RotateCw className="h-4 w-4" />
+                  <RotateCwSquare className="h-4 w-4" />
                 </button>
 
                 <button
+                  aria-label={fullscreenLabel}
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
-                  title={vpFullscreen ? "Quitter plein ecran" : "Plein ecran viewport"}
+                  title={fullscreenLabel}
                   onClick={(event) => {
                     event.stopPropagation();
                     setVpFullscreen((current) => !current);
                   }}
                 >
-                  {vpFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                  {vpFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
                 </button>
               </div>
             </div>
