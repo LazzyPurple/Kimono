@@ -1,108 +1,215 @@
-﻿import NextAuth from "next-auth";
+import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { query, execute } from "@/lib/db";
+import { getDataStore } from "@/lib/data-store";
+import { isLocalDevMode } from "@/lib/local-dev-mode";
+import { shouldEnableCredentialAuth } from "@/lib/auth-guards";
+import { appendAuthDebugLog, toAuthDebugErrorDetails } from "@/lib/auth-debug";
+
+async function writeAuthDebug(
+  event: string,
+  details: Record<string, string | number | boolean | null | undefined> = {}
+) {
+  try {
+    await appendAuthDebugLog(event, details);
+  } catch (error) {
+    console.error("[AUTH_DEBUG] Failed to write auth debug log:", error);
+  }
+}
+
+async function authorizeMasterPassword(credentials: Record<string, unknown> | undefined) {
+  const localDevMode = isLocalDevMode();
+  const credentialsAuthEnabled = shouldEnableCredentialAuth(localDevMode);
+  const password = credentials?.password || credentials?.["password"];
+  const adminPassword = process.env.ADMIN_PASSWORD?.trim();
+
+  await writeAuthDebug("master_password_attempt", {
+    localDevMode,
+    credentialsAuthEnabled,
+    hasPasswordInput: Boolean(password),
+    adminPasswordConfigured: Boolean(adminPassword),
+  });
+
+  if (!credentialsAuthEnabled) {
+    await writeAuthDebug("master_password_rejected", {
+      reason: "credential_auth_disabled",
+      localDevMode,
+    });
+    return null;
+  }
+
+  if (!password) {
+    await writeAuthDebug("master_password_rejected", {
+      reason: "missing_password",
+    });
+    return null;
+  }
+
+  const passwordStr = String(password).trim();
+
+  if (!adminPassword) {
+    await writeAuthDebug("master_password_rejected", {
+      reason: "missing_admin_password",
+    });
+    return null;
+  }
+
+  if (passwordStr !== adminPassword) {
+    await writeAuthDebug("master_password_rejected", {
+      reason: "password_mismatch",
+    });
+    return null;
+  }
+
+  try {
+    const store = await getDataStore();
+    const user = await store.getOrCreateAdminUser();
+
+    await writeAuthDebug("master_password_password_match", {
+      userId: user.id,
+      totpEnabled: Boolean(user.totpEnabled),
+    });
+
+    if (Boolean(user.totpEnabled)) {
+      await writeAuthDebug("master_password_totp_required", {
+        userId: user.id,
+      });
+
+      return {
+        id: user.id,
+        email: user.email,
+        needsTotp: true,
+      } as const;
+    }
+
+    await writeAuthDebug("master_password_success", {
+      userId: user.id,
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+    } as const;
+  } catch (error) {
+    console.error("[AUTH] Database error:", error);
+    await writeAuthDebug("master_password_db_error", {
+      ...toAuthDebugErrorDetails(error),
+      adminPasswordConfigured: Boolean(adminPassword),
+    });
+    return null;
+  }
+}
+
+async function authorizeTotpVerification(credentials: Record<string, unknown> | undefined) {
+  const localDevMode = isLocalDevMode();
+  const credentialsAuthEnabled = shouldEnableCredentialAuth(localDevMode);
+  const userId = credentials?.userId as string | undefined;
+  const code = credentials?.code as string | undefined;
+
+  await writeAuthDebug("totp_attempt", {
+    localDevMode,
+    credentialsAuthEnabled,
+    hasUserId: Boolean(userId),
+    hasCode: Boolean(code),
+  });
+
+  if (!credentialsAuthEnabled) {
+    await writeAuthDebug("totp_rejected", {
+      reason: "credential_auth_disabled",
+      localDevMode,
+    });
+    return null;
+  }
+
+  if (!userId || !code) {
+    await writeAuthDebug("totp_rejected", {
+      reason: "missing_totp_fields",
+      hasUserId: Boolean(userId),
+      hasCode: Boolean(code),
+    });
+    return null;
+  }
+
+  try {
+    const store = await getDataStore();
+    const user = await store.getUserById(userId);
+
+    if (!user || !user.totpSecret) {
+      await writeAuthDebug("totp_rejected", {
+        reason: "missing_user_or_totp_secret",
+        userId,
+      });
+      return null;
+    }
+
+    const { verifyTotpCode } = await import("@/lib/auth/totp");
+    const isValid = verifyTotpCode(code, user.totpSecret);
+
+    if (!isValid) {
+      await writeAuthDebug("totp_rejected", {
+        reason: "invalid_totp_code",
+        userId,
+      });
+      return null;
+    }
+
+    await writeAuthDebug("totp_success", {
+      userId,
+    });
+
+    return {
+      id: user.id,
+      email: user.email,
+    } as const;
+  } catch (error) {
+    console.error("[AUTH] TOTP error:", error);
+    await writeAuthDebug("totp_error", {
+      ...toAuthDebugErrorDetails(error),
+      userId: userId ?? null,
+    });
+    return null;
+  }
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
     Credentials({
       id: "master-password",
-      name: "Mot de passe maître",
+      name: "Mot de passe maitre",
       credentials: {
         password: { label: "Mot de passe", type: "password" },
       },
       async authorize(credentials) {
-        const password = credentials?.password || credentials?.["password"];
-
-        if (!password) {
-          return null;
-        }
-
-        const passwordStr = String(password).trim();
-        const adminPassword = process.env.ADMIN_PASSWORD?.trim();
-
-        if (!adminPassword || passwordStr !== adminPassword) {
-          return null;
-        }
-
-        try {
-          // Récupérer ou créer l'utilisateur unique admin
-          let users = await query<any>("SELECT * FROM User LIMIT 1");
-          let user = users[0];
-
-          if (!user) {
-            const id = crypto.randomUUID();
-            await execute("INSERT INTO User (id, email) VALUES (?, ?)", [id, "admin@kimono.local"]);
-            users = await query<any>("SELECT * FROM User WHERE id = ?", [id]);
-            user = users[0];
-          }
-
-          // Si le TOTP est activé, on ne connecte pas encore —
-          // on renvoie l'user avec un flag indiquant qu'il faut vérifier le TOTP
-          if (Boolean(user.totpEnabled)) {
-            return {
-              id: user.id,
-              email: user.email,
-              needsTotp: true,
-            } as any;
-          }
-
-          return {
-            id: user.id,
-            email: user.email,
-          };
-        } catch (error) {
-          console.error("[AUTH] Erreur base de données:", error);
-          return null;
-        }
+        return authorizeMasterPassword(credentials as Record<string, unknown> | undefined);
       },
     }),
     Credentials({
       id: "totp-verify",
-      name: "Vérification TOTP",
+      name: "Verification TOTP",
       credentials: {
         userId: { label: "User ID", type: "text" },
         code: { label: "Code TOTP", type: "text" },
       },
       async authorize(credentials) {
-        const userId = credentials?.userId as string;
-        const code = credentials?.code as string;
-
-        if (!userId || !code) return null;
-
-        const users = await query<any>("SELECT * FROM User WHERE id = ?", [userId]);
-        const user = users[0];
-
-        if (!user || !user.totpSecret) return null;
-
-        // Vérifier le code TOTP via notre utilitaire
-        const { verifyTotpCode } = await import("@/lib/auth/totp");
-        const isValid = verifyTotpCode(code, user.totpSecret);
-
-        if (!isValid) return null;
-
-        return {
-          id: user.id,
-          email: user.email,
-        };
+        return authorizeTotpVerification(credentials as Record<string, unknown> | undefined);
       },
     }),
   ],
   session: {
     strategy: "jwt",
-    maxAge: 30 * 24 * 60 * 60, // 30 jours
+    maxAge: 30 * 24 * 60 * 60,
   },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
-        token.needsTotp = (user as any).needsTotp || false;
+        token.needsTotp = (user as { needsTotp?: boolean }).needsTotp || false;
       }
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
-        (session as any).needsTotp = token.needsTotp || false;
+        (session as { needsTotp?: boolean }).needsTotp = Boolean(token.needsTotp);
       }
       return session;
     },

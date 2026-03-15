@@ -8,9 +8,12 @@ import MediaCard from "@/components/MediaCard";
 import Pagination from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { UnifiedPost } from "@/lib/api/helpers";
-import { resolvePostMedia } from "@/lib/api/helpers";
+import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
+import { resolveListingPostMedia, type UnifiedPost } from "@/lib/api/helpers";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { buildPopularCacheKey, type PopularPeriod } from "@/lib/perf-cache";
+import { buildAppPageTitle } from "@/lib/page-titles";
 
 interface PopularInfo {
   date: string;
@@ -35,16 +38,18 @@ interface PopularResponse {
   info: PopularInfo | null;
   props: PopularProps | null;
   posts: UnifiedPost[];
+  source?: string;
 }
 
 type SiteType = "kemono" | "coomer";
-type PeriodType = "recent" | "day" | "week" | "month";
+
+const POPULAR_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
 
 function SkeletonGrid() {
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       {Array.from({ length: 12 }).map((_, index) => (
-        <div key={index} className="overflow-hidden rounded-xl border border-[#1e1e2e] bg-[#12121a] animate-pulse">
+        <div key={index} className="animate-pulse overflow-hidden rounded-xl border border-[#1e1e2e] bg-[#12121a]">
           <div className="aspect-video bg-[#1e1e2e]" />
           <div className="space-y-2 p-3">
             <div className="h-3 w-full rounded bg-[#1e1e2e]" />
@@ -67,12 +72,14 @@ function PopularPageContent() {
   const pageNumber = pageParam && pageParam.length > 0 ? parseInt(pageParam[0], 10) : 1;
   const offset = (pageNumber - 1) * 50;
 
-  const urlPeriod = searchParams.get("period") as PeriodType | null;
+  const urlPeriod = searchParams.get("period") as PopularPeriod | null;
   const period = urlPeriod || "recent";
   const date = searchParams.get("date");
 
   const [data, setData] = useState<PopularResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useDocumentTitle(buildAppPageTitle(site === "kemono" ? "Popular - Kemono" : "Popular - Coomer"));
 
   useEffect(() => {
     let active = true;
@@ -81,28 +88,29 @@ function PopularPageContent() {
       setLoading(true);
 
       try {
-        let url = `/api/popular-posts?site=${site}&period=${period}`;
-        if (date) {
-          url += `&date=${date}`;
-        }
-        if (offset > 0) {
-          url += `&offset=${offset}`;
-        }
+        const payload = await fetchJsonWithBrowserCache<PopularResponse>({
+          key: buildPopularCacheKey({ site, period, date, offset }),
+          ttlMs: POPULAR_BROWSER_CACHE_TTL_MS,
+          loader: async () => {
+            const params = new URLSearchParams({ site, period });
+            if (date) {
+              params.set("date", date);
+            }
+            if (offset > 0) {
+              params.set("offset", String(offset));
+            }
 
-        const response = await fetch(url);
-        if (!response.ok) {
-          throw new Error("API responded with an error");
-        }
+            const response = await fetch(`/api/popular-posts?${params.toString()}`);
+            if (!response.ok) {
+              throw new Error("API responded with an error");
+            }
 
-        const json: PopularResponse = await response.json();
+            return response.json();
+          },
+        });
 
         if (active) {
-          setData({
-            ...json,
-            posts: Array.isArray(json.posts)
-              ? json.posts.map((post) => ({ ...post, site }))
-              : [],
-          });
+          setData(payload);
         }
       } catch (error) {
         console.error("Failed to fetch popular posts:", error);
@@ -116,14 +124,14 @@ function PopularPageContent() {
       }
     };
 
-    fetchData();
+    void fetchData();
 
     return () => {
       active = false;
     };
   }, [site, period, date, offset]);
 
-  useScrollRestoration(`popular-${site}-${pageNumber}-${period}`, !loading);
+  useScrollRestoration(`popular-${site}-${pageNumber}-${period}-${date ?? "recent"}`, !loading);
 
   const handlePageChange = (newPage: number) => {
     let url = `/popular/${site}/${newPage}`;
@@ -144,7 +152,7 @@ function PopularPageContent() {
     router.push(url);
   };
 
-  const handlePeriodChange = (nextPeriod: PeriodType) => {
+  const handlePeriodChange = (nextPeriod: PopularPeriod) => {
     let url = `/popular/${site}/1`;
     if (nextPeriod !== "recent") {
       url += `?period=${nextPeriod}`;
@@ -167,12 +175,10 @@ function PopularPageContent() {
       <div className="space-y-1">
         <div className="flex items-center gap-2">
           <Flame className="h-6 w-6 text-[#f0f0f5]" />
-          <h1 className="text-2xl font-bold text-[#f0f0f5]">
-            Posts populaires {site === "kemono" ? "Kemono" : "Coomer"}
-          </h1>
+          <h1 className="text-2xl font-bold text-[#f0f0f5]">Popular posts {site === "kemono" ? "Kemono" : "Coomer"}</h1>
         </div>
         <p className="text-sm text-[#6b7280]">
-          {data?.info?.range_desc || `Les posts les plus populaires de ${site === "kemono" ? "Kemono" : "Coomer"}.`}
+          {data?.info?.range_desc || `The most popular posts on ${site === "kemono" ? "Kemono" : "Coomer"}.`}
         </p>
       </div>
 
@@ -205,12 +211,12 @@ function PopularPageContent() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          {(["recent", "day", "week", "month"] as PeriodType[]).map((currentPeriod) => {
-            const labels: Record<PeriodType, string> = {
-              recent: "Recents",
-              day: "Jour",
-              week: "Semaine",
-              month: "Mois",
+          {(["recent", "day", "week", "month"] as PopularPeriod[]).map((currentPeriod) => {
+            const labels: Record<PopularPeriod, string> = {
+              recent: "Recent",
+              day: "Day",
+              week: "Week",
+              month: "Month",
             };
             const isActive = period === currentPeriod;
 
@@ -248,7 +254,7 @@ function PopularPageContent() {
             }
             onClick={() => handleDateChange(navigationDates[0])}
           >
-            &larr; Precedent
+            &larr; Previous
           </Button>
 
           <span className="text-sm font-medium text-[#f0f0f5]">{data.info.date}</span>
@@ -257,13 +263,10 @@ function PopularPageContent() {
             variant="outline"
             size="sm"
             className="cursor-pointer border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e]/50 hover:text-[#f0f0f5]"
-            disabled={
-              !navigationDates[1] ||
-              (data.props.today ? navigationDates[1] > data.props.today : false)
-            }
+            disabled={!navigationDates[1] || (data.props.today ? navigationDates[1] > data.props.today : false)}
             onClick={() => handleDateChange(navigationDates[1])}
           >
-            Suivant &rarr;
+            Next &rarr;
           </Button>
         </div>
       )}
@@ -272,13 +275,13 @@ function PopularPageContent() {
         <SkeletonGrid />
       ) : !data?.posts || data.posts.length === 0 ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
-          <p className="text-[#6b7280]">Aucun post populaire.</p>
+          <p className="text-[#6b7280]">No popular posts found.</p>
         </div>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {data.posts.map((post) => {
-              const media = resolvePostMedia(post);
+            {data.posts.map((post, index) => {
+              const media = resolveListingPostMedia(post);
 
               return (
                 <MediaCard
@@ -292,7 +295,10 @@ function PopularPageContent() {
                   postId={post.id}
                   user={post.user}
                   publishedAt={post.published}
-                  videoPreviewMode="viewport"
+                  priority={index < 4}
+                  durationSeconds={media.durationSeconds}
+                  videoPreviewMode="hover"
+                  videoCandidates={media.videoCandidates}
                 />
               );
             })}
@@ -320,3 +326,7 @@ export default function PopularPage() {
     </Suspense>
   );
 }
+
+
+
+

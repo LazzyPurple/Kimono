@@ -1,6 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
-import { fetchCreatorProfileBySite } from "@/lib/api/unified";
+﻿import { NextRequest, NextResponse } from "next/server";
+
+import { createHybridContentService } from "@/lib/hybrid-content";
+import { logAppError } from "@/lib/app-logger";
 import type { Site } from "@/lib/api/unified";
+
+const hybridContent = createHybridContentService();
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -9,16 +13,32 @@ export async function GET(request: NextRequest) {
   const id = searchParams.get("id") ?? "";
 
   if (!site || !service || !id) {
-    return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
+    return NextResponse.json({ error: "Parametres manquants" }, { status: 400 });
   }
 
   try {
-    const profile = await fetchCreatorProfileBySite(site, service, id);
-    return NextResponse.json(profile);
-  } catch (err) {
-    console.error("creator-profile error:", err);
+    const result = await hybridContent.getCreatorProfile({
+      site,
+      service,
+      creatorId: id,
+    });
+
+    return NextResponse.json(result.profile, {
+      headers: {
+        "x-kimono-source": result.source,
+      },
+    });
+  } catch (error) {
+    await logAppError("api", "creator-profile error", error, {
+      details: {
+        route: "/api/creator-profile",
+        site,
+        service,
+        creatorId: id,
+      },
+    });
     return NextResponse.json(
-      { error: "Impossible de récupérer le profil" },
+      { error: "Impossible de recuperer le profil" },
       { status: 500 }
     );
   }

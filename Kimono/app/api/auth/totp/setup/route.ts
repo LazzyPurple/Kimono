@@ -3,48 +3,52 @@ export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { query, execute } from "@/lib/db";
 import { generateTotpSetup } from "@/lib/auth/totp";
+import { getDataStore } from "@/lib/data-store";
+import { getTotpSetupAvailability } from "@/lib/auth-guards";
+import { isLocalDevMode } from "@/lib/local-dev-mode";
 
-/**
- * GET /api/auth/totp/setup
- * Génère un nouveau secret TOTP + QR code pour l'utilisateur connecté
- */
+function getDisabledTotpResponse() {
+  return NextResponse.json({ error: "Introuvable" }, { status: 404 });
+}
+
 export async function GET() {
+  if (getTotpSetupAvailability(isLocalDevMode()) === "disabled") {
+    return getDisabledTotpResponse();
+  }
+
   const session = await auth();
 
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    return NextResponse.json({ error: "Non authentifie" }, { status: 401 });
   }
 
-  const users = await query<any>("SELECT * FROM User WHERE id = ?", [session.user.id]);
-  const user = users[0];
+  const store = await getDataStore();
+  const user = await store.getUserById(session.user.id);
 
   if (!user) {
     return NextResponse.json({ error: "Utilisateur introuvable" }, { status: 404 });
   }
 
   if (user.totpEnabled) {
-    return NextResponse.json({ error: "TOTP déjà activé" }, { status: 400 });
+    return NextResponse.json({ error: "TOTP deja active" }, { status: 400 });
   }
 
   const { secret, qrCodeDataUrl } = await generateTotpSetup(user.email);
-
-  // Sauvegarder le secret temporairement (pas encore activé)
-  await execute("UPDATE User SET totpSecret = ? WHERE id = ?", [secret, user.id]);
+  await store.updateUserTotpSecret(user.id, secret);
 
   return NextResponse.json({ qrCodeDataUrl });
 }
 
-/**
- * POST /api/auth/totp/setup
- * Active le TOTP après vérification du premier code
- */
 export async function POST(request: Request) {
+  if (getTotpSetupAvailability(isLocalDevMode()) === "disabled") {
+    return getDisabledTotpResponse();
+  }
+
   const session = await auth();
 
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    return NextResponse.json({ error: "Non authentifie" }, { status: 401 });
   }
 
   const { code } = await request.json();
@@ -53,11 +57,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Code requis" }, { status: 400 });
   }
 
-  const users = await query<any>("SELECT * FROM User WHERE id = ?", [session.user.id]);
-  const user = users[0];
+  const store = await getDataStore();
+  const user = await store.getUserById(session.user.id);
 
   if (!user || !user.totpSecret) {
-    return NextResponse.json({ error: "Aucun secret TOTP trouvé" }, { status: 400 });
+    return NextResponse.json({ error: "Aucun secret TOTP trouve" }, { status: 400 });
   }
 
   const { verifyTotpCode } = await import("@/lib/auth/totp");
@@ -67,8 +71,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Code invalide" }, { status: 400 });
   }
 
-  // Activer le TOTP
-  await execute("UPDATE User SET totpEnabled = 1 WHERE id = ?", [user.id]);
+  await store.enableUserTotp(user.id);
 
-  return NextResponse.json({ success: true, message: "2FA activé avec succès" });
+  return NextResponse.json({ success: true, message: "2FA activee avec succes" });
 }

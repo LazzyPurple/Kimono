@@ -1,4 +1,4 @@
-@import "tailwindcss";
+﻿@import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -46,7 +46,7 @@
   --radius-3xl: calc(var(--radius) + 12px);
   --radius-4xl: calc(var(--radius) + 16px);
 
-  /* Couleurs personnalisÃ©es Kimino */
+  /* Couleurs personnalisees Kimono */
   --color-kimono-bg: #0a0a0f;
   --color-kimino-card: #12121a;
   --color-kimino-accent: #7c3aed;
@@ -60,7 +60,7 @@
   --font-geist-sans: "Trebuchet MS", "Segoe UI", system-ui, sans-serif;
   --font-geist-mono: "Consolas", "SFMono-Regular", "Liberation Mono", monospace;
   --radius: 0.625rem;
-  /* ThÃ¨me sombre par dÃ©faut pour Kimino */
+  /* Theme sombre par defaut pour Kimono */
   --background: #0a0a0f;
   --foreground: #f0f0f5;
   --card: #12121a;
@@ -102,3 +102,5 @@
     @apply bg-background text-foreground;
   }
 }
+
+

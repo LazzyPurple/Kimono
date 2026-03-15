@@ -19,7 +19,9 @@ prisma/*.db-wal
 # Prisma debug
 prisma_debug.txt
 
-# Deployment artifacts
-Kimono/deploy-package/
+# Build and packaging artifacts
+Kimono/.npm-cache/
 Kimono/*.zip
 Kimono/deploy/*.zip
+Kimono/deploy/.o2switch-runtime-stage/
+Kimono/deploy-package/
