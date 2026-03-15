@@ -1,4 +1,5 @@
-﻿import { proxyCdnUrl, resolvePostMedia, type UnifiedCreator, type UnifiedPost } from "./api/helpers.ts";
+import { proxyCdnUrl, resolvePostMedia, type UnifiedCreator, type UnifiedPost } from "./api/helpers.ts";
+import { hydratePostWithCachedPreviewAssets, hydratePostsWithCachedPreviewAssets } from "./post-preview-hydration.ts";
 import {
   buildPreviewAssetPublicUrl,
   createPopularPreviewAssetService,
@@ -689,8 +690,11 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
       }
 
       const live = await fetchCreatorPostsLive(input.site, input.service, input.creatorId, input.offset, input.cookie, query);
+      const hydratedLive = await hydratePostsWithCachedPreviewAssets(live, {
+        repository,
+      });
       await Promise.all(
-        live.map((post) =>
+        hydratedLive.map((post) =>
           repository.upsertPostCache(
             createPostCacheInputFromUnifiedPost(post as UnifiedPost, query ? "search-query" : "creator-page", "metadata")
           )
@@ -698,7 +702,7 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
       );
 
       return {
-        posts: live,
+        posts: hydratedLive,
         source: "live" as const,
       };
     },
@@ -723,15 +727,20 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
       }
 
       const live = await fetchPostLive(input);
-      await repository.upsertPostCache(createPostCacheInputFromUnifiedPost(live as UnifiedPost, "post-detail", "full"));
+      const hydratedLive = await hydratePostWithCachedPreviewAssets(live, {
+        repository,
+      });
+      await repository.upsertPostCache(createPostCacheInputFromUnifiedPost(hydratedLive as UnifiedPost, "post-detail", "full"));
 
       return {
-        post: live,
+        post: hydratedLive,
         source: cached ? "live-refresh" as const : "live" as const,
       };
     },
   };
 }
+
+
 
 
 

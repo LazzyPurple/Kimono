@@ -12,9 +12,8 @@ import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import {
   getPostType,
-  getPostVideoUrls,
   proxyCdnUrl,
-  resolvePostMedia,
+  resolveListingPostMedia,
   type Site,
   type UnifiedPost,
 } from "@/lib/api/helpers";
@@ -569,8 +568,8 @@ export default function CreatorPage() {
               )}
 
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {filteredPosts.map((post) => {
-                  const media = resolvePostMedia(post);
+                {filteredPosts.map((post, index) => {
+                  const media = resolveListingPostMedia(post);
 
                   return (
                     <MediaCard
@@ -578,13 +577,16 @@ export default function CreatorPage() {
                       title={post.title}
                       previewImageUrl={media.previewImageUrl}
                       videoUrl={media.videoUrl}
-                      videoCandidates={getPostVideoUrls(post)}
+                      videoCandidates={media.videoCandidates}
                       type={media.type}
                       site={post.site}
                       service={post.service}
                       postId={post.id}
                       user={post.user}
                       publishedAt={post.published}
+                      priority={index < 4}
+                      durationSeconds={media.durationSeconds}
+                      videoPreviewMode="hover"
                     />
                   );
                 })}
@@ -629,3 +631,8 @@ export default function CreatorPage() {
     </div>
   );
 }
+
+
+
+
+

@@ -39,12 +39,27 @@ export interface ResolvedPostMedia {
   videoUrl?: string;
 }
 
+export interface ResolvedListingPostMedia extends ResolvedPostMedia {
+  videoCandidates: string[];
+  durationSeconds: number | null;
+  previewStatus: string | null;
+  usesServerPreview: boolean;
+}
+
 function toDataUrl(site: Site, path?: string): string | undefined {
   if (!path || path.startsWith("http")) {
     return path || undefined;
   }
 
   return `${SITE_BASE_URLS[site]}/data${encodeURI(path)}`;
+}
+
+function toThumbnailUrl(site: Site, path?: string): string | undefined {
+  if (!path || path.startsWith("http")) {
+    return path || undefined;
+  }
+
+  return `${SITE_CDN_URLS[site]}/thumbnail/data${encodeURI(path)}`;
 }
 
 function findFirstMediaPath(
@@ -87,7 +102,7 @@ export function resolvePostMedia(post: UnifiedPost): ResolvedPostMedia {
 
   return {
     type: videoPath ? "video" : imagePath ? "image" : "text",
-    previewImageUrl: imagePath ? toDataUrl(post.site, imagePath) : undefined,
+    previewImageUrl: imagePath ? toThumbnailUrl(post.site, imagePath) : undefined,
     videoUrl: videoPath ? toDataUrl(post.site, videoPath) : undefined,
   };
 }
@@ -113,6 +128,24 @@ export function getPostVideoUrls(post: UnifiedPost): string[] {
   return paths
     .map((path) => toDataUrl(post.site, path))
     .filter((path): path is string => Boolean(path));
+}
+
+export function resolveListingPostMedia(post: UnifiedPost): ResolvedListingPostMedia {
+  const media = resolvePostMedia(post);
+  const usesServerPreview = Boolean(
+    post.previewThumbnailUrl || post.previewClipUrl || post.longestVideoDurationSeconds != null
+  );
+  const videoUrl = post.previewClipUrl ?? media.videoUrl;
+
+  return {
+    type: videoUrl ? "video" : media.type,
+    previewImageUrl: post.previewThumbnailUrl ?? media.previewImageUrl,
+    videoUrl,
+    videoCandidates: post.previewClipUrl ? [post.previewClipUrl] : getPostVideoUrls(post),
+    durationSeconds: post.longestVideoDurationSeconds ?? null,
+    previewStatus: post.previewStatus ?? null,
+    usesServerPreview,
+  };
 }
 
 export function deduplicatePosts(posts: UnifiedPost[]): UnifiedPost[] {
@@ -142,3 +175,4 @@ export function deduplicateCreators(creators: UnifiedCreator[]): UnifiedCreator[
     return true;
   });
 }
+

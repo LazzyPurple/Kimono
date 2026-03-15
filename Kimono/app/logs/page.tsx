@@ -1,12 +1,15 @@
 ﻿import type { Metadata } from "next";
+import { headers } from "next/headers";
 import Link from "next/link";
+import { notFound, redirect } from "next/navigation";
+import { getCurrentDiagnosticAccessDecision } from "@/lib/diagnostic-access";
 import { getLogsDashboardData } from "@/lib/logs-dashboard";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Logs | Kimono",
-  description: "Temporary public debugging view for Kimono server and client logs.",
+  description: "Protected diagnostics view for Kimono server and client logs.",
 };
 
 type SearchParamValue = string | string[] | undefined;
@@ -28,21 +31,47 @@ export default async function LogsPage({
   const levelParam = firstParam(resolvedParams.level);
   const q = firstParam(resolvedParams.q);
   const limit = Number(firstParam(resolvedParams.limit) ?? "200") || 200;
+  const debugToken = firstParam(resolvedParams.debugToken);
 
-  const params = new URLSearchParams();
-  if (source) params.set("source", source);
-  if (levelParam) params.set("level", levelParam);
-  if (q) params.set("q", q);
-  params.set("limit", String(limit));
+  const filterParams = new URLSearchParams();
+  if (source) filterParams.set("source", source);
+  if (levelParam) filterParams.set("level", levelParam);
+  if (q) filterParams.set("q", q);
+  filterParams.set("limit", String(limit));
+
+  const accessParams = new URLSearchParams(filterParams);
+  if (debugToken) {
+    accessParams.set("debugToken", debugToken);
+  }
+
+  const requestHeaders = await headers();
+  const currentUrl = `http://localhost/logs?${accessParams.toString()}`;
+  const accessDecision = await getCurrentDiagnosticAccessDecision({
+    headers: requestHeaders,
+    url: currentUrl,
+  });
+
+  if (accessDecision.type !== "allowed") {
+    if (debugToken) {
+      notFound();
+    }
+
+    const callbackUrl = filterParams.size > 0
+      ? `/logs?${filterParams.toString()}`
+      : "/logs";
+
+    redirect(`/login?callbackUrl=${encodeURIComponent(callbackUrl)}`);
+  }
 
   const dashboard = await getLogsDashboardData({
-    url: `http://localhost/logs?${params.toString()}`,
+    url: currentUrl,
   });
 
   const logs = dashboard.logs.logs;
   const authSnapshot = dashboard.auth.auth;
   const runtimeSnapshot = dashboard.auth.runtime;
   const databaseUrlDebug = runtimeSnapshot.env.databaseUrlDebug;
+  const rawJsonHref = accessParams.size > 0 ? `/api/logs?${accessParams.toString()}` : "/api/logs";
 
   return (
     <main className="min-h-screen bg-[#05050a] px-3 py-5 text-[#f0f0f5] sm:px-5 sm:py-6 lg:px-6 lg:py-8">
@@ -53,13 +82,12 @@ export default async function LogsPage({
               <p className="text-[11px] uppercase tracking-[0.34em] text-[#8b5cf6]">Kimono Debug</p>
               <h1 className="mt-3 text-3xl font-semibold tracking-tight text-white sm:text-[2.35rem]">Logs</h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-[#9ca3af] sm:text-[15px]">
-                This page is temporarily public for production debugging. Remove or secure it after the current
-                incidents are resolved.
+                Protected diagnostics view for runtime logs and sanitized auth or database health snapshots.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Link
-                href="/api/logs"
+                href={rawJsonHref}
                 className="inline-flex h-11 items-center justify-center rounded-full border border-[#312e81] px-5 text-sm font-medium text-[#d9ccff] transition hover:border-[#4c1d95] hover:bg-[#17172a] hover:text-white"
               >
                 Raw JSON
@@ -117,19 +145,13 @@ export default async function LogsPage({
             <div className="mt-4 rounded-2xl border border-[#202034] bg-[#09090f] p-4 text-sm text-[#d1d5db]">
               {authSnapshot.database.ok ? (
                 <div className="grid gap-2 md:grid-cols-2">
-                  <p className="break-words">
-                    <span className="text-[#9ca3af]">Admin user:</span> {authSnapshot.database.adminUser.email}
-                  </p>
-                  <p className="break-all">
-                    <span className="text-[#9ca3af]">User ID:</span> {authSnapshot.database.adminUser.id}
+                  <p>
+                    <span className="text-[#9ca3af]">Admin record:</span>{" "}
+                    {authSnapshot.database.adminUser.exists ? "available" : "missing"}
                   </p>
                   <p>
                     <span className="text-[#9ca3af]">TOTP:</span>{" "}
                     {authSnapshot.database.adminUser.totpEnabled ? "enabled" : "disabled"}
-                  </p>
-                  <p>
-                    <span className="text-[#9ca3af]">Created at:</span>{" "}
-                    {new Date(authSnapshot.database.adminUser.createdAt).toLocaleString("en-GB")}
                   </p>
                 </div>
               ) : (
@@ -144,17 +166,16 @@ export default async function LogsPage({
                 <p className="text-[11px] uppercase tracking-[0.22em] text-[#8b5cf6]">Database URL diagnostics</p>
                 <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   <p><span className="text-[#9ca3af]">Scheme:</span> {databaseUrlDebug.scheme ?? "unknown"}</p>
-                  <p className="break-all"><span className="text-[#9ca3af]">Username:</span> {databaseUrlDebug.username ?? "unknown"}</p>
-                  <p><span className="text-[#9ca3af]">Host:</span> {databaseUrlDebug.hostname ?? "unknown"}</p>
-                  <p><span className="text-[#9ca3af]">Port:</span> {databaseUrlDebug.port ?? "unknown"}</p>
-                  <p className="break-all"><span className="text-[#9ca3af]">Database:</span> {databaseUrlDebug.databaseName ?? "unknown"}</p>
-                  <p><span className="text-[#9ca3af]">Password length:</span> {databaseUrlDebug.passwordLength}</p>
+                  <p><span className="text-[#9ca3af]">Has credentials:</span> {databaseUrlDebug.hasCredentials ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Has host:</span> {databaseUrlDebug.hasHostname ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Has port:</span> {databaseUrlDebug.hasPort ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Has database name:</span> {databaseUrlDebug.hasDatabaseName ? "yes" : "no"}</p>
                   <p><span className="text-[#9ca3af]">Has whitespace:</span> {databaseUrlDebug.hasWhitespace ? "yes" : "no"}</p>
                   <p><span className="text-[#9ca3af]">Has newline:</span> {databaseUrlDebug.hasNewline ? "yes" : "no"}</p>
                   <p><span className="text-[#9ca3af]">Has quotes:</span> {databaseUrlDebug.hasQuotes ? "yes" : "no"}</p>
                   <p><span className="text-[#9ca3af]">Edge whitespace:</span> {databaseUrlDebug.hasLeadingOrTrailingWhitespace ? "yes" : "no"}</p>
                   <p><span className="text-[#9ca3af]">Parseable:</span> {databaseUrlDebug.parseable ? "yes" : "no"}</p>
-                  <p className="break-all"><span className="text-[#9ca3af]">Runtime hash:</span> {databaseUrlDebug.valueHash}</p>
+                  <p className="break-all md:col-span-2 xl:col-span-2"><span className="text-[#9ca3af]">Runtime hash:</span> {databaseUrlDebug.valueHash}</p>
                 </div>
               </div>
             ) : null}
@@ -162,9 +183,9 @@ export default async function LogsPage({
 
           <article className="rounded-[26px] border border-[#1e1e2e] bg-[#10101a] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.32)] sm:p-5">
             <p className="text-[11px] uppercase tracking-[0.28em] text-[#8b5cf6]">Raw auth snapshot</p>
-            <h2 className="mt-2 text-xl font-semibold text-white">Embedded auth-check data</h2>
+            <h2 className="mt-2 text-xl font-semibold text-white">Sanitized diagnostic payload</h2>
             <p className="mt-2 text-sm leading-6 text-[#9ca3af]">
-              Live runtime probe merged into the logs view so the debugging surface stays in one place.
+              Runtime probe data is kept in one place here, but the sensitive identifiers and DB topology are stripped.
             </p>
             <pre className="mt-4 max-h-[26rem] overflow-auto rounded-2xl border border-[#1d1d2b] bg-[#09090f] p-4 text-xs leading-6 text-[#d1d5db]">
               {JSON.stringify(dashboard.auth, null, 2)}
@@ -173,6 +194,7 @@ export default async function LogsPage({
         </section>
 
         <form className="grid gap-3 rounded-[24px] border border-[#1e1e2e] bg-[#10101a] p-4 shadow-[0_16px_32px_rgba(0,0,0,0.28)] sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_180px_120px_auto]">
+          {debugToken ? <input type="hidden" name="debugToken" value={debugToken} /> : null}
           <input
             type="text"
             name="q"

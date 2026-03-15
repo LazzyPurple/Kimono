@@ -1,4 +1,4 @@
-﻿# Kimono - Checkpoint
+# Kimono - Checkpoint
 
 Ce document sert de resume d'etat du projet et de memo de progression.
 
@@ -102,14 +102,44 @@ Ce qui est deja en place :
 - referencement des assets en base
 - deduplication des previews deja traitees via empreinte video stable
 - reutilisation d'un asset si une video reste populaire plusieurs jours
+- cache HTTP plus agressif et immuable sur les assets de preview
 
-Objectif :
+### 8. Hydratation centrale des preview assets
 
-- reduire la charge CPU / GPU et reseau cote client
-- eviter de recalculer la duree et la preview dans le navigateur
-- preparer une extension future du meme modele a `home`, `creator`, `favorites`, `discover` et autres listings
+Une couche centrale d'enrichissement des posts a ete ajoutee pour reinjecter des assets serveur quand ils existent deja.
 
-### 8. Deploiement o2switch
+Ce qui est en place :
+
+- helper central d'hydratation des posts a partir du cache de preview assets
+- `Popular` reste la source de production des assets serveur
+- la couche hybride reutilise ensuite ces assets sur les principaux flux deja branches
+- la logique reste suffisamment isolee pour garder une porte ouverte a un futur chemin plus SQL-first pour `Popular`
+
+### 9. Optimisations images et cards media
+
+Un lot de perf image a ete applique sur les listings :
+
+- previews de listing via thumbnails CDN au lieu des images originales pleine resolution
+- image detail conservee en pleine resolution sur la page post
+- preconnect global vers les origines image et data Kemono / Coomer
+- `referrerPolicy="no-referrer"` ajoute sur les images distantes des cards media
+- priorisation des premieres cards deja visibles
+- lazy loading conserve pour le reste des images
+- rendu plus stable des previews media en mode serveur-first
+
+### 10. Durcissement du debug et des logs
+
+Le debug runtime a ete fortement resserre.
+
+Ce qui est en place :
+
+- garde d'acces centralisee pour les surfaces de diagnostic
+- acces autorise en local, via session connectee, ou via `AUTH_DEBUG_TOKEN`
+- payloads debug assainis pour ne plus exposer topologie DB ou metadata admin sensibles
+- `/logs`, `/api/logs`, `/api/debug/auth-check` et `/api/debug/env-db` ne sont plus publics par defaut
+- la page logs continue de servir de point d'entree operable en cas d'incident, avec un token de secours si necessaire
+
+### 11. Deploiement o2switch
 
 Le flux de deploiement a ete fortement remis a plat.
 
@@ -128,24 +158,7 @@ Objectif :
 - ne plus faire de build Next.js sur o2switch
 - ne laisser au serveur que l'installation runtime et le redemarrage Passenger
 
-### 9. Logging et debug
-
-Une couche de logging centralisee a ete ajoutee :
-
-- logger structure central
-- route `/api/logs`
-- page `/logs`
-- integration des logs auth, DB, API, serveur et client
-- fusion du runtime auth / DB probe dans `/logs`
-
-Notes :
-
-- `/logs` est volontairement publique temporairement pour debloquer le debug prod
-- `/api/debug/auth-check` est encore present comme secours temporaire
-- `/api/debug/env-db` aide a diagnostiquer la valeur runtime de `DATABASE_URL`
-- ces routes doivent etre fermees ou supprimees une fois la stabilisation terminee
-
-### 10. Correctifs UI / hydration
+### 12. Logging, UI et hydration
 
 Plusieurs correctifs de stabilite et de presentation ont ete appliques :
 
@@ -155,16 +168,9 @@ Plusieurs correctifs de stabilite et de presentation ont ete appliques :
 - correction du flux de login qui pouvait spinner a l'infini
 - correction du proxy / lecture de session qui creait une boucle vers `/login`
 - page `/logs` rendue plus compacte et responsive
-
-### 11. UI / contenu visible
-
-Un chantier de polish UI a ete entame :
-
 - passage progressif de l'interface vers l'anglais
 - titres de pages dynamiques
 - durees video sur les cards
-- nettoyage de plusieurs textes mal encodes
-- travail en cours sur la stabilite visuelle des cards et des previews
 
 ## Tests et outillage ajoutes
 
@@ -180,43 +186,46 @@ Une couverture de tests a ete ajoutee ou etendue autour de :
 - cache navigateur
 - hybrid content
 - logs dashboard / logs route / logs layout
-- packaging o2switch
+- debug gating et payloads assainis
 - preview assets `Popular`
+- hydratation centrale des preview assets
+- optimisations images CDN / loading priority / lazy loading
+- packaging o2switch
 - correctif Sakura / UI copy
 
 ## Etat actuel de la production
 
-Le projet est fonctionnel, mais encore en phase de stabilisation.
+Le projet est fonctionnel, mais encore en phase de stabilisation et de hardening.
 
 Points a surveiller en ce moment :
 
-- la DB de production est fonctionnelle, mais reste sensible a une mauvaise valeur de `DATABASE_URL`
-- debug auth et debug DB encore volontairement exposes pour investigation
-- la page `Popular` reste encore trop lourde visuellement sur certaines configurations client
-- certaines cards media affichent encore des artefacts de chargement ou des etats noirs
-- les assets serveur de `Popular` ne sont pas encore reutilises partout dans le site
-- certains endpoints likes / favorites / kimono session ont deja ete durcis, mais l'ensemble n'est pas encore totalement fiabilise
+- la DB de production reste sensible a une mauvaise valeur de `DATABASE_URL`
+- les secrets montres dans des captures ou partages doivent etre tournes immediatement
+- l'acces diagnostic doit rester exceptionnel et temporaire en prod
+- `Popular` est beaucoup plus stable, mais certains listings peuvent encore etre optimises davantage
+- toutes les surfaces ne reutilisent pas encore les assets serveur avec le meme niveau de couverture
+- le backlog lint source reste ouvert meme si le bruit des artefacts generes a ete retire
 
 ## Recommandations court terme
 
 ### A faire en priorite
 
-1. propager les assets serveur issus de `Popular` a toutes les surfaces ou ces posts reapparaissent
-2. reduire les artefacts de chargement et les cartes noires sur `Popular`
-3. continuer a reduire le cout client des previews video
-4. finaliser l'anglais de l'UI et les titres de page
-5. refermer ou securiser `/logs`, `/api/debug/auth-check` et `/api/debug/env-db`
-6. nettoyer les warnings restants et les routes de debug temporaires
+1. finir de propager les preview assets serveur a toutes les listes de posts encore non branchees
+2. finaliser le hardening prod en supprimant ce qui reste de debug temporaire une fois la stabilisation finie
+3. resorber le backlog lint source maintenant que `deploy-package/**` est ignore
+4. regenerer l'artefact o2switch apres chaque lot significatif via `npm run build:o2switch-package`
+5. continuer le polish UI et les optimisations de chargement sur les surfaces media les plus visibles
+6. introduire a terme un vrai role admin si d'autres types d'utilisateurs arrivent
 
 ### A verifier apres chaque deploy
 
-- `/logs`
+- `/logs` avec session admin ou token de secours si necessaire
 - `/api/logs`
 - `/api/search-creators`
 - `/api/popular-posts`
 - `/api/preview-assets/...`
 - login admin
-- navigation `/search`, `/creator`, `/post`, `/popular`
+- navigation `/search`, `/creator`, `/post`, `/popular`, `/home`
 
 ## Commandes utiles
 
@@ -250,8 +259,9 @@ Kimono a beaucoup evolue pendant cette passe :
 - architecture local / prod separee
 - caching hybride et prechauffage
 - deploiement Linux prebuild pour o2switch
-- outils de debug serveur enfin visibles via `/logs`
+- debug et logs securises
 - phase `Popular` serveur-first avec preview assets dedupliques
+- hydratation centrale des previews et optimisation images CDN sur les listings
 - plusieurs correctifs auth, session, hydration et UX
 
-Le projet est beaucoup mieux structure qu'au depart, mais la phase actuelle reste une phase de hardening orientee performance media, avant de refermer les routes de debug et de finaliser la polish UI.
+Le projet est nettement plus structure qu'au depart. La phase actuelle est une phase de stabilisation finale avant generalisation complete des previews serveur, nettoyage du backlog lint et rotation des derniers secrets exposes.

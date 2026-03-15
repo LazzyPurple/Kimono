@@ -253,7 +253,7 @@ export default function PostPage() {
                 onClick={() => setLightboxIndex(index)}
                 className="aspect-square cursor-pointer overflow-hidden rounded-lg transition hover:opacity-90"
               >
-                <img src={makeUrl(media.path)} alt={media.name || media.path} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+                <img src={makeUrl(media.path)} alt={media.name || media.path} loading={index === 0 ? undefined : "lazy"} referrerPolicy="no-referrer" className="h-full w-full object-cover" />
               </button>
             ))}
           </div>
@@ -298,3 +298,4 @@ export default function PostPage() {
     </div>
   );
 }
+

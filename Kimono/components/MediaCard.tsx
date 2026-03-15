@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +29,7 @@ interface MediaCardProps {
   publishedAt?: string | number;
   durationSeconds?: number | null;
   videoPreviewMode?: "hover" | "viewport";
+  priority?: boolean;
 }
 
 const videoDurationCache = new Map<string, number | null>();
@@ -92,6 +93,7 @@ export default function MediaCard({
   publishedAt,
   durationSeconds = null,
   videoPreviewMode = "hover",
+  priority = false,
 }: MediaCardProps) {
   const [hovered, setHovered] = useState(false);
   const [hasHovered, setHasHovered] = useState(false);
@@ -150,8 +152,16 @@ export default function MediaCard({
 
     setDurationLabel(formatVideoDurationLabel(durationSeconds ?? pickLongestVideoDuration(cachedDurations)));
 
-    if (hasCachedWarmPreview) {
+    const canWarmInBackground = videoPreviewMode === "viewport" || !showImage;
+
+    if (hasCachedWarmPreview && canWarmInBackground) {
       setShouldWarmVideo(true);
+    }
+
+    if (!canWarmInBackground) {
+      return () => {
+        cancelled = true;
+      };
     }
 
     const warmSoon = () => {
@@ -177,10 +187,10 @@ export default function MediaCard({
         clearTimeout(timeoutId);
       }
     };
-  }, [durationSeconds, resolvedVideoCandidates, type]);
+  }, [durationSeconds, resolvedVideoCandidates, showImage, type, videoPreviewMode]);
 
   useEffect(() => {
-    if (type !== "video" || !videoUrl || !cardRef.current) {
+    if (type !== "video" || videoPreviewMode !== "viewport" || !videoUrl || !cardRef.current) {
       return;
     }
 
@@ -192,7 +202,7 @@ export default function MediaCard({
         }
       },
       {
-        rootMargin: videoPreviewMode === "viewport" ? "1200px 0px" : "800px 0px",
+        rootMargin: "1200px 0px",
         threshold: 0.01,
       }
     );
@@ -222,7 +232,11 @@ export default function MediaCard({
   const shouldMountVideo =
     type === "video" &&
     Boolean(videoUrl) &&
-    (hasHovered || shouldWarmVideo || (!showImage && videoPreviewMode === "viewport"));
+    (
+      hasHovered ||
+      (videoPreviewMode === "viewport" && (shouldWarmVideo || !showImage)) ||
+      (!showImage && shouldWarmVideo)
+    );
 
   useEffect(() => {
     isHoveredRef.current = hovered;
@@ -325,7 +339,7 @@ export default function MediaCard({
   }, [durationSeconds, videoUrl]);
 
   const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
-  const videoPreload = shouldWarmVideo ? "auto" : videoPreviewMode === "viewport" || !showImage ? "metadata" : "none";
+  const videoPreload = shouldWarmVideo ? ((videoPreviewMode === "viewport" || !showImage) ? "auto" : "metadata") : (videoPreviewMode === "viewport" || !showImage ? "metadata" : "none");
 
   return (
     <a
@@ -346,8 +360,10 @@ export default function MediaCard({
               <img
                 src={previewImageUrl}
                 alt={title}
-                loading="lazy"
+                loading={priority ? undefined : "lazy"}
+                fetchPriority={priority ? "high" : undefined}
                 decoding="async"
+                referrerPolicy="no-referrer"
                 onError={() => setImgError(true)}
                 className={`absolute inset-0 h-full w-full object-cover object-center transition-all duration-300 ${
                   hovered ? "scale-105 opacity-0" : "opacity-100 group-hover:scale-105"
@@ -378,8 +394,10 @@ export default function MediaCard({
             <img
               src={previewImageUrl}
               alt={title}
-              loading="lazy"
+              loading={priority ? undefined : "lazy"}
+              fetchPriority={priority ? "high" : undefined}
               decoding="async"
+              referrerPolicy="no-referrer"
               onError={() => setImgError(true)}
               className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
             />
@@ -456,5 +474,10 @@ export default function MediaCard({
     </a>
   );
 }
+
+
+
+
+
 
 

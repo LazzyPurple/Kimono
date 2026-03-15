@@ -1,4 +1,4 @@
-﻿import path from "node:path";
+import path from "node:path";
 import { promises as fs } from "node:fs";
 
 import { NextResponse } from "next/server";
@@ -46,7 +46,7 @@ export async function GET(
     return new NextResponse(new Uint8Array(fileBuffer), {
       headers: {
         "content-type": contentType,
-        "cache-control": "public, max-age=3600, stale-while-revalidate=86400",
+        "cache-control": "public, max-age=86400, stale-while-revalidate=604800, immutable",
       },
     });
   } catch {
