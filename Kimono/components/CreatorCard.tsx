@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { Heart, User } from "lucide-react";
@@ -15,6 +15,19 @@ interface CreatorCardProps {
   updated?: string | number;
 }
 
+function formatCreatorDate(updated?: string | number): string | null {
+  if (updated === undefined) {
+    return null;
+  }
+
+  const date = new Date(typeof updated === "number" ? updated * 1000 : updated);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleDateString("en-GB");
+}
+
 export default function CreatorCard({
   id,
   name,
@@ -28,9 +41,9 @@ export default function CreatorCard({
   const { isCreatorLiked, toggleCreatorLike } = useLikes();
 
   const liked = isCreatorLiked(site, service, id);
-
   const avatarUrl = proxyCdnUrl(site, `/icons/${service}/${id}`);
   const bannerUrl = proxyCdnUrl(site, `/banners/${service}/${id}`);
+  const displayDate = formatCreatorDate(updated);
 
   const isGumroad = service.toLowerCase() === "gumroad";
   const displayBannerUrl = isGumroad ? avatarUrl : bannerUrl;
@@ -42,11 +55,10 @@ export default function CreatorCard({
       : "bg-pink-600/80 text-white";
 
   return (
-    <a href={`/creator/${site}/${service}/${id}`} className="block group">
+    <a href={`/creator/${site}/${service}/${id}`} className="group block">
       <div
-        className="rounded-2xl overflow-hidden border-2 transition-all duration-300 cursor-pointer"
+        className="overflow-hidden rounded-2xl border-2 bg-[#12121a] transition-all duration-300"
         style={{
-          backgroundColor: "#12121a",
           borderColor: liked ? "#ef4444" : "rgba(124,58,237,0.25)",
         }}
         onMouseEnter={(e) =>
@@ -67,95 +79,93 @@ export default function CreatorCard({
                 decoding="async"
                 referrerPolicy="no-referrer"
                 onError={() => setBannerError(true)}
-                className={`w-full h-full transition-transform duration-500 group-hover:scale-105 ${
+                className={`h-full w-full transition-transform duration-500 group-hover:scale-105 ${
                   isGumroad ? "object-contain bg-[#0a0a0f]" : "object-cover"
                 }`}
               />
             ) : (
               <div
-                className="w-full h-full"
+                className="h-full w-full"
                 style={{
                   background: `linear-gradient(135deg, ${siteColor}33 0%, #1e1e2e 100%)`,
                 }}
               />
             )}
 
-            <div className="absolute inset-0 bg-gradient-to-t from-[#12121a] via-transparent to-transparent pointer-events-none" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#12121a] via-transparent to-transparent" />
           </div>
 
-          <div className="absolute top-2 left-2 z-10">
+          <div className="absolute left-2 top-2 z-10">
             <button
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 toggleCreatorLike(site, service, id);
               }}
-              className="p-1.5 rounded-full bg-black/40 hover:bg-black/60 transition-colors cursor-pointer"
+              className="cursor-pointer rounded-full bg-black/40 p-1.5 transition-colors hover:bg-black/60"
             >
               <Heart
                 className={`h-4 w-4 transition-colors ${
-                  liked ? "text-red-500 fill-red-500" : "text-white/80"
+                  liked ? "fill-red-500 text-red-500" : "text-white/80"
                 }`}
               />
             </button>
           </div>
 
-          <div className="absolute top-2 right-2 z-10">
+          <div className="absolute right-2 top-2 z-10">
             <Badge className={`text-xs ${siteBadgeClass}`}>{site}</Badge>
           </div>
-
-          {!isGumroad && (
-            <div className="absolute -bottom-5 left-4 z-10">
-              <div
-                className="h-14 w-14 rounded-full overflow-hidden flex items-center justify-center border-2 bg-[#12121a]"
-                style={{
-                  borderColor: "#12121a",
-                }}
-              >
-                {!avatarError ? (
-                  <img
-                    src={avatarUrl}
-                    alt={name}
-                    loading="lazy"
-                    decoding="async"
-                    referrerPolicy="no-referrer"
-                    onError={() => setAvatarError(true)}
-                    className="h-full w-full object-contain"
-                  />
-                ) : (
-                  <User className="h-7 w-7 text-[#7c3aed]" />
-                )}
-              </div>
-            </div>
-          )}
         </div>
 
-        <div className={`px-4 pb-4 space-y-1.5 ${isGumroad ? "pt-4" : "pt-7"}`}>
-          <h3 className="text-sm font-bold text-[#f0f0f5] truncate leading-tight">
-            {name}
-          </h3>
-
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5 min-w-0">
-              <Badge
-                variant="outline"
-                className="border-[#1e1e2e] text-[#6b7280] text-xs shrink-0"
-              >
-                {service}
-              </Badge>
-            </div>
-
-            <div className="flex items-center gap-3 text-xs text-[#6b7280] shrink-0">
-              {favorited !== undefined && (
-                <span className="flex items-center gap-1">
-                  <span>❤</span>
-                  <span>{favorited.toLocaleString()}</span>
-                </span>
-              )}
-              {updated !== undefined && (
-                <span>{new Date(typeof updated === "number" ? updated * 1000 : updated).toLocaleDateString("fr-FR")}</span>
+        <div className="space-y-3 p-4">
+          <div className="flex items-start gap-3">
+            <div
+              className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[#1e1e2e] bg-[#0a0a0f]"
+              style={{ borderColor: "rgba(255,255,255,0.06)" }}
+            >
+              {!avatarError ? (
+                <img
+                  src={avatarUrl}
+                  alt={name}
+                  loading="lazy"
+                  decoding="async"
+                  referrerPolicy="no-referrer"
+                  onError={() => setAvatarError(true)}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <User className="h-6 w-6 text-[#7c3aed]" />
               )}
             </div>
+
+            <div className="min-w-0 flex-1 space-y-2">
+              <h3 className="min-h-[2.5rem] break-words text-sm font-bold leading-tight text-[#f0f0f5]">
+                {name}
+              </h3>
+
+              <div className="flex flex-wrap gap-2">
+                <Badge
+                  variant="outline"
+                  className="border-[#1e1e2e] bg-[#0a0a0f] text-xs text-[#6b7280]"
+                >
+                  {service}
+                </Badge>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 text-xs text-[#6b7280]">
+            {favorited !== undefined && (
+              <span className="inline-flex items-center gap-1 rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1">
+                <Heart className="h-3.5 w-3.5" />
+                <span>{favorited.toLocaleString()}</span>
+              </span>
+            )}
+            {displayDate && (
+              <span className="inline-flex items-center rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1">
+                {displayDate}
+              </span>
+            )}
           </div>
         </div>
       </div>

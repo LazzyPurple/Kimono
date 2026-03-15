@@ -1,35 +1,27 @@
-import { query, execute } from "@/lib/db";
+import { getDataStore } from "@/lib/data-store";
 
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
 export async function getCachedCreators(site: string): Promise<any[] | null> {
-  const rows = await query<any>("SELECT * FROM CreatorsCache WHERE site = ?", [site]);
-  const row = rows[0];
+  const store = await getDataStore();
+  const row = await store.getCreatorsCache(site);
 
   if (!row) {
     return null;
   }
 
-  // Row updatedAt might come back as Date or string depending on mysql2 config
-  const updatedAt = typeof row.updatedAt === "string" ? new Date(row.updatedAt) : row.updatedAt;
-
-  if (Date.now() - updatedAt.getTime() > CACHE_TTL_MS) {
+  if (Date.now() - row.updatedAt.getTime() > CACHE_TTL_MS) {
     return null;
   }
 
   try {
     return JSON.parse(row.data);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
 
 export async function setCachedCreators(site: string, data: any[]): Promise<void> {
-  const jsonData = JSON.stringify(data);
-  const now = new Date();
-
-  await execute(
-    "INSERT INTO CreatorsCache (site, data, updatedAt) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE data = ?, updatedAt = ?",
-    [site, jsonData, now, jsonData, now]
-  );
+  const store = await getDataStore();
+  await store.setCreatorsCache(site, data, new Date());
 }

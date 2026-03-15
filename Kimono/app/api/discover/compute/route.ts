@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { query, execute } from "@/lib/db";
+import { getDataStore, type SupportedSite } from "@/lib/data-store";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ interface Favorite {
   id: string;
   name: string;
   service: string;
-  site: string; // "kemono" | "coomer"
+  site: SupportedSite;
 }
 
 interface RecommendedCreator {
@@ -23,12 +23,13 @@ interface RecommendedCreator {
 }
 
 interface ScoredCreator extends RecommendedCreator {
-  site: "kemono" | "coomer";
+  site: SupportedSite;
   score: number;
 }
 
-async function fetchSiteFavorites(site: "kemono" | "coomer", cookie: string): Promise<Favorite[]> {
+async function fetchSiteFavorites(site: SupportedSite, cookie: string): Promise<Favorite[]> {
   const baseUrl = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -48,12 +49,14 @@ async function fetchSiteFavorites(site: "kemono" | "coomer", cookie: string): Pr
     }
 
     const data = await res.json();
-    if (!Array.isArray(data)) return [];
+    if (!Array.isArray(data)) {
+      return [];
+    }
 
-    return data.map((c: any) => ({
-      id: c.id,
-      name: c.name,
-      service: c.service,
+    return data.map((creator: any) => ({
+      id: creator.id,
+      name: creator.name,
+      service: creator.service,
       site,
     }));
   } catch (error) {
@@ -62,8 +65,13 @@ async function fetchSiteFavorites(site: "kemono" | "coomer", cookie: string): Pr
   }
 }
 
-async function fetchRecommendations(site: "kemono" | "coomer", service: string, id: string): Promise<RecommendedCreator[]> {
+async function fetchRecommendations(
+  site: SupportedSite,
+  service: string,
+  id: string
+): Promise<RecommendedCreator[]> {
   const baseUrl = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
@@ -74,112 +82,117 @@ async function fetchRecommendations(site: "kemono" | "coomer", service: string, 
     });
     clearTimeout(timeoutId);
 
-    if (!res.ok) return [];
-    
+    if (!res.ok) {
+      return [];
+    }
+
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch (error) {
+  } catch {
     return [];
   }
 }
 
-// Helper to chunk arrays
 function chunkArray<T>(array: T[], size: number): T[][] {
   const chunks: T[][] = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
+
+  for (let index = 0; index < array.length; index += size) {
+    chunks.push(array.slice(index, index + size));
   }
+
   return chunks;
 }
 
 export async function POST() {
   try {
-    const sessions = await query<any>("SELECT * FROM KimonoSession");
+    const store = await getDataStore();
+    const sessions = await store.getKimonoSessions();
+
     if (sessions.length === 0) {
-      return NextResponse.json({ error: "Aucune session trouvée. Veuillez vous connecter." }, { status: 400 });
+      return NextResponse.json(
+        { error: "Aucune session trouvee. Veuillez vous connecter." },
+        { status: 400 }
+      );
     }
 
-    let allFavorites: Favorite[] = [];
-
-    // 1. Fetch all favorites from Kemono and Coomer
-    const favPromises = sessions.map((s: any) => fetchSiteFavorites(s.site as "kemono" | "coomer", s.cookie));
-    const favResults = await Promise.all(favPromises);
-    allFavorites = favResults.flat();
+    let allFavorites = (await Promise.all(
+      sessions.map((session) => fetchSiteFavorites(session.site, session.cookie))
+    )).flat();
 
     if (allFavorites.length === 0) {
-      return NextResponse.json({ error: "Aucun favori trouvé." }, { status: 400 });
+      return NextResponse.json({ error: "Aucun favori trouve." }, { status: 400 });
     }
 
     const totalFavorites = allFavorites.length;
     const wasTruncated = totalFavorites > MAX_FAVORITES;
+
     if (wasTruncated) {
       allFavorites = allFavorites.slice(0, MAX_FAVORITES);
     }
 
-    const favoriteKeys = new Set(allFavorites.map((f) => `${f.site}-${f.service}-${f.id}`));
+    const favoriteKeys = new Set(
+      allFavorites.map((favorite) => `${favorite.site}-${favorite.service}-${favorite.id}`)
+    );
 
-    // 2. Compute recommendations by batching requests (max 15 concurrent)
-    const BATCH_SIZE = 15;
-    const batches = chunkArray(allFavorites, BATCH_SIZE);
-    
-    console.log(`[DISCOVER] Computing recommendations for ${allFavorites.length} favorites in ${batches.length} batches.`);
-
+    const batches = chunkArray(allFavorites, 15);
     const scoreMap = new Map<string, ScoredCreator>();
 
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      console.log(`[DISCOVER] Processing batch ${i + 1}/${batches.length}...`);
-      
-      const promises = batch.map(async (fav) => {
-        const recs = await fetchRecommendations(fav.site as "kemono" | "coomer", fav.service, fav.id);
-        
-        for (const rec of recs) {
-          const key = `${fav.site}-${rec.service}-${rec.id}`;
-          
-          if (scoreMap.has(key)) {
-            scoreMap.get(key)!.score += 1;
-          } else {
-            scoreMap.set(key, { ...rec, site: fav.site as "kemono" | "coomer", score: 1 });
-          }
-        }
-      });
+    for (let index = 0; index < batches.length; index += 1) {
+      const batch = batches[index];
+      console.log(`[DISCOVER] Processing batch ${index + 1}/${batches.length}...`);
 
-      await Promise.all(promises);
-      
-      // Small pause between batches to be nice to the API
-      if (i < batches.length - 1) {
-        await new Promise(r => setTimeout(r, 500));
+      await Promise.all(
+        batch.map(async (favorite) => {
+          const recommendations = await fetchRecommendations(
+            favorite.site,
+            favorite.service,
+            favorite.id
+          );
+
+          for (const recommendation of recommendations) {
+            const key = `${favorite.site}-${recommendation.service}-${recommendation.id}`;
+            const existing = scoreMap.get(key);
+
+            if (existing) {
+              existing.score += 1;
+            } else {
+              scoreMap.set(key, {
+                ...recommendation,
+                site: favorite.site,
+                score: 1,
+              });
+            }
+          }
+        })
+      );
+
+      if (index < batches.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
 
-    // 3. Filter out existing favorites and blocked creators
-    const blocks = await query<any>("SELECT * FROM DiscoveryBlock");
-    const blockedKeys = new Set(blocks.map((b: any) => `${b.site}-${b.service}-${b.creatorId}`));
+    const blocks = await store.getDiscoveryBlocks();
+    const blockedKeys = new Set(
+      blocks.map((block) => `${block.site}-${block.service}-${block.creatorId}`)
+    );
 
     const finalRecommendations = Array.from(scoreMap.values())
-      .filter((rec) => {
-        const key = `${rec.site}-${rec.service}-${rec.id}`;
+      .filter((recommendation) => {
+        const key = `${recommendation.site}-${recommendation.service}-${recommendation.id}`;
         return !favoriteKeys.has(key) && !blockedKeys.has(key);
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((left, right) => right.score - left.score);
 
-    // 4. Save to Cache
-    // We use a fixed ID 'global' to only store one recent cache
     const now = new Date();
-    const jsonData = JSON.stringify(finalRecommendations);
-    await execute(
-      "INSERT INTO DiscoveryCache (id, data, updatedAt) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE data = ?, updatedAt = ?",
-      ["global", jsonData, now, jsonData, now]
-    );
+    await store.setDiscoveryCache("global", finalRecommendations, now);
 
     return NextResponse.json({
       total: finalRecommendations.length,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now.toISOString(),
       ...(wasTruncated && {
-        warning: `Seuls ${MAX_FAVORITES} favoris sur ${totalFavorites} ont été traités pour respecter les limites du serveur.`,
+        warning: `Seuls ${MAX_FAVORITES} favoris sur ${totalFavorites} ont ete traites pour respecter les limites du serveur.`,
       }),
     });
-
   } catch (error) {
     console.error("[DISCOVER] Error in compute:", error);
     return NextResponse.json({ error: "Erreur lors du calcul" }, { status: 500 });

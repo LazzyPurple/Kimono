@@ -1,9 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { fetchCreatorPostsBySite } from "@/lib/api/unified";
+﻿import { NextRequest, NextResponse } from "next/server";
+
+import { createHybridContentService } from "@/lib/hybrid-content";
+import { logAppError } from "@/lib/app-logger";
+import { loadStoredKimonoSessionCookie } from "@/lib/remote-session";
 import type { Site } from "@/lib/api/unified";
-import { query as dbQuery } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+
+const hybridContent = createHybridContentService();
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
@@ -14,26 +18,37 @@ export async function GET(request: NextRequest) {
   const query = searchParams.get("q") || undefined;
 
   if (!site || !service || !id) {
-    return NextResponse.json({ error: "Paramètres manquants" }, { status: 400 });
+    return NextResponse.json({ error: "Parametres manquants" }, { status: 400 });
   }
 
   try {
-    // Récupérer le cookie de session si disponible (pour le contenu restreint)
-    const sessions = await dbQuery<any>(
-      "SELECT * FROM KimonoSession WHERE site = ? ORDER BY savedAt DESC LIMIT 1",
-      [site]
-    );
-    const session = sessions[0];
+    const cookie = await loadStoredKimonoSessionCookie(site);
+    const result = await hybridContent.getCreatorPosts({
+      site,
+      service,
+      creatorId: id,
+      offset,
+      cookie: cookie ?? undefined,
+      query,
+    });
 
-    const posts = await fetchCreatorPostsBySite(site, service, id, offset, session?.cookie, query);
-    // Guard: s'assurer qu'on retourne toujours un tableau
-    const safePosts = Array.isArray(posts) ? posts : [];
-    if (!Array.isArray(posts)) {
-      console.error("creator-posts: unexpected response (not an array):", posts);
-    }
-    return NextResponse.json(safePosts);
-  } catch (err) {
-    console.error("creator-posts error:", err);
-    return NextResponse.json([], { status: 200 }); // retourner [] plutôt qu'une erreur JSON
+    return NextResponse.json(result.posts, {
+      headers: {
+        "x-kimono-source": result.source,
+      },
+    });
+  } catch (error) {
+    await logAppError("api", "creator-posts error", error, {
+      details: {
+        route: "/api/creator-posts",
+        site,
+        service,
+        creatorId: id,
+        offset,
+        query: query ?? null,
+      },
+    });
+    return NextResponse.json([], { status: 200 });
   }
 }
+

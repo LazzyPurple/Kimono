@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -35,14 +36,14 @@ export default function TotpSetupDialog({
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Erreur lors de la génération du QR code");
+        setError(data.error || "Failed to generate the QR code.");
         setLoading(false);
         return;
       }
 
       setQrCode(data.qrCodeDataUrl);
     } catch {
-      setError("Erreur réseau");
+      setError("Network error.");
     }
 
     setLoading(false);
@@ -63,14 +64,14 @@ export default function TotpSetupDialog({
       const data = await res.json();
 
       if (!res.ok) {
-        setError(data.error || "Code invalide");
+        setError(data.error || "Invalid code.");
         setLoading(false);
         return;
       }
 
       setSuccess(true);
     } catch {
-      setError("Erreur réseau");
+      setError("Network error.");
     }
 
     setLoading(false);
@@ -78,49 +79,49 @@ export default function TotpSetupDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] max-w-md">
+      <DialogContent className="max-w-md border-[#1e1e2e] bg-[#12121a] text-[#f0f0f5]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-[#f0f0f5]">
             <Shield className="h-5 w-5 text-[#7c3aed]" />
-            Configurer la 2FA
+            Set up 2FA
           </DialogTitle>
+          <DialogDescription className="text-[#6b7280]">
+            Add an authenticator app to protect your account with a second verification step.
+          </DialogDescription>
         </DialogHeader>
 
         {success ? (
-          <div className="text-center space-y-4 py-4">
-            <CheckCircle className="h-12 w-12 text-green-500 mx-auto" />
-            <p className="text-[#f0f0f5] font-medium">
-              Authentification à deux facteurs activée !
+          <div className="space-y-4 py-4 text-center">
+            <CheckCircle className="mx-auto h-12 w-12 text-green-500" />
+            <p className="font-medium text-[#f0f0f5]">
+              Two-factor authentication is now enabled.
             </p>
             <p className="text-sm text-[#6b7280]">
-              Vous devrez désormais entrer un code depuis votre application
-              Authenticator à chaque connexion.
+              You will now be asked for a code from your authenticator app each time you sign in.
             </p>
             <Button
               onClick={() => onOpenChange(false)}
-              className="bg-[#7c3aed] hover:bg-[#6d28d9] text-white cursor-pointer"
+              className="cursor-pointer bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
             >
-              Terminé
+              Done
             </Button>
           </div>
         ) : !qrCode ? (
-          <div className="text-center space-y-4 py-4">
+          <div className="space-y-4 py-4 text-center">
             <p className="text-sm text-[#6b7280]">
-              Scannez le QR code avec votre application Authenticator (Proton
-              Pass, Google Authenticator, Authy, etc.) pour ajouter une couche
-              de sécurité supplémentaire.
+              Scan a QR code with your authenticator app such as Proton Pass, Google Authenticator, or Authy.
             </p>
             <Button
               onClick={startSetup}
               disabled={loading}
-              className="bg-[#7c3aed] hover:bg-[#6d28d9] text-white cursor-pointer"
+              className="cursor-pointer bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
             >
               {loading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <Shield className="mr-2 h-4 w-4" />
               )}
-              Générer le QR Code
+              Generate QR code
             </Button>
           </div>
         ) : (
@@ -128,18 +129,16 @@ export default function TotpSetupDialog({
             <div className="flex justify-center">
               <img
                 src={qrCode}
-                alt="QR Code TOTP"
-                className="w-48 h-48 rounded-lg"
+                alt="TOTP QR Code"
+                className="h-48 w-48 rounded-lg"
               />
             </div>
-            <p className="text-xs text-[#6b7280] text-center">
-              Scannez ce QR code avec Proton Pass ou votre application
-              Authenticator préférée, puis entrez le code à 6 chiffres
-              ci-dessous.
+            <p className="text-center text-xs text-[#6b7280]">
+              Scan this QR code with Proton Pass or your preferred authenticator app, then enter the 6-digit code below.
             </p>
 
             {error && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2 text-red-400 text-sm text-center">
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-center text-sm text-red-400">
                 {error}
               </div>
             )}
@@ -149,7 +148,7 @@ export default function TotpSetupDialog({
               inputMode="numeric"
               pattern="[0-9]*"
               maxLength={6}
-              placeholder="Code à 6 chiffres"
+              placeholder="6-digit code"
               value={code}
               onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
               className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] text-center text-2xl tracking-[0.5em]"
@@ -158,7 +157,7 @@ export default function TotpSetupDialog({
 
             <Button
               type="submit"
-              className="w-full bg-[#7c3aed] hover:bg-[#6d28d9] text-white cursor-pointer"
+              className="w-full cursor-pointer bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
               disabled={loading || code.length !== 6}
             >
               {loading ? (
@@ -166,7 +165,7 @@ export default function TotpSetupDialog({
               ) : (
                 <CheckCircle className="mr-2 h-4 w-4" />
               )}
-              Activer la 2FA
+              Enable 2FA
             </Button>
           </form>
         )}

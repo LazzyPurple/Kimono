@@ -1,18 +1,45 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, useSearchParams, useRouter, usePathname } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import MediaCard from "@/components/MediaCard";
-import { User, ExternalLink, Loader2, Search, Heart, Users, LayoutGrid } from "lucide-react";
-import type { UnifiedPost, Site } from "@/lib/api/helpers";
-import type { Creator } from "@/lib/api/kemono";
-import { getPostType, proxyCdnUrl, resolvePostMedia } from "@/lib/api/helpers";
+import CreatorCard from "@/components/CreatorCard";
 import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
-import CreatorCard from "@/components/CreatorCard";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import {
+  getPostType,
+  proxyCdnUrl,
+  resolveListingPostMedia,
+  type Site,
+  type UnifiedPost,
+} from "@/lib/api/helpers";
+import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
+import {
+  BROWSER_POST_CACHE_TTL_MS,
+  buildCreatorPostsCacheKey,
+  buildCreatorProfileCacheKey,
+} from "@/lib/perf-cache";
+import { buildCreatorPageTitle } from "@/lib/page-titles";
+import type { Creator } from "@/lib/api/kemono";
+import {
+  CalendarDays,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ExternalLink,
+  FileText,
+  Heart,
+  LayoutGrid,
+  Loader2,
+  MoreHorizontal,
+  Search,
+  User,
+  Users,
+} from "lucide-react";
 
 interface RecommendedCreator {
   id: string;
@@ -32,9 +59,8 @@ export default function CreatorPage() {
   const service = params.service;
   const id = params.id;
 
-  // Fix #6: Validation des paramÃƒÂ¨tres
   const isValidSite = site === "kemono" || site === "coomer";
-  const isValid = isValidSite && service && id;
+  const isValid = isValidSite && Boolean(service) && Boolean(id);
 
   const [profile, setProfile] = useState<(Creator & { site: Site }) | null>(null);
   const [posts, setPosts] = useState<UnifiedPost[]>([]);
@@ -43,59 +69,59 @@ export default function CreatorPage() {
   const [recommended, setRecommended] = useState<RecommendedCreator[]>([]);
   const [loadingRecommended, setLoadingRecommended] = useState(true);
   const [avatarError, setAvatarError] = useState(false);
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  
+
   const { isCreatorLiked, toggleCreatorLike } = useLikes();
   const liked = isCreatorLiked(site, service, id);
 
   const query = searchParams.get("q") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
-
-  const [inputValue, setInputValue] = useState(query);
-  const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, page));
   const mediaFilter = (searchParams.get("media") as MediaFilter) || "tout";
   const activeTab = (searchParams.get("tab") as "posts" | "recommended") || "posts";
 
-  const handleTabChange = (tab: "posts" | "recommended") => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (tab === "posts") params.delete("tab");
-    else params.set("tab", tab);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
-
-  const handleMediaFilterChange = (media: MediaFilter) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (media === "tout") params.delete("media");
-    else params.set("media", media);
-    params.delete("page");
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  };
-
+  const [inputValue, setInputValue] = useState(query);
+  const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, page));
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
 
-  // Construction de la clÃƒÂ© unique pour ce crÃƒÂ©ateur (site-service-id)
   const creatorPageKey = `${site}-${service}-${id}`;
-  
-  // Le scroll sera restaurÃƒÂ© uniquement quand les posts ne sont plus en cours de chargement
-  // (On suppose ici que loadingPosts ÃƒÂ  false veut dire "donnÃƒÂ©es chargÃƒÂ©es et prÃƒÂªtes")
+  const recommendedCacheKey = `creator:recommended:${site}:${service}:${id}`;
   const isDataReady = !loadingPosts && !loadingProfile;
+
+  const displayName = profile?.name ?? (loadingProfile ? "..." : `Creator ${id}`);
+  useDocumentTitle(buildCreatorPageTitle(profile?.name ?? `Creator ${id}`, service));
   useScrollRestoration(creatorPageKey, isDataReady);
+
+  const handleTabChange = (tab: "posts" | "recommended") => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (tab === "posts") nextParams.delete("tab");
+    else nextParams.set("tab", tab);
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  };
+
+  const handleMediaFilterChange = (media: MediaFilter) => {
+    const nextParams = new URLSearchParams(searchParams.toString());
+    if (media === "tout") nextParams.delete("media");
+    else nextParams.set("media", media);
+    nextParams.delete("page");
+    router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
+  };
 
   const updateURL = useMemo(() => {
     let timeout: ReturnType<typeof setTimeout>;
-    return (q: string, p: number) => {
+    return (nextQuery: string, nextPage: number) => {
       clearTimeout(timeout);
       timeout = setTimeout(() => {
-        const params = new URLSearchParams(searchParams.toString());
-        if (q) params.set("q", q);
-        else params.delete("q");
-        if (p > 1) params.set("page", String(p));
-        else params.delete("page");
-        router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+        const nextParams = new URLSearchParams(searchParams.toString());
+        if (nextQuery) nextParams.set("q", nextQuery);
+        else nextParams.delete("q");
+        if (nextPage > 1) nextParams.set("page", String(nextPage));
+        else nextParams.delete("page");
+        router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
       }, 300);
     };
   }, [pathname, router, searchParams]);
@@ -104,62 +130,82 @@ export default function CreatorPage() {
     setInputValue(query);
   }, [query]);
 
-  const siteBaseUrl =
-    site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+  const siteBaseUrl = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
 
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
-      const res = await fetch(
-        `/api/creator-profile?site=${site}&service=${service}&id=${id}`
-      );
-      const data = await res.json();
+      const data = await fetchJsonWithBrowserCache<(Creator & { site: Site }) | null>({
+        key: buildCreatorProfileCacheKey({ site, service, creatorId: id }),
+        ttlMs: BROWSER_POST_CACHE_TTL_MS,
+        loader: async () => {
+          const response = await fetch(`/api/creator-profile?site=${site}&service=${service}&id=${id}`);
+          return response.ok ? response.json() : null;
+        },
+      });
       setProfile(data);
     } catch {
       setProfile(null);
     } finally {
       setLoadingProfile(false);
     }
-  }, [site, service, id]);
+  }, [id, service, site]);
 
   const fetchPosts = useCallback(
-    async (p: number) => {
+    async (nextPage: number) => {
       setLoadingPosts(true);
 
       try {
-        const currentOffset = (p - 1) * 50;
-        const res = await fetch(
-          `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`
-        );
-        const raw = await res.json();
-        const data: UnifiedPost[] = Array.isArray(raw) ? raw : [];
+        const currentOffset = (nextPage - 1) * 50;
+        const data = await fetchJsonWithBrowserCache<UnifiedPost[]>({
+          key: buildCreatorPostsCacheKey({
+            site,
+            service,
+            creatorId: id,
+            offset: currentOffset,
+          }),
+          ttlMs: BROWSER_POST_CACHE_TTL_MS,
+          loader: async () => {
+            const response = await fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`);
+            const raw = await response.json();
+            return Array.isArray(raw) ? raw : [];
+          },
+        });
 
         setPosts(data);
         const hasNext = data.length >= 50;
         setHasNextPage(hasNext);
-        if (p > knownMaxPage) setKnownMaxPage(p);
-        if (hasNext && p >= knownMaxPage) setKnownMaxPage(p + 1);
-      } catch (err) {
-        console.error(err);
+        if (nextPage > knownMaxPage) setKnownMaxPage(nextPage);
+        if (hasNext && nextPage >= knownMaxPage) setKnownMaxPage(nextPage + 1);
+      } catch (error) {
+        console.error(error);
       } finally {
         setLoadingPosts(false);
       }
     },
-    [site, service, id, knownMaxPage]
+    [id, knownMaxPage, service, site]
   );
 
   useEffect(() => {
-    fetchProfile();
+    void fetchProfile();
   }, [fetchProfile]);
-  
+
   useEffect(() => {
     let active = true;
     setLoadingRecommended(true);
-    fetch(`/api/recommended?site=${site}&service=${service}&id=${id}`)
-      .then((res) => res.json())
+
+    fetchJsonWithBrowserCache<RecommendedCreator[]>({
+      key: recommendedCacheKey,
+      ttlMs: BROWSER_POST_CACHE_TTL_MS,
+      loader: async () => {
+        const response = await fetch(`/api/recommended?site=${site}&service=${service}&id=${id}`);
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+      },
+    })
       .then((data) => {
         if (active) {
-          setRecommended(Array.isArray(data) ? data : []);
+          setRecommended(data);
           setLoadingRecommended(false);
         }
       })
@@ -169,35 +215,46 @@ export default function CreatorPage() {
           setLoadingRecommended(false);
         }
       });
-      
-    return () => { active = false; };
-  }, [site, service, id]);
-  
+
+    return () => {
+      active = false;
+    };
+  }, [id, recommendedCacheKey, service, site]);
+
   useEffect(() => {
     if (!query) {
-      fetchPosts(page);
+      void fetchPosts(page);
     }
   }, [fetchPosts, page, query]);
 
-
-  // Recherche server-side via ?q= (loop complet)
   useEffect(() => {
     if (!query) {
       setSearchResults([]);
+      setLoadingSearch(false);
       return;
     }
+
     let cancelled = false;
     setLoadingSearch(true);
 
-    (async () => {
+    void (async () => {
       const all: UnifiedPost[] = [];
       let offset = 0;
+
       while (true) {
         try {
-          const res = await fetch(
-            `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}&q=${encodeURIComponent(query)}`
-          );
-          const data = await res.json();
+          const data = await fetchJsonWithBrowserCache<UnifiedPost[]>({
+            key: buildCreatorPostsCacheKey({ site, service, creatorId: id, offset, q: query }),
+            ttlMs: BROWSER_POST_CACHE_TTL_MS,
+            loader: async () => {
+              const response = await fetch(
+                `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}&q=${encodeURIComponent(query)}`
+              );
+              const json = await response.json();
+              return Array.isArray(json) ? json : [];
+            },
+          });
+
           if (cancelled) return;
           if (!Array.isArray(data) || data.length === 0) break;
           all.push(...data);
@@ -207,67 +264,61 @@ export default function CreatorPage() {
           break;
         }
       }
+
       if (!cancelled) {
         setSearchResults(all);
         setLoadingSearch(false);
       }
     })();
 
-    return () => { cancelled = true; };
-  }, [query, site, service, id]);
+    return () => {
+      cancelled = true;
+    };
+  }, [id, query, service, site]);
 
-  // Reset recherche quand on change de crÃƒÂ©ateur
   useEffect(() => {
     setSearchResults([]);
-  }, [site, service, id]);
+  }, [id, service, site]);
 
   const isSearching = query.length > 0;
   const basePosts = isSearching ? searchResults : posts;
 
-  // Si l'API renvoie des rÃƒÂ©sultats non filtrÃƒÂ©s, ou juste pour ÃƒÂªtre sÃƒÂ»r,
-  // on applique aussi un filtre local supplÃƒÂ©mentaire sur les rÃƒÂ©sultats paginÃƒÂ©s
-  // (Coomer a parfois du mal avec ?q=)
   const filteredPosts = basePosts.filter((post) => {
     if (mediaFilter === "images" && getPostType(post) !== "image") return false;
     if (mediaFilter === "videos" && getPostType(post) !== "video") return false;
-    
-    // Fallback filter if API ignores ?q=
+
     if (isSearching) {
-      const qText = query.toLowerCase();
-      if (!((post.title || "").toLowerCase().includes(qText) || (post.content || "").toLowerCase().includes(qText))) {
+      const loweredQuery = query.toLowerCase();
+      const inTitle = (post.title || "").toLowerCase().includes(loweredQuery);
+      const inContent = (post.content || "").toLowerCase().includes(loweredQuery);
+      if (!inTitle && !inContent) {
         return false;
       }
     }
+
     return true;
   });
 
-  const displayName =
-    profile?.name ?? (loadingProfile ? "Ã¢â‚¬Â¦" : `CrÃƒÂ©ateur ${id}`);
-
   if (!isValid) {
     return (
-      <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center space-y-2">
-        <p className="text-red-400 text-lg font-medium">ParamÃƒÂ¨tres invalides</p>
-        <p className="text-[#6b7280] text-sm">
-          Le site doit ÃƒÂªtre Ã‚Â« kemono Ã‚Â» ou Ã‚Â« coomer Ã‚Â», et le service/ID ne peuvent pas ÃƒÂªtre vides.
-        </p>
+      <div className="space-y-2 rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
+        <p className="text-lg font-medium text-red-400">Invalid parameters</p>
+        <p className="text-sm text-[#6b7280]">The site must be kemono or coomer, and both service and identifier are required.</p>
       </div>
     );
   }
 
-  const goToPage = (newPage: number) => {
-    updateURL(query, newPage);
+  const goToPage = (nextPage: number) => {
+    updateURL(query, nextPage);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  function Pagination() {
-    const pages = [];
+  function PaginationControls() {
+    const pages: Array<number | "..."> = [];
     const maxVisiblePage = Math.max(page, knownMaxPage);
 
-    // Always show 1
     pages.push(1);
 
-    // Show dots or pages between 1 and page-1
     if (page > 3) {
       pages.push("...");
       pages.push(page - 1);
@@ -275,74 +326,92 @@ export default function CreatorPage() {
       pages.push(2);
     }
 
-    // Show page (if > 1)
     if (page > 1) {
       pages.push(page);
     }
 
-    // Show pages up to maxVisiblePage
-    let nextP = page + 1;
-    while (nextP <= maxVisiblePage) {
-      if (nextP === maxVisiblePage && maxVisiblePage > page + 2) {
+    let nextPage = page + 1;
+    while (nextPage <= maxVisiblePage) {
+      if (nextPage === maxVisiblePage && maxVisiblePage > page + 2) {
         pages.push("...");
         pages.push(maxVisiblePage);
         break;
       }
-      pages.push(nextP);
-      nextP++;
+      pages.push(nextPage);
+      nextPage += 1;
     }
 
     return (
-      <div className="flex items-center justify-center gap-1 pt-4 flex-wrap">
+      <div className="flex flex-wrap items-center justify-center gap-1 pt-4">
         {page > 1 && (
-          <button onClick={() => goToPage(1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
-            Ã‚Â«
+          <button
+            aria-label="First page"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-[#1e1e2e] text-[#6b7280] transition-colors hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+            onClick={() => goToPage(1)}
+            title="First page"
+          >
+            <ChevronsLeft className="h-4 w-4" />
           </button>
         )}
         {page > 1 && (
-          <button onClick={() => goToPage(page - 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
-            Ã¢â‚¬Â¹
+          <button
+            aria-label="Previous page"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-[#1e1e2e] text-[#6b7280] transition-colors hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+            onClick={() => goToPage(page - 1)}
+            title="Previous page"
+          >
+            <ChevronLeft className="h-4 w-4" />
           </button>
         )}
-        {pages.map((p, i) =>
-          p === "..." ? (
-            <span key={`dots-${i}`} className="px-2 text-[#6b7280]">
-              Ã¢â‚¬Â¦
+        {pages.map((value, index) =>
+          value === "..." ? (
+            <span key={`dots-${index}`} className="flex h-9 w-9 items-center justify-center text-[#6b7280]">
+              <MoreHorizontal className="h-4 w-4" />
             </span>
           ) : (
             <button
-              key={`page-${p}`}
-              onClick={() => goToPage(p as number)}
-              className={`w-9 h-9 rounded-lg text-sm transition-colors cursor-pointer flex items-center justify-center ${
-                p === page
+              key={`page-${value}`}
+              className={`flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-sm transition-colors ${
+                value === page
                   ? "bg-[#7c3aed] text-white"
                   : "border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
               }`}
+              onClick={() => goToPage(value as number)}
             >
-              {p}
+              {value}
             </button>
           )
         )}
         {hasNextPage && (
-          <button onClick={() => goToPage(page + 1)} className="w-9 h-9 rounded-lg text-sm border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5] transition-colors cursor-pointer flex items-center justify-center">
-            Ã¢â‚¬Âº
+          <button
+            aria-label="Next page"
+            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-[#1e1e2e] text-[#6b7280] transition-colors hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+            onClick={() => goToPage(page + 1)}
+            title="Next page"
+          >
+            <ChevronRight className="h-4 w-4" />
           </button>
         )}
       </div>
     );
   }
 
+  const mediaFilterLabels: Record<MediaFilter, string> = {
+    tout: "All",
+    images: "Images",
+    videos: "Videos",
+  };
+
   return (
     <div className="space-y-6">
-      {/* En-tÃƒÂªte crÃƒÂ©ateur */}
-      <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-6">
+      <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-6">
         <div className="flex items-start gap-4">
-          <div className="h-16 w-16 rounded-full bg-[#7c3aed]/20 flex items-center justify-center shrink-0 overflow-hidden">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-[#7c3aed]/20">
             {loadingProfile ? (
               <Loader2 className="h-7 w-7 animate-spin text-[#7c3aed]" />
             ) : !avatarError ? (
               <img
-              src={proxyCdnUrl(site, `/icons/${service}/${id}`)}
+                src={proxyCdnUrl(site, `/icons/${service}/${id}`)}
                 alt={displayName}
                 onError={() => setAvatarError(true)}
                 className="h-full w-full object-cover"
@@ -352,69 +421,54 @@ export default function CreatorPage() {
             )}
           </div>
 
-          <div className="flex-1 space-y-2 min-w-0">
+          <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold text-[#f0f0f5] truncate">
-                {displayName}
-              </h1>
-              <Badge
-                className={
-                  site === "kemono"
-                    ? "bg-[#7c3aed]/20 text-[#7c3aed]"
-                    : "bg-pink-600/20 text-pink-400"
-                }
-              >
+              <h1 className="truncate text-2xl font-bold text-[#f0f0f5]">{displayName}</h1>
+              <Badge className={site === "kemono" ? "bg-[#7c3aed]/20 text-[#7c3aed]" : "bg-pink-600/20 text-pink-400"}>
                 {site}
               </Badge>
-              <Badge
-                variant="outline"
-                className="border-[#1e1e2e] text-[#6b7280]"
-              >
+              <Badge variant="outline" className="border-[#1e1e2e] text-[#6b7280]">
                 {service}
               </Badge>
               <button
-                onClick={() => toggleCreatorLike(site, service, id)}
-                className="ml-auto flex items-center gap-1.5 text-sm transition-colors cursor-pointer bg-[#1e1e2e]/50 hover:bg-[#1e1e2e] px-3 py-1.5 rounded-full border border-[#1e1e2e]"
+                onClick={() => void toggleCreatorLike(site, service, id)}
+                className="ml-auto flex cursor-pointer items-center gap-1.5 rounded-full border border-[#1e1e2e] bg-[#1e1e2e]/50 px-3 py-1.5 text-sm transition-colors hover:bg-[#1e1e2e]"
               >
-                <Heart
-                  className={`h-4 w-4 transition-colors ${
-                    liked
-                      ? "text-red-500 fill-red-500"
-                      : "text-[#6b7280] group-hover:text-red-400"
-                  }`}
-                />
-                <span className={liked ? "text-red-500 font-medium" : "text-[#6b7280]"}>
-                  {liked ? "AbonnÃƒÂ©" : "S'abonner"}
-                </span>
+                <Heart className={`h-4 w-4 transition-colors ${liked ? "fill-red-500 text-red-500" : "text-[#6b7280] group-hover:text-red-400"}`} />
+                <span className={liked ? "font-medium text-red-500" : "text-[#6b7280]"}>{liked ? "Following" : "Follow"}</span>
               </button>
             </div>
 
-            <div className="flex items-center gap-2 text-[#6b7280] text-sm">
+            <div className="flex items-center gap-2 text-sm text-[#6b7280]">
               <ExternalLink className="h-3 w-3 shrink-0" />
               <a
                 href={`${siteBaseUrl}/${service}/user/${id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="hover:text-[#7c3aed] transition-colors truncate"
+                className="truncate transition-colors hover:text-[#7c3aed]"
               >
                 {siteBaseUrl}/{service}/user/{id}
               </a>
             </div>
 
             {profile && (
-              <div className="flex gap-4 text-xs text-[#6b7280]">
+              <div className="flex flex-wrap gap-4 text-xs text-[#6b7280]">
                 {profile.post_count !== undefined && (
-                  <span>Ã°Å¸â€œÂ {profile.post_count.toLocaleString()} posts</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <FileText className="h-3.5 w-3.5 text-[#7c3aed]" />
+                    <span>{profile.post_count.toLocaleString()} posts</span>
+                  </span>
                 )}
                 {profile.favorited !== undefined && (
-                  <span>Ã¢ÂÂ¤ {profile.favorited.toLocaleString()} favoris</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <Heart className="h-3.5 w-3.5 text-pink-400" />
+                    <span>{profile.favorited.toLocaleString()} favorites</span>
+                  </span>
                 )}
                 {(profile.updated !== undefined || profile.indexed !== undefined) && (
-                  <span>
-                    Mis ÃƒÂ  jour le{" "}
-                    {new Date(profile.updated ?? profile.indexed ?? 0).toLocaleDateString(
-                      "fr-FR"
-                    )}
+                  <span className="inline-flex items-center gap-1.5">
+                    <CalendarDays className="h-3.5 w-3.5 text-[#7c3aed]" />
+                    <span>Updated on {new Date(profile.updated ?? profile.indexed ?? 0).toLocaleDateString("en-GB")}</span>
                   </span>
                 )}
               </div>
@@ -423,172 +477,162 @@ export default function CreatorPage() {
         </div>
       </div>
 
-      {/* Onglets */}
-      <div className="flex bg-[#12121a] border border-[#1e1e2e] rounded-xl p-1 gap-1 w-full max-w-sm">
+      <div className="flex w-full max-w-sm gap-1 rounded-xl border border-[#1e1e2e] bg-[#12121a] p-1">
         <button
           onClick={() => handleTabChange("posts")}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
-            activeTab === "posts"
-              ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
-              : "text-[#6b7280] hover:text-[#f0f0f5]"
+          className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors ${
+            activeTab === "posts" ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm" : "text-[#6b7280] hover:text-[#f0f0f5]"
           }`}
         >
           <LayoutGrid className="h-4 w-4" />
           Posts
           {profile?.post_count !== undefined && (
-            <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px] h-4 bg-[#7c3aed]/20 text-[#7c3aed]">
+            <Badge variant="secondary" className="ml-1 h-4 bg-[#7c3aed]/20 px-1.5 py-0 text-[10px] text-[#7c3aed]">
               {profile.post_count > 999 ? "999+" : profile.post_count}
             </Badge>
           )}
         </button>
         <button
           onClick={() => handleTabChange("recommended")}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer ${
-            activeTab === "recommended"
-              ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
-              : "text-[#6b7280] hover:text-[#f0f0f5]"
+          className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors ${
+            activeTab === "recommended" ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm" : "text-[#6b7280] hover:text-[#f0f0f5]"
           }`}
         >
           <Users className="h-4 w-4" />
-          Similaires
+          Similar
         </button>
       </div>
 
       {activeTab === "posts" ? (
         <>
-          {/* Filtres mÃƒÂ©dias */}
           <div className="flex gap-2">
-        {(["tout", "images", "videos"] as MediaFilter[]).map((f) => (
-          <Button
-            key={f}
-            variant="outline"
-            size="sm"
-            onClick={() => handleMediaFilterChange(f)}
-            className={`border-[#1e1e2e] cursor-pointer transition-colors ${
-              mediaFilter === f
-                ? "bg-[#7c3aed] border-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-            }`}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-          </Button>
-        ))}
-      </div>
-
-      {/* Recherche dans les posts */}
-      <div className="space-y-2">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
-          <Input
-            value={inputValue}
-            onChange={(e) => {
-              const val = e.target.value;
-              setInputValue(val);
-              updateURL(val, 1);
-            }}
-            placeholder="Chercher dans les postsÃ¢â‚¬Â¦"
-            className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] pl-9"
-          />
-        </div>
-        {loadingPosts && isSearching ? (
-          <div className="flex items-center text-xs text-[#7c3aed]">
-            <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-            Recherche en coursÃ¢â‚¬Â¦
-          </div>
-        ) : isSearching ? (
-          <p className="text-xs text-[#6b7280]">
-            {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvÃƒÂ©{filteredPosts.length > 1 ? "s" : ""}
-          </p>
-        ) : null}
-      </div>
-
-      {/* Grille de posts */}
-      {(loadingPosts && !isSearching) || (loadingSearch && isSearching) ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {Array.from({ length: 18 }).map((_, i) => (
-            <div
-              key={i}
-              className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-square animate-pulse"
-            />
-          ))}
-        </div>
-      ) : filteredPosts.length === 0 ? (
-        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
-          <p className="text-[#6b7280] text-lg">
-            {isSearching ? "Aucun post trouvÃƒÂ© pour cette recherche." : "Aucun post disponible."}
-          </p>
-        </div>
-      ) : (
-        <>
-          {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
-            <div className="pb-4">
-              <Pagination />
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-            {filteredPosts.map((post) => {
-              const media = resolvePostMedia(post);
-
-              return (
-                <MediaCard
-                  key={`${post.site}-${post.service}-${post.id}`}
-                  title={post.title}
-                  previewImageUrl={media.previewImageUrl}
-                  videoUrl={media.videoUrl}
-                  type={media.type}
-                  site={post.site}
-                  service={post.service}
-                  postId={post.id}
-                  user={post.user}
-                  publishedAt={post.published}
-                />
-              );
-            })}
+            {(["tout", "images", "videos"] as MediaFilter[]).map((value) => (
+              <Button
+                key={value}
+                variant="outline"
+                size="sm"
+                onClick={() => handleMediaFilterChange(value)}
+                className={`cursor-pointer border-[#1e1e2e] transition-colors ${
+                  mediaFilter === value
+                    ? "border-[#7c3aed] bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                }`}
+              >
+                {mediaFilterLabels[value]}
+              </Button>
+            ))}
           </div>
 
-          {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
-            <div className="pt-4">
-              <Pagination />
+          <div className="space-y-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6b7280]" />
+              <Input
+                value={inputValue}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setInputValue(nextValue);
+                  updateURL(nextValue, 1);
+                }}
+                placeholder="Search within posts..."
+                className="border-[#1e1e2e] bg-[#12121a] pl-9 text-[#f0f0f5] placeholder:text-[#6b7280]"
+              />
             </div>
+            {loadingSearch && isSearching ? (
+              <div className="flex items-center text-xs text-[#7c3aed]">
+                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                Searching...
+              </div>
+            ) : isSearching ? (
+              <p className="text-xs text-[#6b7280]">
+                {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} found
+              </p>
+            ) : null}
+          </div>
+
+          {(loadingPosts && !isSearching) || (loadingSearch && isSearching) ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {Array.from({ length: 18 }).map((_, index) => (
+                <div key={index} className="aspect-square animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]" />
+              ))}
+            </div>
+          ) : filteredPosts.length === 0 ? (
+            <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
+              <p className="text-lg text-[#6b7280]">{isSearching ? "No posts match this search." : "No posts available."}</p>
+            </div>
+          ) : (
+            <>
+              {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
+                <div className="pb-4">
+                  <PaginationControls />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+                {filteredPosts.map((post, index) => {
+                  const media = resolveListingPostMedia(post);
+
+                  return (
+                    <MediaCard
+                      key={`${post.site}-${post.service}-${post.id}`}
+                      title={post.title}
+                      previewImageUrl={media.previewImageUrl}
+                      videoUrl={media.videoUrl}
+                      videoCandidates={media.videoCandidates}
+                      type={media.type}
+                      site={post.site}
+                      service={post.service}
+                      postId={post.id}
+                      user={post.user}
+                      publishedAt={post.published}
+                      priority={index < 4}
+                      durationSeconds={media.durationSeconds}
+                      videoPreviewMode="hover"
+                    />
+                  );
+                })}
+              </div>
+
+              {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
+                <div className="pt-4">
+                  <PaginationControls />
+                </div>
+              )}
+            </>
           )}
         </>
-      )}
-      </>
       ) : (
-        /* CrÃƒÂ©ateurs similaires */
         <div className="pt-2">
           {loadingRecommended ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="rounded-xl bg-[#12121a] border border-[#1e1e2e] aspect-[4/5] animate-pulse"
-                />
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div key={index} className="aspect-[4/5] animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]" />
               ))}
             </div>
           ) : recommended.length === 0 ? (
-            <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center">
-              <p className="text-[#6b7280] text-sm">Aucun crÃƒÂ©ateur similaire trouvÃƒÂ©.</p>
+            <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
+              <p className="text-sm text-[#6b7280]">No similar creators found.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-              {recommended.map((rc) => (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {recommended.map((creator) => (
                 <CreatorCard
-                  key={`${rc.service}-${rc.id}`}
-                  id={rc.id}
-                  name={rc.name}
-                  service={rc.service}
+                  key={`${creator.service}-${creator.id}`}
+                  id={creator.id}
+                  name={creator.name}
+                  service={creator.service}
                   site={site}
-                  updated={rc.updated}
+                  updated={creator.updated}
                 />
               ))}
             </div>
           )}
         </div>
       )}
-
     </div>
   );
 }
+
+
+
+
 

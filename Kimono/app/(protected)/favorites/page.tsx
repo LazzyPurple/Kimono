@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
-import { Heart, Loader2, X, LogOut, Search, SlidersHorizontal } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Heart, Loader2, LogOut, Search, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -14,10 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
+import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { buildAppPageTitle } from "@/lib/page-titles";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { UnifiedCreator, Site } from "@/lib/api/helpers";
 import type { Creator } from "@/lib/api/kemono";
-import { useScrollRestoration } from "@/hooks/useScrollRestoration";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 interface SiteState {
   loggedIn: boolean;
@@ -43,6 +46,8 @@ function FavoritesPageContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
 
+  useDocumentTitle(buildAppPageTitle("Favorites"));
+
   const qParam = searchParams.get("q") ?? "";
   const sortParam = (searchParams.get("sort") as "date" | "favorites" | "az") ?? "date";
   const serviceParam = searchParams.get("service") ?? "Tous";
@@ -50,48 +55,50 @@ function FavoritesPageContent() {
 
   const [kemono, setKemono] = useState<SiteState>(defaultState);
   const [coomer, setCoomer] = useState<SiteState>(defaultState);
-  const [loginModal, setLoginModal] = useState<LoginModal>({
-    open: false,
-    site: null,
-  });
+  const [loginModal, setLoginModal] = useState<LoginModal>({ open: false, site: null });
   const [loginUsername, setLoginUsername] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState("");
-
   const [kemonoActive, setKemonoActive] = useState(true);
   const [coomerActive, setCoomerActive] = useState(true);
-  
-  // Local input for debouncing
   const [searchQuery, setSearchQuery] = useState(qParam);
 
   const { likedCreatorsOrder } = useLikes();
 
-  const updateParams = useCallback((updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams.toString());
-    let resettingPage = false;
-    
-    Object.entries(updates).forEach(([key, value]) => {
-      if (key !== "page" && key !== "q") resettingPage = true;
-      if (key === "q" && value !== qParam) resettingPage = true;
+  const updateParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      let resettingPage = false;
 
-      if (value === null) {
-        params.delete(key);
-      } else {
-        if (key === "q" && value === "") params.delete(key);
-        else if (key === "sort" && value === "date") params.delete(key);
-        else if (key === "service" && value === "Tous") params.delete(key);
-        else if (key === "page" && value === "1") params.delete(key);
-        else params.set(key, value);
+      Object.entries(updates).forEach(([key, value]) => {
+        if (key !== "page" && key !== "q") resettingPage = true;
+        if (key === "q" && value !== qParam) resettingPage = true;
+
+        if (value === null) {
+          params.delete(key);
+        } else if (key === "q" && value === "") {
+          params.delete(key);
+        } else if (key === "sort" && value === "date") {
+          params.delete(key);
+        } else if (key === "service" && value === "Tous") {
+          params.delete(key);
+        } else if (key === "page" && value === "1") {
+          params.delete(key);
+        } else {
+          params.set(key, value);
+        }
+      });
+
+      if (resettingPage && !Object.prototype.hasOwnProperty.call(updates, "page")) {
+        params.delete("page");
       }
-    });
 
-    if (resettingPage && !updates.hasOwnProperty("page")) {
-      params.delete("page");
-    }
-
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [searchParams, pathname, router, qParam]);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, qParam, router, searchParams]
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -99,25 +106,26 @@ function FavoritesPageContent() {
         updateParams({ q: searchQuery || null });
       }
     }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery, qParam, updateParams]);
 
+    return () => clearTimeout(timer);
+  }, [qParam, searchQuery, updateParams]);
 
   const fetchFavorites = useCallback(async (site: Site) => {
     const setter = site === "kemono" ? setKemono : setCoomer;
-    setter((prev) => ({ ...prev, loading: true }));
+    setter((previous) => ({ ...previous, loading: true }));
 
     try {
-      const res = await fetch(`/api/kimono-favorites?site=${site}`);
-      const data = await res.json();
+      const response = await fetch(`/api/kimono-favorites?site=${site}`);
+      const data = await response.json();
 
       setter({
         loggedIn: data.loggedIn ?? false,
         loading: false,
         username: data.username,
-        favorites: (data.favorites ?? []).map(
-          (c: Creator) => ({ ...c, site } as Creator & { site: Site })
-        ),
+        favorites: (data.favorites ?? []).map((creator: Creator) => ({
+          ...creator,
+          site,
+        })) as (Creator & { site: Site })[],
         expired: data.expired,
       });
     } catch {
@@ -126,8 +134,8 @@ function FavoritesPageContent() {
   }, []);
 
   useEffect(() => {
-    fetchFavorites("kemono");
-    fetchFavorites("coomer");
+    void fetchFavorites("kemono");
+    void fetchFavorites("coomer");
   }, [fetchFavorites]);
 
   const isFullyLoaded = !kemono.loading && !coomer.loading;
@@ -145,12 +153,15 @@ function FavoritesPageContent() {
   }
 
   async function handleLogin() {
-    if (!loginModal.site) return;
+    if (!loginModal.site) {
+      return;
+    }
+
     setLoginLoading(true);
     setLoginError("");
 
     try {
-      const res = await fetch("/api/kimono-login", {
+      const response = await fetch("/api/kimono-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -160,17 +171,17 @@ function FavoritesPageContent() {
         }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!res.ok) {
-        setLoginError(data.error ?? "Connexion échouée");
+      if (!response.ok) {
+        setLoginError(data.error ?? "Sign-in failed.");
         return;
       }
 
       closeLoginModal();
-      fetchFavorites(loginModal.site);
+      void fetchFavorites(loginModal.site);
     } catch {
-      setLoginError("Erreur réseau");
+      setLoginError("Network error.");
     } finally {
       setLoginLoading(false);
     }
@@ -182,13 +193,14 @@ function FavoritesPageContent() {
     setter({ loggedIn: false, loading: false, favorites: [] });
   }
 
-  const allFavorites: UnifiedCreator[] = useMemo(() => {
-    return [...kemono.favorites, ...coomer.favorites];
-  }, [kemono.favorites, coomer.favorites]);
+  const allFavorites: UnifiedCreator[] = useMemo(
+    () => [...kemono.favorites, ...coomer.favorites],
+    [coomer.favorites, kemono.favorites]
+  );
 
   const services = useMemo(() => {
-    const s = new Set(allFavorites.map((c) => c.service));
-    return ["Tous", ...Array.from(s).sort()];
+    const values = new Set(allFavorites.map((creator) => creator.service));
+    return ["Tous", ...Array.from(values).sort()];
   }, [allFavorites]);
 
   const filteredFavorites = useMemo(() => {
@@ -197,69 +209,57 @@ function FavoritesPageContent() {
     if (coomerActive) result.push(...coomer.favorites);
 
     if (qParam) {
-      const q = qParam.toLowerCase();
-      result = result.filter((c) => c.name.toLowerCase().includes(q));
+      const normalizedQuery = qParam.toLowerCase();
+      result = result.filter((creator) => creator.name.toLowerCase().includes(normalizedQuery));
     }
 
     if (serviceParam !== "Tous") {
-      result = result.filter((c) => c.service === serviceParam);
+      result = result.filter((creator) => creator.service === serviceParam);
     }
 
-    result.sort((a, b) => {
+    result.sort((left, right) => {
       if (sortParam === "date") {
-        const dateA = new Date(a.updated || 0).getTime();
-        const dateB = new Date(b.updated || 0).getTime();
-        return dateB - dateA;
+        return new Date(right.updated || 0).getTime() - new Date(left.updated || 0).getTime();
       }
+
       if (sortParam === "favorites") {
-        const orderA = likedCreatorsOrder.get(`${a.site}-${a.service}-${a.id}`) ?? Infinity;
-        const orderB = likedCreatorsOrder.get(`${b.site}-${b.service}-${b.id}`) ?? Infinity;
-        if (orderA !== orderB) return orderA - orderB;
-        // fallback au favoris global si jamais
-        return (b.favorited || 0) - (a.favorited || 0);
+        const leftOrder = likedCreatorsOrder.get(`${left.site}-${left.service}-${left.id}`) ?? Infinity;
+        const rightOrder = likedCreatorsOrder.get(`${right.site}-${right.service}-${right.id}`) ?? Infinity;
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
+        }
+
+        return (right.favorited || 0) - (left.favorited || 0);
       }
-      if (sortParam === "az") {
-        return a.name.localeCompare(b.name);
-      }
-      return 0;
+
+      return left.name.localeCompare(right.name);
     });
 
     return result;
-  }, [
-    kemono.favorites,
-    coomer.favorites,
-    kemonoActive,
-    coomerActive,
-    qParam,
-    serviceParam,
-    sortParam,
-    likedCreatorsOrder,
-  ]);
+  }, [coomer.favorites, coomerActive, kemono.favorites, kemonoActive, likedCreatorsOrder, qParam, serviceParam, sortParam]);
 
   const ITEMS_PER_PAGE = 50;
-  const paginatedFavorites = filteredFavorites.slice(
-    (pageParam - 1) * ITEMS_PER_PAGE,
-    pageParam * ITEMS_PER_PAGE
-  );
-  
+  const paginatedFavorites = filteredFavorites.slice((pageParam - 1) * ITEMS_PER_PAGE, pageParam * ITEMS_PER_PAGE);
   const totalPages = Math.max(1, Math.ceil(filteredFavorites.length / ITEMS_PER_PAGE));
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <Heart className="h-6 w-6 text-[#7c3aed]" />
-        <h1 className="text-2xl font-bold text-[#f0f0f5]">Favoris</h1>
+        <h1 className="text-2xl font-bold text-[#f0f0f5]">Favorites</h1>
       </div>
 
-      {/* Panneaux de connexion et Toggles */}
       <div className="grid gap-4 sm:grid-cols-2">
         {(["kemono", "coomer"] as Site[]).map((site) => {
           const state = site === "kemono" ? kemono : coomer;
           const isActive = site === "kemono" ? kemonoActive : coomerActive;
-          const toggleActive = () =>
-            site === "kemono"
-              ? setKemonoActive(!kemonoActive)
-              : setCoomerActive(!coomerActive);
+          const toggleActive = () => {
+            if (site === "kemono") {
+              setKemonoActive((value) => !value);
+            } else {
+              setCoomerActive((value) => !value);
+            }
+          };
 
           const siteColor =
             site === "kemono"
@@ -271,40 +271,29 @@ function FavoritesPageContent() {
               key={site}
               onClick={() => {
                 toggleActive();
-                // Reset page to 1 when toggling sites since the count changes
                 updateParams({ page: "1" });
               }}
-              className={`rounded-xl border p-4 space-y-3 cursor-pointer transition-all duration-200 ${siteColor} ${
-                !isActive && "opacity-50 grayscale hover:opacity-75"
+              className={`space-y-3 rounded-xl border p-4 transition-all duration-200 ${siteColor} ${
+                !isActive ? "opacity-50 grayscale hover:opacity-75" : ""
               }`}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <Badge
-                    className={
-                      site === "kemono"
-                        ? "bg-[#7c3aed]/20 text-[#7c3aed]"
-                        : "bg-pink-600/20 text-pink-400"
-                    }
-                  >
+                  <Badge className={site === "kemono" ? "bg-[#7c3aed]/20 text-[#7c3aed]" : "bg-pink-600/20 text-pink-400"}>
                     {site.charAt(0).toUpperCase() + site.slice(1)}
                   </Badge>
-                  {state.loggedIn && state.username && (
-                    <span className="text-xs text-[#6b7280]">
-                      {state.username}
-                    </span>
-                  )}
+                  {state.loggedIn && state.username && <span className="text-xs text-[#6b7280]">{state.username}</span>}
                 </div>
 
-                <div onClick={(e) => e.stopPropagation()}>
+                <div onClick={(event) => event.stopPropagation()}>
                   {state.loading ? (
                     <Loader2 className="h-4 w-4 animate-spin text-[#6b7280]" />
                   ) : state.loggedIn ? (
-                     <Button
+                    <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => handleLogout(site)}
-                      className="text-[#6b7280] hover:text-red-400 h-7 px-2 cursor-pointer"
+                      onClick={() => void handleLogout(site)}
+                      className="h-7 cursor-pointer px-2 text-[#6b7280] hover:text-red-400"
                     >
                       <LogOut className="h-3.5 w-3.5" />
                     </Button>
@@ -312,13 +301,13 @@ function FavoritesPageContent() {
                     <Button
                       size="sm"
                       onClick={() => openLoginModal(site)}
-                      className={`cursor-pointer text-xs h-7 ${
+                      className={`h-7 cursor-pointer text-xs ${
                         site === "kemono"
-                          ? "bg-[#7c3aed] hover:bg-[#6d28d9] text-white"
-                          : "bg-pink-600 hover:bg-pink-700 text-white"
+                          ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                          : "bg-pink-600 text-white hover:bg-pink-700"
                       }`}
                     >
-                      Se connecter
+                      Sign in
                     </Button>
                   )}
                 </div>
@@ -327,17 +316,14 @@ function FavoritesPageContent() {
               {!state.loading && !state.loggedIn && (
                 <p className="text-xs text-[#6b7280]">
                   {state.expired
-                    ? "Session expirée. Reconnectez-vous."
-                    : `Connectez-vous à ${
-                        site.charAt(0).toUpperCase() + site.slice(1)
-                      } pour voir vos favoris.`}
+                    ? "Session expired. Please sign in again."
+                    : `Sign in to ${site.charAt(0).toUpperCase() + site.slice(1)} to view your favorites.`}
                 </p>
               )}
 
               {state.loggedIn && (
                 <p className="text-xs text-[#6b7280]">
-                  {state.favorites.length} créateur
-                  {state.favorites.length !== 1 ? "s" : ""} en favori
+                  {state.favorites.length} favorite creator{state.favorites.length !== 1 ? "s" : ""}
                 </p>
               )}
             </div>
@@ -345,99 +331,94 @@ function FavoritesPageContent() {
         })}
       </div>
 
-      {/* Barre de filtres */}
       {allFavorites.length > 0 && (
-        <div className="bg-[#12121a] border border-[#1e1e2e] rounded-xl p-4 space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
-            {/* Recherche */}
+        <div className="space-y-4 rounded-xl border border-[#1e1e2e] bg-[#12121a] p-4">
+          <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
             <div className="relative w-full sm:max-w-xs">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6b7280]" />
               <Input
-                placeholder="Rechercher un créateur..."
+                placeholder="Search creators..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] h-9 text-sm"
+                onChange={(event) => setSearchQuery(event.target.value)}
+                className="h-9 border-[#1e1e2e] bg-[#0a0a0f] pl-9 text-sm text-[#f0f0f5]"
               />
             </div>
-            {/* Tri */}
+
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
                 onClick={() => updateParams({ sort: "date" })}
-                className={`cursor-pointer text-xs h-8 transition-colors ${
+                className={`h-8 cursor-pointer text-xs transition-colors ${
                   sortParam === "date"
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
               >
-                Par date
+                Updated
               </Button>
               <Button
                 size="sm"
                 onClick={() => updateParams({ sort: "favorites" })}
-                className={`cursor-pointer text-xs h-8 transition-colors ${
+                className={`h-8 cursor-pointer text-xs transition-colors ${
                   sortParam === "favorites"
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
               >
-                Date d'ajout
+                Added first
               </Button>
               <Button
                 size="sm"
                 onClick={() => updateParams({ sort: "az" })}
-                className={`cursor-pointer text-xs h-8 transition-colors ${
+                className={`h-8 cursor-pointer text-xs transition-colors ${
                   sortParam === "az"
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "bg-transparent border border-[#1e1e2e] text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
               >
                 A-Z
               </Button>
             </div>
           </div>
-          {/* Services */}
-          <div className="flex flex-wrap gap-2 items-center">
-            <SlidersHorizontal className="h-4 w-4 text-[#6b7280] mr-1" />
-            {services.map((s) => (
+
+          <div className="flex flex-wrap items-center gap-2">
+            <SlidersHorizontal className="mr-1 h-4 w-4 text-[#6b7280]" />
+            {services.map((service) => (
               <Badge
-                key={s}
-                onClick={() => updateParams({ service: s })}
+                key={service}
+                onClick={() => updateParams({ service })}
                 className={`cursor-pointer px-3 py-1 text-xs transition-colors ${
-                  serviceParam === s
+                  serviceParam === service
                     ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "bg-[#0a0a0f] text-[#6b7280] border border-[#1e1e2e] hover:bg-[#1e1e2e]"
+                    : "border border-[#1e1e2e] bg-[#0a0a0f] text-[#6b7280] hover:bg-[#1e1e2e]"
                 }`}
               >
-                {s}
+                {service === "Tous" ? "All" : service}
               </Badge>
             ))}
           </div>
         </div>
       )}
 
-      {/* Contenu */}
       {!isFullyLoaded ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" />
         </div>
       ) : allFavorites.length === 0 ? (
-        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center text-[#6b7280]">
-          Connectez-vous pour voir vos favoris, ou commencez à en ajouter !
+        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center text-[#6b7280]">
+          Sign in to view your favorites, or start adding some.
         </div>
       ) : filteredFavorites.length === 0 ? (
-        <div className="rounded-xl bg-[#12121a] border border-[#1e1e2e] p-12 text-center text-[#6b7280]">
-          Aucun créateur ne correspond à vos filtres.
+        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center text-[#6b7280]">
+          No creators match the current filters.
         </div>
       ) : (
         <div className="space-y-6">
           <p className="text-sm text-[#6b7280]">
-            {filteredFavorites.length} créateur
-            {filteredFavorites.length !== 1 ? "s" : ""} affiché
-            {filteredFavorites.length !== 1 ? "s" : ""}
+            {filteredFavorites.length} creator{filteredFavorites.length !== 1 ? "s" : ""} shown
           </p>
 
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {paginatedFavorites.map((creator) => (
               <CreatorCard
                 key={`${creator.site}-${creator.service}-${creator.id}`}
@@ -451,73 +432,61 @@ function FavoritesPageContent() {
             ))}
           </div>
 
-          <Pagination
-            current={pageParam}
-            total={totalPages}
-            onChange={(p) => updateParams({ page: String(p) })}
-          />
+          <Pagination current={pageParam} total={totalPages} onChange={(page) => updateParams({ page: String(page) })} />
         </div>
       )}
 
-      {/* Modal de connexion */}
-      <Dialog open={loginModal.open} onOpenChange={(o) => !o && closeLoginModal()}>
-        <DialogContent className="bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] sm:max-w-sm">
+      <Dialog open={loginModal.open} onOpenChange={(open) => !open && closeLoginModal()}>
+        <DialogContent className="bg-[#12121a] text-[#f0f0f5] sm:max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Badge
-                className={
-                  loginModal.site === "kemono"
-                    ? "bg-[#7c3aed]/20 text-[#7c3aed]"
-                    : "bg-pink-600/20 text-pink-400"
-                }
-              >
+              <Badge className={loginModal.site === "kemono" ? "bg-[#7c3aed]/20 text-[#7c3aed]" : "bg-pink-600/20 text-pink-400"}>
                 {loginModal.site}
               </Badge>
-              Connexion
+              Sign in
             </DialogTitle>
+            <DialogDescription className="text-[#6b7280]">
+              Save your Kemono or Coomer session so Kimono can sync your favorites.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
             <div className="space-y-2">
-              <label className="text-sm text-[#6b7280]">Nom d&apos;utilisateur</label>
+              <label className="text-sm text-[#6b7280]">Username</label>
               <Input
                 value={loginUsername}
-                onChange={(e) => setLoginUsername(e.target.value)}
-                placeholder="Votre nom d'utilisateur"
-                className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280]"
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                onChange={(event) => setLoginUsername(event.target.value)}
+                placeholder="Your username"
+                className="border-[#1e1e2e] bg-[#0a0a0f] text-[#f0f0f5] placeholder:text-[#6b7280]"
+                onKeyDown={(event) => event.key === "Enter" && void handleLogin()}
               />
             </div>
 
             <div className="space-y-2">
-              <label className="text-sm text-[#6b7280]">Mot de passe</label>
+              <label className="text-sm text-[#6b7280]">Password</label>
               <Input
                 type="password"
                 value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                placeholder="Votre mot de passe"
-                className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280]"
-                onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                onChange={(event) => setLoginPassword(event.target.value)}
+                placeholder="Your password"
+                className="border-[#1e1e2e] bg-[#0a0a0f] text-[#f0f0f5] placeholder:text-[#6b7280]"
+                onKeyDown={(event) => event.key === "Enter" && void handleLogin()}
               />
             </div>
 
             {loginError && (
-              <p className="text-sm text-red-400 flex items-center gap-1">
+              <p className="flex items-center gap-1 text-sm text-red-400">
                 <X className="h-3.5 w-3.5" />
                 {loginError}
               </p>
             )}
 
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="ghost"
-                onClick={closeLoginModal}
-                className="text-[#6b7280] hover:text-[#f0f0f5] cursor-pointer"
-              >
-                Annuler
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={closeLoginModal} className="cursor-pointer text-[#6b7280] hover:text-[#f0f0f5]">
+                Cancel
               </Button>
               <Button
-                onClick={handleLogin}
+                onClick={() => void handleLogin()}
                 disabled={loginLoading || !loginUsername || !loginPassword}
                 className={`cursor-pointer text-white ${
                   loginModal.site === "kemono"
@@ -525,11 +494,7 @@ function FavoritesPageContent() {
                     : "bg-pink-600 hover:bg-pink-700"
                 }`}
               >
-                {loginLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Se connecter"
-                )}
+                {loginLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign in"}
               </Button>
             </div>
           </div>
@@ -541,8 +506,14 @@ function FavoritesPageContent() {
 
 export default function FavoritesPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center min-h-[50vh] items-center"><Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" /></div>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" />
+        </div>
+      }
+    >
       <FavoritesPageContent />
     </Suspense>
-  )
+  );
 }

@@ -1,12 +1,9 @@
 generator client {
-  provider      = "prisma-client-js"
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
-  output        = "../generated/client"
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
 }
 
 model User {
@@ -23,7 +20,7 @@ model Passkey {
   id           String   @id @default(cuid())
   userId       String
   credentialId String   @unique
-  publicKey    String   @db.Text
+  publicKey    String
   counter      BigInt
   deviceName   String?
   user         User     @relation(fields: [userId], references: [id])
@@ -41,15 +38,107 @@ model Session {
 model KimonoSession {
   id       String   @id @default(cuid())
   site     String
-  cookie   String   @db.Text
+  cookie   String
   username String
   savedAt  DateTime @default(now())
 }
 
 model CreatorsCache {
   site      String   @id
-  data      String   @db.LongText
+  data      String
   updatedAt DateTime @updatedAt
+}
+
+model CreatorIndex {
+  site              String
+  service           String
+  creatorId         String
+  name              String
+  normalizedName    String
+  favorited         Int      @default(0)
+  updatedAt         DateTime?
+  indexedAt         DateTime?
+  profileImageUrl   String?
+  bannerImageUrl    String?
+  publicId          String?
+  postCount         Int?
+  rawPreviewPayload String?
+  syncedAt          DateTime @default(now())
+
+  @@id([site, service, creatorId])
+  @@index([normalizedName], map: "CreatorIndex_normalizedName_idx")
+  @@index([site, syncedAt], map: "CreatorIndex_site_syncedAt_idx")
+}
+
+model PostCache {
+  site                        String
+  service                     String
+  creatorId                   String
+  postId                      String
+  title                       String?
+  excerpt                     String?
+  publishedAt                 DateTime?
+  addedAt                     DateTime?
+  editedAt                    DateTime?
+  previewImageUrl             String?
+  videoUrl                    String?
+  thumbUrl                    String?
+  mediaType                   String?
+  authorName                  String?
+  rawPreviewPayload           String?
+  rawDetailPayload            String?
+  detailLevel                 String
+  sourceKind                  String
+  longestVideoUrl             String?
+  longestVideoDurationSeconds Float?
+  previewThumbnailAssetPath   String?
+  previewClipAssetPath        String?
+  previewStatus               String?
+  previewGeneratedAt          DateTime?
+  previewError                String?
+  previewSourceFingerprint    String?
+  cachedAt                    DateTime @default(now())
+  expiresAt                   DateTime
+
+  @@id([site, service, creatorId, postId])
+  @@index([site, service, creatorId, publishedAt], map: "PostCache_creator_idx")
+  @@index([expiresAt], map: "PostCache_expiresAt_idx")
+  @@index([site, previewSourceFingerprint], map: "PostCache_previewSourceFingerprint_idx")
+}
+
+model PreviewAssetCache {
+  site               String
+  sourceVideoUrl     String
+  sourceFingerprint  String
+  durationSeconds    Float?
+  thumbnailAssetPath String?
+  clipAssetPath      String?
+  status             String   @default("pending")
+  generatedAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  error              String?
+
+  @@id([site, sourceFingerprint])
+  @@index([lastSeenAt], map: "PreviewAssetCache_lastSeenAt_idx")
+}
+
+model PopularSnapshot {
+  snapshotRunId String
+  rank          Int
+  site          String
+  period        String
+  rangeKey      String   @default("")
+  pageOffset    Int      @default(0)
+  snapshotDate  String
+  syncedAt      DateTime @default(now())
+  postSite      String
+  postService   String
+  creatorId     String
+  postId        String
+
+  @@id([snapshotRunId, rank])
+  @@index([site, period, rangeKey, pageOffset, syncedAt], map: "PopularSnapshot_lookup_idx")
+  @@index([snapshotDate], map: "PopularSnapshot_snapshotDate_idx")
 }
 
 model DiscoveryBlock {
@@ -64,6 +153,7 @@ model DiscoveryBlock {
 
 model DiscoveryCache {
   id        String   @id @default(cuid())
-  data      String   @db.LongText
+  data      String
   updatedAt DateTime @default(now())
 }
+
