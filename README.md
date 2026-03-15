@@ -1,13 +1,13 @@
-# Kimono
+﻿# Kimono
 
 Kimono est un frontend personnel unifie pour consulter du contenu provenant de `Kemono` et `Coomer` dans une seule interface Next.js.
 
-Le projet supporte maintenant deux modes distincts :
+Le projet fonctionne en deux modes :
 
-- `LOCAL_DEV_MODE=true` : mode local de developpement avec Prisma + SQLite
-- production : mode MySQL + SQL brut pour o2switch / cPanel
+- `LOCAL_DEV_MODE=true` : developpement local avec Prisma + SQLite
+- production : MySQL + SQL brut pour o2switch / cPanel
 
-Les routes applicatives restent identiques entre les deux modes. Seules la couche d'acces aux donnees et la logique d'entree changent.
+Les routes applicatives restent identiques entre les deux modes. Ce qui change, c'est la couche de donnees, certains garde-fous d'auth, et une partie du debug.
 
 ## Etat actuel
 
@@ -16,25 +16,39 @@ Les routes applicatives restent identiques entre les deux modes. Seules la couch
 - auth single-user via `ADMIN_PASSWORD`
 - support TOTP / 2FA en production
 - bypass total de l'auth en mode local avec `LOCAL_DEV_MODE=true`
-- routes et layouts adaptes pour ne pas emuler de session NextAuth en local
-- route de debug auth temporaire pour diagnostic serveur
+- `/login` redirige vers `/search` en local
+- layouts et routes adaptes pour ne pas emuler de session NextAuth en local
 
-### Donnees et cache
+### Donnees, cache et perf
 
 - couche partagee `data-store` pour eviter que les routes parlent directement a MySQL
 - backend local Prisma / SQLite sur `Kimono/prisma/dev.db`
 - backend production MySQL via SQL brut
-- cache hybride serveur + navigateur pour accelerer la recherche, les pages createur, les pages post et les previews
+- cache hybride serveur + navigateur pour la recherche, les pages createur, les pages post et certaines previews
 - stockage indexe des createurs
 - cache canonique des posts
-- snapshots des posts populaires
+- snapshots de populaires
 - jobs de prechauffage prevus pour cron cPanel
+
+### Focus perf actuel
+
+Le chantier principal en cours est une approche serveur-first sur `Popular` :
+
+- batch quotidien `popular-warmup`
+- detection de la plus longue video
+- duree precalculee cote serveur
+- generation de thumbnail et mini clip serveur
+- deduplication des assets deja traites pour ne pas retraiter une meme video plusieurs jours
+- serving des assets via `/api/preview-assets/...`
+
+Le but est ensuite de reutiliser ces assets sur les autres surfaces ou un post populaire peut reapparaitre, afin de reduire encore la charge cote client.
 
 ### UI / experience
 
 - lecteur video avec icones Lucide
 - correction du decor Sakura pour supprimer les mismatches d'hydratation
-- correction de plusieurs textes moji-bakes
+- plusieurs libelles UI sont en cours de passage vers l'anglais
+- titres de pages dynamiques en cours d'harmonisation
 - page `/logs` pour centraliser le debug runtime, auth, DB, API et client
 
 ### Deploiement
@@ -117,10 +131,19 @@ WEBAUTHN_RP_ID=kimono.paracosm.fr
 WEBAUTHN_RP_NAME=Kimono
 ```
 
+Variables utiles pour la phase `Popular` serveur-first :
+
+```env
+PREVIEW_ASSET_DIR=/home/dosa4307/tmp/kimono-preview-assets
+POPULAR_PREVIEW_RETENTION_DAYS=7
+POPULAR_PREVIEW_CLIP_SECONDS=3
+```
+
 Important :
 
 - ne pas activer `LOCAL_DEV_MODE` en production
-- si le mot de passe MySQL contient des caracteres speciaux, preferer un mot de passe URL-safe pour `DATABASE_URL`
+- preferer un mot de passe MySQL URL-safe pour `DATABASE_URL`
+- si `PREVIEW_ASSET_DIR` n'est pas defini, les assets tombent dans un dossier local du projet
 
 ## Packaging o2switch
 
@@ -144,6 +167,20 @@ Ensuite sur o2switch :
 3. lancer `Run NPM Install`
 4. redemarrer l'application Node.js
 
+## Batchs et warmup
+
+Deux jobs principaux existent :
+
+- `creator-snapshot`
+- `popular-warmup`
+
+`popular-warmup` sert maintenant a :
+
+- preparer les snapshots `Popular`
+- generer les assets de preview
+- reutiliser les assets deja generes si la video source a deja ete traitee
+- nettoyer les assets trop anciens selon la retention
+
 ## Debug temporaire
 
 Des surfaces de debug temporaires existent pendant la phase de stabilisation :
@@ -151,6 +188,7 @@ Des surfaces de debug temporaires existent pendant la phase de stabilisation :
 - `/logs`
 - `/api/logs`
 - `/api/debug/auth-check`
+- `/api/debug/env-db`
 
 Ces routes doivent etre re-securisees ou supprimees une fois le debug termine.
 
@@ -167,6 +205,7 @@ Le projet a ete fortement refactorise ces dernieres sessions :
 - perf hybride
 - packaging o2switch
 - logging central
+- phase `Popular` serveur-first
 - correction de plusieurs regressions auth / DB / hydration
 
-Il reste encore des correctifs de stabilisation et de finition UI a faire, documentes dans `Checkpoint.md`.
+Le chantier principal encore en cours est la reduction du cout client des listings media, avec `Popular` comme pilote avant extension plus large au reste du site.

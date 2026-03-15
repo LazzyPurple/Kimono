@@ -1,4 +1,3 @@
-import type { PrismaClient } from "@prisma/client";
 import type mysql from "mysql2/promise";
 
 import { isLocalDevMode } from "./local-dev-mode.ts";
@@ -75,6 +74,14 @@ export interface PostCacheInput {
   rawDetailPayload?: unknown;
   detailLevel: "metadata" | "full";
   sourceKind: string;
+  longestVideoUrl?: string | null;
+  longestVideoDurationSeconds?: number | null;
+  previewThumbnailAssetPath?: string | null;
+  previewClipAssetPath?: string | null;
+  previewStatus?: string | null;
+  previewGeneratedAt?: string | Date | null;
+  previewError?: string | null;
+  previewSourceFingerprint?: string | null;
   cachedAt: Date;
   expiresAt: Date;
 }
@@ -98,8 +105,42 @@ export interface PostCacheRecord {
   rawDetailPayload: unknown | null;
   detailLevel: "metadata" | "full";
   sourceKind: string;
+  longestVideoUrl: string | null;
+  longestVideoDurationSeconds: number | null;
+  previewThumbnailAssetPath: string | null;
+  previewClipAssetPath: string | null;
+  previewStatus: string | null;
+  previewGeneratedAt: Date | null;
+  previewError: string | null;
+  previewSourceFingerprint: string | null;
   cachedAt: Date;
   expiresAt: Date;
+}
+
+export interface PreviewAssetCacheInput {
+  site: Site;
+  sourceVideoUrl: string;
+  sourceFingerprint: string;
+  durationSeconds?: number | null;
+  thumbnailAssetPath?: string | null;
+  clipAssetPath?: string | null;
+  status: string;
+  generatedAt: Date;
+  lastSeenAt: Date;
+  error?: string | null;
+}
+
+export interface PreviewAssetCacheRecord {
+  site: Site;
+  sourceVideoUrl: string;
+  sourceFingerprint: string;
+  durationSeconds: number | null;
+  thumbnailAssetPath: string | null;
+  clipAssetPath: string | null;
+  status: string;
+  generatedAt: Date;
+  lastSeenAt: Date;
+  error: string | null;
 }
 
 export interface PopularSnapshotInput {
@@ -134,8 +175,22 @@ export interface PerformanceRepository {
   listCreatorPosts(input: { site: Site; service: string; creatorId: string; offset: number; limit: number; freshOnly: boolean; now?: Date }): Promise<PostCacheRecord[]>;
   replacePopularSnapshot(input: PopularSnapshotInput): Promise<void>;
   getPopularSnapshot(input: { site: Site; period: PopularPeriod; rangeDate: string | null; pageOffset: number; now?: Date }): Promise<PopularSnapshotResult>;
+  getPreviewAssetCache(input: { site: Site; sourceFingerprint: string }): Promise<PreviewAssetCacheRecord | null>;
+  upsertPreviewAssetCache(input: PreviewAssetCacheInput): Promise<void>;
+  touchPreviewAssetCache(input: { site: Site; sourceFingerprint: string; lastSeenAt: Date }): Promise<void>;
+  listPreviewAssetCachesOlderThan(input: { cutoff: Date }): Promise<PreviewAssetCacheRecord[]>;
+  deletePreviewAssetCaches(input: { entries: Array<{ site: Site; sourceFingerprint: string }> }): Promise<void>;
+  listActivePreviewSourceFingerprints(input: { snapshotDateFrom: string }): Promise<Array<{ site: Site; sourceFingerprint: string }>>;
+  deletePopularSnapshotsOlderThan(input: { snapshotDateBefore: string }): Promise<void>;
   disconnect(): Promise<void>;
 }
+
+type LocalPrismaQueryClient = {
+  $queryRawUnsafe<T = any>(sql: string, ...values: any[]): Promise<T[]>;
+  $executeRawUnsafe(sql: string, ...values: any[]): Promise<unknown>;
+  $transaction<T>(fn: (tx: LocalPrismaQueryClient) => Promise<T>): Promise<T>;
+  $disconnect(): Promise<void>;
+};
 
 interface DatabaseDriver {
   kind: "sqlite" | "mysql";
@@ -207,8 +262,37 @@ function mapPostRow(row: any): PostCacheRecord {
     rawDetailPayload: parseJson(row.rawDetailPayload),
     detailLevel: row.detailLevel === "full" ? "full" : "metadata",
     sourceKind: String(row.sourceKind ?? "live"),
+    longestVideoUrl: row.longestVideoUrl ?? null,
+    longestVideoDurationSeconds:
+      row.longestVideoDurationSeconds === null || row.longestVideoDurationSeconds === undefined
+        ? null
+        : Number(row.longestVideoDurationSeconds),
+    previewThumbnailAssetPath: row.previewThumbnailAssetPath ?? null,
+    previewClipAssetPath: row.previewClipAssetPath ?? null,
+    previewStatus: row.previewStatus ?? null,
+    previewGeneratedAt: toDate(row.previewGeneratedAt),
+    previewError: row.previewError ?? null,
+    previewSourceFingerprint: row.previewSourceFingerprint ?? null,
     cachedAt: toDate(row.cachedAt) ?? new Date(0),
     expiresAt: toDate(row.expiresAt) ?? new Date(0),
+  };
+}
+
+function mapPreviewAssetRow(row: any): PreviewAssetCacheRecord {
+  return {
+    site: row.site as Site,
+    sourceVideoUrl: String(row.sourceVideoUrl),
+    sourceFingerprint: String(row.sourceFingerprint),
+    durationSeconds:
+      row.durationSeconds === null || row.durationSeconds === undefined
+        ? null
+        : Number(row.durationSeconds),
+    thumbnailAssetPath: row.thumbnailAssetPath ?? null,
+    clipAssetPath: row.clipAssetPath ?? null,
+    status: String(row.status ?? "pending"),
+    generatedAt: toDate(row.generatedAt) ?? new Date(0),
+    lastSeenAt: toDate(row.lastSeenAt) ?? new Date(0),
+    error: row.error ?? null,
   };
 }
 
@@ -286,7 +370,7 @@ function flattenRows(rows: any[][]): any[] {
   return rows.flat();
 }
 
-function createSqliteDriver(prisma: PrismaClient): DatabaseDriver {
+function createSqliteDriver(prisma: LocalPrismaQueryClient): DatabaseDriver {
   const prismaAny = prisma as any;
   return {
     kind: "sqlite",
@@ -354,6 +438,21 @@ function createMysqlDriver(): DatabaseDriver {
   };
 }
 
+async function ensureSqliteColumn(driver: DatabaseDriver, table: string, columnDefinition: string) {
+  try {
+    await driver.execute(`ALTER TABLE ${table} ADD COLUMN ${columnDefinition}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!/duplicate column name/i.test(message)) {
+      throw error;
+    }
+  }
+}
+
+async function ensureMySqlColumn(driver: DatabaseDriver, table: string, columnDefinition: string) {
+  await driver.execute(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${columnDefinition}`);
+}
+
 async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
   if (driver.kind === "mysql") {
     await driver.execute(`
@@ -397,11 +496,49 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
         rawDetailPayload LONGTEXT NULL,
         detailLevel VARCHAR(32) NOT NULL DEFAULT 'metadata',
         sourceKind VARCHAR(64) NOT NULL DEFAULT 'live',
+        longestVideoUrl TEXT NULL,
+        longestVideoDurationSeconds DOUBLE NULL,
+        previewThumbnailAssetPath TEXT NULL,
+        previewClipAssetPath TEXT NULL,
+        previewStatus VARCHAR(64) NULL,
+        previewGeneratedAt DATETIME(3) NULL,
+        previewError LONGTEXT NULL,
+        previewSourceFingerprint VARCHAR(191) NULL,
         cachedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
         expiresAt DATETIME(3) NOT NULL,
         PRIMARY KEY (site, service, creatorId, postId),
         KEY PostCache_creator_idx (site, service, creatorId, publishedAt),
-        KEY PostCache_expiresAt_idx (expiresAt)
+        KEY PostCache_expiresAt_idx (expiresAt),
+        KEY PostCache_previewSourceFingerprint_idx (site, previewSourceFingerprint)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    for (const column of [
+      "longestVideoUrl TEXT NULL",
+      "longestVideoDurationSeconds DOUBLE NULL",
+      "previewThumbnailAssetPath TEXT NULL",
+      "previewClipAssetPath TEXT NULL",
+      "previewStatus VARCHAR(64) NULL",
+      "previewGeneratedAt DATETIME(3) NULL",
+      "previewError LONGTEXT NULL",
+      "previewSourceFingerprint VARCHAR(191) NULL",
+    ]) {
+      await ensureMySqlColumn(driver, "PostCache", column);
+    }
+    await driver.execute(`CREATE INDEX IF NOT EXISTS PostCache_previewSourceFingerprint_idx ON PostCache(site, previewSourceFingerprint)`);
+    await driver.execute(`
+      CREATE TABLE IF NOT EXISTS PreviewAssetCache (
+        site VARCHAR(32) NOT NULL,
+        sourceVideoUrl TEXT NOT NULL,
+        sourceFingerprint VARCHAR(191) NOT NULL,
+        durationSeconds DOUBLE NULL,
+        thumbnailAssetPath TEXT NULL,
+        clipAssetPath TEXT NULL,
+        status VARCHAR(64) NOT NULL DEFAULT 'pending',
+        generatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        lastSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        error LONGTEXT NULL,
+        PRIMARY KEY (site, sourceFingerprint),
+        KEY PreviewAssetCache_lastSeenAt_idx (lastSeenAt)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     await driver.execute(`
@@ -419,9 +556,11 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
         creatorId VARCHAR(191) NOT NULL,
         postId VARCHAR(191) NOT NULL,
         PRIMARY KEY (snapshotRunId, rank),
-        KEY PopularSnapshot_lookup_idx (site, period, rangeKey, pageOffset, syncedAt)
+        KEY PopularSnapshot_lookup_idx (site, period, rangeKey, pageOffset, syncedAt),
+        KEY PopularSnapshot_snapshotDate_idx (snapshotDate)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    await driver.execute(`CREATE INDEX IF NOT EXISTS PopularSnapshot_snapshotDate_idx ON PopularSnapshot(snapshotDate)`);
     return;
   }
 
@@ -466,13 +605,50 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
       rawDetailPayload LONGTEXT NULL,
       detailLevel VARCHAR(32) NOT NULL DEFAULT 'metadata',
       sourceKind VARCHAR(64) NOT NULL DEFAULT 'live',
+      longestVideoUrl TEXT NULL,
+      longestVideoDurationSeconds REAL NULL,
+      previewThumbnailAssetPath TEXT NULL,
+      previewClipAssetPath TEXT NULL,
+      previewStatus VARCHAR(64) NULL,
+      previewGeneratedAt DATETIME NULL,
+      previewError TEXT NULL,
+      previewSourceFingerprint VARCHAR(191) NULL,
       cachedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       expiresAt DATETIME NOT NULL,
       PRIMARY KEY (site, service, creatorId, postId)
     )
   `);
+  for (const column of [
+    "longestVideoUrl TEXT NULL",
+    "longestVideoDurationSeconds REAL NULL",
+    "previewThumbnailAssetPath TEXT NULL",
+    "previewClipAssetPath TEXT NULL",
+    "previewStatus VARCHAR(64) NULL",
+    "previewGeneratedAt DATETIME NULL",
+    "previewError TEXT NULL",
+    "previewSourceFingerprint VARCHAR(191) NULL",
+  ]) {
+    await ensureSqliteColumn(driver, "PostCache", column);
+  }
   await driver.execute(`CREATE INDEX IF NOT EXISTS PostCache_creator_idx ON PostCache(site, service, creatorId, publishedAt)`);
   await driver.execute(`CREATE INDEX IF NOT EXISTS PostCache_expiresAt_idx ON PostCache(expiresAt)`);
+  await driver.execute(`CREATE INDEX IF NOT EXISTS PostCache_previewSourceFingerprint_idx ON PostCache(site, previewSourceFingerprint)`);
+  await driver.execute(`
+    CREATE TABLE IF NOT EXISTS PreviewAssetCache (
+      site VARCHAR(32) NOT NULL,
+      sourceVideoUrl TEXT NOT NULL,
+      sourceFingerprint VARCHAR(191) NOT NULL,
+      durationSeconds REAL NULL,
+      thumbnailAssetPath TEXT NULL,
+      clipAssetPath TEXT NULL,
+      status VARCHAR(64) NOT NULL DEFAULT 'pending',
+      generatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      error TEXT NULL,
+      PRIMARY KEY (site, sourceFingerprint)
+    )
+  `);
+  await driver.execute(`CREATE INDEX IF NOT EXISTS PreviewAssetCache_lastSeenAt_idx ON PreviewAssetCache(lastSeenAt)`);
   await driver.execute(`
     CREATE TABLE IF NOT EXISTS PopularSnapshot (
       snapshotRunId VARCHAR(191) NOT NULL,
@@ -491,6 +667,35 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
     )
   `);
   await driver.execute(`CREATE INDEX IF NOT EXISTS PopularSnapshot_lookup_idx ON PopularSnapshot(site, period, rangeKey, pageOffset, syncedAt)`);
+  await driver.execute(`CREATE INDEX IF NOT EXISTS PopularSnapshot_snapshotDate_idx ON PopularSnapshot(snapshotDate)`);
+}
+
+function getPreviewAssetUpsertSql(driver: DatabaseDriver): string {
+  if (driver.kind === "sqlite") {
+    return `INSERT INTO PreviewAssetCache (site, sourceVideoUrl, sourceFingerprint, durationSeconds, thumbnailAssetPath, clipAssetPath, status, generatedAt, lastSeenAt, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(site, sourceFingerprint) DO UPDATE SET
+        sourceVideoUrl = excluded.sourceVideoUrl,
+        durationSeconds = excluded.durationSeconds,
+        thumbnailAssetPath = excluded.thumbnailAssetPath,
+        clipAssetPath = excluded.clipAssetPath,
+        status = excluded.status,
+        generatedAt = excluded.generatedAt,
+        lastSeenAt = excluded.lastSeenAt,
+        error = excluded.error`;
+  }
+
+  return `INSERT INTO PreviewAssetCache (site, sourceVideoUrl, sourceFingerprint, durationSeconds, thumbnailAssetPath, clipAssetPath, status, generatedAt, lastSeenAt, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      sourceVideoUrl = VALUES(sourceVideoUrl),
+      durationSeconds = VALUES(durationSeconds),
+      thumbnailAssetPath = VALUES(thumbnailAssetPath),
+      clipAssetPath = VALUES(clipAssetPath),
+      status = VALUES(status),
+      generatedAt = VALUES(generatedAt),
+      lastSeenAt = VALUES(lastSeenAt),
+      error = VALUES(error)`;
 }
 
 function getUpsertSql(driver: DatabaseDriver, table: "CreatorIndex" | "PostCache"): string {
@@ -512,8 +717,8 @@ function getUpsertSql(driver: DatabaseDriver, table: "CreatorIndex" | "PostCache
           syncedAt = excluded.syncedAt`;
     }
 
-    return `INSERT INTO PostCache (site, service, creatorId, postId, title, excerpt, publishedAt, addedAt, editedAt, previewImageUrl, videoUrl, thumbUrl, mediaType, authorName, rawPreviewPayload, rawDetailPayload, detailLevel, sourceKind, cachedAt, expiresAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    return `INSERT INTO PostCache (site, service, creatorId, postId, title, excerpt, publishedAt, addedAt, editedAt, previewImageUrl, videoUrl, thumbUrl, mediaType, authorName, rawPreviewPayload, rawDetailPayload, detailLevel, sourceKind, longestVideoUrl, longestVideoDurationSeconds, previewThumbnailAssetPath, previewClipAssetPath, previewStatus, previewGeneratedAt, previewError, previewSourceFingerprint, cachedAt, expiresAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(site, service, creatorId, postId) DO UPDATE SET
         title = excluded.title,
         excerpt = excluded.excerpt,
@@ -529,6 +734,14 @@ function getUpsertSql(driver: DatabaseDriver, table: "CreatorIndex" | "PostCache
         rawDetailPayload = excluded.rawDetailPayload,
         detailLevel = excluded.detailLevel,
         sourceKind = excluded.sourceKind,
+        longestVideoUrl = excluded.longestVideoUrl,
+        longestVideoDurationSeconds = excluded.longestVideoDurationSeconds,
+        previewThumbnailAssetPath = excluded.previewThumbnailAssetPath,
+        previewClipAssetPath = excluded.previewClipAssetPath,
+        previewStatus = excluded.previewStatus,
+        previewGeneratedAt = excluded.previewGeneratedAt,
+        previewError = excluded.previewError,
+        previewSourceFingerprint = excluded.previewSourceFingerprint,
         cachedAt = excluded.cachedAt,
         expiresAt = excluded.expiresAt`;
   }
@@ -550,8 +763,8 @@ function getUpsertSql(driver: DatabaseDriver, table: "CreatorIndex" | "PostCache
         syncedAt = VALUES(syncedAt)`;
   }
 
-  return `INSERT INTO PostCache (site, service, creatorId, postId, title, excerpt, publishedAt, addedAt, editedAt, previewImageUrl, videoUrl, thumbUrl, mediaType, authorName, rawPreviewPayload, rawDetailPayload, detailLevel, sourceKind, cachedAt, expiresAt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  return `INSERT INTO PostCache (site, service, creatorId, postId, title, excerpt, publishedAt, addedAt, editedAt, previewImageUrl, videoUrl, thumbUrl, mediaType, authorName, rawPreviewPayload, rawDetailPayload, detailLevel, sourceKind, longestVideoUrl, longestVideoDurationSeconds, previewThumbnailAssetPath, previewClipAssetPath, previewStatus, previewGeneratedAt, previewError, previewSourceFingerprint, cachedAt, expiresAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       title = VALUES(title),
       excerpt = VALUES(excerpt),
@@ -567,6 +780,14 @@ function getUpsertSql(driver: DatabaseDriver, table: "CreatorIndex" | "PostCache
       rawDetailPayload = VALUES(rawDetailPayload),
       detailLevel = VALUES(detailLevel),
       sourceKind = VALUES(sourceKind),
+      longestVideoUrl = VALUES(longestVideoUrl),
+      longestVideoDurationSeconds = VALUES(longestVideoDurationSeconds),
+      previewThumbnailAssetPath = VALUES(previewThumbnailAssetPath),
+      previewClipAssetPath = VALUES(previewClipAssetPath),
+      previewStatus = VALUES(previewStatus),
+      previewGeneratedAt = VALUES(previewGeneratedAt),
+      previewError = VALUES(previewError),
+      previewSourceFingerprint = VALUES(previewSourceFingerprint),
       cachedAt = VALUES(cachedAt),
       expiresAt = VALUES(expiresAt)`;
 }
@@ -706,6 +927,14 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
         serializeJson(input.rawDetailPayload),
         input.detailLevel,
         input.sourceKind,
+        input.longestVideoUrl ?? null,
+        input.longestVideoDurationSeconds ?? null,
+        input.previewThumbnailAssetPath ?? null,
+        input.previewClipAssetPath ?? null,
+        input.previewStatus ?? null,
+        toDate(input.previewGeneratedAt),
+        input.previewError ?? null,
+        input.previewSourceFingerprint ?? null,
         input.cachedAt,
         input.expiresAt,
       ]);
@@ -760,6 +989,74 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
       };
     },
 
+    async getPreviewAssetCache({ site, sourceFingerprint }) {
+      const rows = await driver.query<any>("SELECT * FROM PreviewAssetCache WHERE site = ? AND sourceFingerprint = ? LIMIT 1", [site, sourceFingerprint]);
+      return rows[0] ? mapPreviewAssetRow(rows[0]) : null;
+    },
+
+    async upsertPreviewAssetCache(input) {
+      await driver.execute(getPreviewAssetUpsertSql(driver), [
+        input.site,
+        input.sourceVideoUrl,
+        input.sourceFingerprint,
+        input.durationSeconds ?? null,
+        input.thumbnailAssetPath ?? null,
+        input.clipAssetPath ?? null,
+        input.status,
+        input.generatedAt,
+        input.lastSeenAt,
+        input.error ?? null,
+      ]);
+    },
+
+    async touchPreviewAssetCache({ site, sourceFingerprint, lastSeenAt }) {
+      await driver.execute("UPDATE PreviewAssetCache SET lastSeenAt = ? WHERE site = ? AND sourceFingerprint = ?", [lastSeenAt, site, sourceFingerprint]);
+    },
+
+    async listPreviewAssetCachesOlderThan({ cutoff }) {
+      const rows = await driver.query<any>("SELECT * FROM PreviewAssetCache WHERE lastSeenAt < ? ORDER BY lastSeenAt ASC", [cutoff]);
+      return rows.map(mapPreviewAssetRow);
+    },
+
+    async deletePreviewAssetCaches({ entries }) {
+      if (entries.length === 0) {
+        return;
+      }
+
+      for (const chunk of chunkArray(entries, 250)) {
+        const predicates = chunk.map(() => "(site = ? AND sourceFingerprint = ?)").join(" OR ");
+        await driver.execute(
+          `DELETE FROM PreviewAssetCache WHERE ${predicates}`,
+          chunk.flatMap((entry) => [entry.site, entry.sourceFingerprint])
+        );
+      }
+    },
+
+    async listActivePreviewSourceFingerprints({ snapshotDateFrom }) {
+      const rows = await driver.query<any>(
+        `SELECT DISTINCT pc.site AS site, pc.previewSourceFingerprint AS sourceFingerprint
+         FROM PopularSnapshot ps
+         INNER JOIN PostCache pc
+           ON pc.site = ps.postSite
+          AND pc.service = ps.postService
+          AND pc.creatorId = ps.creatorId
+          AND pc.postId = ps.postId
+         WHERE ps.snapshotDate >= ?
+           AND pc.previewSourceFingerprint IS NOT NULL
+         ORDER BY pc.site ASC, pc.previewSourceFingerprint ASC`,
+        [snapshotDateFrom]
+      );
+
+      return rows.map((row) => ({
+        site: row.site as Site,
+        sourceFingerprint: String(row.sourceFingerprint),
+      }));
+    },
+
+    async deletePopularSnapshotsOlderThan({ snapshotDateBefore }) {
+      await driver.execute("DELETE FROM PopularSnapshot WHERE snapshotDate < ?", [snapshotDateBefore]);
+    },
+
     async disconnect() {
       await driver.disconnect();
     },
@@ -768,7 +1065,7 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
 
 export async function createLocalPerformanceRepository(options?: { databaseUrl?: string }): Promise<PerformanceRepository> {
   const { getLocalPrismaClient } = await import("./prisma.ts");
-  const prisma = getLocalPrismaClient(options?.databaseUrl);
+  const prisma = getLocalPrismaClient(options?.databaseUrl) as unknown as LocalPrismaQueryClient;
   const driver = createSqliteDriver(prisma);
   await ensurePerformanceTables(driver);
   return createRepository(driver);

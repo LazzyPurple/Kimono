@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -8,8 +8,10 @@ import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
 import { buildSearchCacheKey, type SearchFilter, type SearchSort } from "@/lib/perf-cache";
+import { buildSearchPageTitle } from "@/lib/page-titles";
 import { shouldCacheSearchResponse } from "@/lib/search-response-cache";
 import type { UnifiedCreator } from "@/lib/api/helpers";
 import { Heart, Loader2, Search as SearchIcon, SlidersHorizontal } from "lucide-react";
@@ -42,7 +44,9 @@ function SearchPageContent() {
   const [query, setQuery] = useState(qParam);
   const [resultPage, setResultPage] = useState<SearchApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const { likedCreators, isCreatorLiked } = useLikes();
+  const { likedCreators } = useLikes();
+
+  useDocumentTitle(buildSearchPageTitle());
 
   const likedCreatorKeys = useMemo(
     () => (filter === "liked" ? Array.from(likedCreators).sort() : []),
@@ -60,13 +64,18 @@ function SearchPageContent() {
 
         if (value === null) {
           params.delete(key);
+        } else if (key === "q" && value === "") {
+          params.delete(key);
+        } else if (key === "filter" && value === "tous") {
+          params.delete(key);
+        } else if (key === "sort" && value === "favorites") {
+          params.delete(key);
+        } else if (key === "service" && value === "Tous") {
+          params.delete(key);
+        } else if (key === "page" && value === "1") {
+          params.delete(key);
         } else {
-          if (key === "q" && value === "") params.delete(key);
-          else if (key === "filter" && value === "tous") params.delete(key);
-          else if (key === "sort" && value === "favorites") params.delete(key);
-          else if (key === "service" && value === "Tous") params.delete(key);
-          else if (key === "page" && value === "1") params.delete(key);
-          else params.set(key, value);
+          params.set(key, value);
         }
       });
 
@@ -74,7 +83,8 @@ function SearchPageContent() {
         params.delete("page");
       }
 
-      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      const queryString = params.toString();
+      router.replace(queryString ? `${pathname}?${queryString}` : pathname, { scroll: false });
     },
     [pathname, qParam, router, searchParams]
   );
@@ -85,6 +95,7 @@ function SearchPageContent() {
         updateParams({ q: query || null });
       }
     }, 300);
+
     return () => clearTimeout(timer);
   }, [qParam, query, updateParams]);
 
@@ -98,6 +109,7 @@ function SearchPageContent() {
 
     const loadPage = async () => {
       setLoading(true);
+
       try {
         const cacheKey = buildSearchCacheKey({
           q: qParam,
@@ -126,7 +138,7 @@ function SearchPageContent() {
 
             const response = await fetch(`/api/search-creators?${params.toString()}`);
             if (!response.ok) {
-              throw new Error("Erreur reseau");
+              throw new Error("Network error");
             }
 
             return response.json();
@@ -183,9 +195,25 @@ function SearchPageContent() {
     updateParams({ page: String(nextPage) });
   };
 
+  const filterLabels: Record<SearchFilter, string> = {
+    tous: "All",
+    kemono: "Kemono",
+    coomer: "Coomer",
+    liked: "Liked",
+  };
+
+  const sortLabels: Record<SearchSort, string> = {
+    favorites: "Popular",
+    date: "Updated",
+    az: "A-Z",
+  };
+
+  const emptyFilterHint =
+    filter !== "tous" || query !== "" || serviceFilter !== "Tous";
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-[#f0f0f5]">Accueil</h1>
+      <h1 className="text-2xl font-bold text-[#f0f0f5]">Search</h1>
 
       <div className="space-y-4 rounded-xl border border-[#1e1e2e] bg-[#12121a] p-4">
         <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
@@ -194,45 +222,26 @@ function SearchPageContent() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder={"Rechercher un createur..."}
+              placeholder="Search creators..."
               className="h-9 border-[#1e1e2e] bg-[#0a0a0f] pl-9 text-sm text-[#f0f0f5] placeholder:text-[#6b7280]"
             />
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              onClick={() => updateParams({ sort: "favorites" })}
-              className={`h-8 cursor-pointer text-xs transition-colors ${
-                sortBy === "favorites"
-                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                  : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-              }`}
-            >
-              Popularite
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => updateParams({ sort: "date" })}
-              className={`h-8 cursor-pointer text-xs transition-colors ${
-                sortBy === "date"
-                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                  : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-              }`}
-            >
-              Mise a jour
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => updateParams({ sort: "az" })}
-              className={`h-8 cursor-pointer text-xs transition-colors ${
-                sortBy === "az"
-                  ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                  : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-              }`}
-            >
-              A-Z
-            </Button>
+            {(["favorites", "date", "az"] as SearchSort[]).map((value) => (
+              <Button
+                key={value}
+                size="sm"
+                onClick={() => updateParams({ sort: value })}
+                className={`h-8 cursor-pointer text-xs transition-colors ${
+                  sortBy === value
+                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                }`}
+              >
+                {sortLabels[value]}
+              </Button>
+            ))}
           </div>
         </div>
 
@@ -254,10 +263,10 @@ function SearchPageContent() {
               {value === "liked" ? (
                 <span className="inline-flex items-center gap-1.5">
                   <Heart className={`h-3.5 w-3.5 ${filter === value ? "fill-current" : ""}`} />
-                  <span>Likes</span>
+                  <span>{filterLabels[value]}</span>
                 </span>
               ) : (
-                value.charAt(0).toUpperCase() + value.slice(1)
+                filterLabels[value]
               )}
             </Button>
           ))}
@@ -275,7 +284,7 @@ function SearchPageContent() {
                   : "border border-[#1e1e2e] bg-[#0a0a0f] text-[#6b7280] hover:bg-[#1e1e2e]"
               }`}
             >
-              {service}
+              {service === "Tous" ? "All" : service}
             </Badge>
           ))}
         </div>
@@ -294,17 +303,16 @@ function SearchPageContent() {
       ) : displayed.length === 0 ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
           <SearchIcon className="mx-auto mb-4 h-12 w-12 text-[#6b7280]" />
-          <p className="text-lg text-[#6b7280]">Aucun resultat</p>
-          {(filter !== "tous" || query !== "" || serviceFilter !== "Tous") && (
-            <p className="mt-1 text-sm text-[#6b7280]">Modifiez vos filtres ou votre recherche.</p>
+          <p className="text-lg text-[#6b7280]">No results</p>
+          {emptyFilterHint && (
+            <p className="mt-1 text-sm text-[#6b7280]">Try different filters or another search.</p>
           )}
         </div>
       ) : (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-sm text-[#6b7280]">
-              {totalResults} resultat
-              {totalResults > 1 ? "s" : ""}
+              {totalResults} result{totalResults > 1 ? "s" : ""}
               {totalPages > 1 && (
                 <span className="ml-2 text-[#4b5563]">
                   - page {currentPage}/{totalPages}
@@ -349,9 +357,3 @@ export default function SearchPage() {
     </Suspense>
   );
 }
-
-
-
-
-
-

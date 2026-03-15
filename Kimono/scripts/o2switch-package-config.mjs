@@ -5,6 +5,8 @@
   "bcryptjs",
   "class-variance-authority",
   "clsx",
+  "ffmpeg-static",
+  "fluent-ffmpeg",
   "lucide-react",
   "mysql2",
   "next",
@@ -71,9 +73,10 @@ export const RUNTIME_DEPENDENCY_NAMES = [...BASE_RUNTIME_DEPENDENCIES];
 
 export function createRuntimePackageManifest(sourcePackage) {
   const sourceDependencies = sourcePackage.dependencies ?? {};
+  const sourceOptionalDependencies = sourcePackage.optionalDependencies ?? {};
   const runtimeDependencies = Object.fromEntries(
     RUNTIME_DEPENDENCY_NAMES.flatMap((name) => {
-      const version = sourceDependencies[name];
+      const version = sourceDependencies[name] ?? sourceOptionalDependencies[name];
       return version ? [[name, version]] : [];
     })
   );

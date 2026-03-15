@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import Link from "next/link";
@@ -22,37 +22,37 @@ export default function ProtectedLayoutShell({
 
   return (
     <LikesProvider>
-      <div className="min-h-screen relative">
+      <div className="relative min-h-screen">
         <SakuraDecor />
         <nav className="sticky top-0 z-50 border-b border-[#ffb7c5]/20 bg-[#0a0a0f]/80 backdrop-blur-md">
-          <div className="container mx-auto flex h-14 items-center justify-between px-4 relative z-10">
-            <Link href="/search" className="shrink-0 flex items-center hover:opacity-80 transition-opacity">
-              <Logo className="h-5 sm:h-6 w-auto" />
+          <div className="container relative z-10 mx-auto flex h-14 items-center justify-between px-4">
+            <Link href="/search" className="flex shrink-0 items-center transition-opacity hover:opacity-80">
+              <Logo className="h-5 w-auto sm:h-6" />
             </Link>
             <div className="flex items-center gap-4">
               <Link
                 href="/search"
-                className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors"
+                className="text-sm text-[#6b7280] transition-colors hover:text-[#f0f0f5]"
               >
-                Accueil
+                Home
               </Link>
               <Link
                 href="/favorites"
-                className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors"
+                className="text-sm text-[#6b7280] transition-colors hover:text-[#f0f0f5]"
               >
-                Favoris
+                Favorites
               </Link>
               <Link
                 href="/popular/kemono"
-                className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors"
+                className="text-sm text-[#6b7280] transition-colors hover:text-[#f0f0f5]"
               >
-                Populaires
+                Popular
               </Link>
               <Link
                 href="/discover"
-                className="text-sm text-[#6b7280] hover:text-[#f0f0f5] transition-colors flex items-center gap-1"
+                className="flex items-center gap-1 text-sm text-[#6b7280] transition-colors hover:text-[#f0f0f5]"
               >
-                {"D\u00e9couverte"}
+                Discover
               </Link>
 
               {showSecurityControls && (
@@ -60,8 +60,8 @@ export default function ProtectedLayoutShell({
                   variant="ghost"
                   size="sm"
                   onClick={() => setTotpDialogOpen(true)}
-                  className="text-[#6b7280] hover:text-[#7c3aed] cursor-pointer"
-                  title="Configurer la 2FA"
+                  className="cursor-pointer text-[#6b7280] hover:text-[#7c3aed]"
+                  title="Set up 2FA"
                 >
                   <ShieldCheck className="h-4 w-4" />
                 </Button>
@@ -72,8 +72,8 @@ export default function ProtectedLayoutShell({
                   variant="ghost"
                   size="sm"
                   onClick={onLogout}
-                  className="text-[#6b7280] hover:text-red-400 cursor-pointer"
-                  title={"Se d\u00e9connecter"}
+                  className="cursor-pointer text-[#6b7280] hover:text-red-400"
+                  title="Sign out"
                 >
                   <LogOut className="h-4 w-4" />
                 </Button>
@@ -82,7 +82,7 @@ export default function ProtectedLayoutShell({
           </div>
         </nav>
 
-        <main className="container mx-auto px-4 py-6 relative z-10">{children}</main>
+        <main className="container relative z-10 mx-auto px-4 py-6">{children}</main>
 
         {showSecurityControls && (
           <TotpSetupDialog

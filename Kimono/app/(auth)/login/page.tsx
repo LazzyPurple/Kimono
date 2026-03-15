@@ -6,8 +6,8 @@ import LoginPageClient from "@/components/LoginPageClient";
 
 function LoginPageFallback() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f] px-4">
-      <div className="text-[#7c3aed] text-lg animate-pulse">Chargement...</div>
+    <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f] px-4">
+      <div className="animate-pulse text-lg text-[#7c3aed]">Loading...</div>
     </div>
   );
 }

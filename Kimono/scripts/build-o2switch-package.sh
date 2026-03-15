@@ -69,13 +69,11 @@ stage_runtime_path() {
 
 echo "[o2switch] Copying source into Linux build workspace..."
 copy_source
+rm -f "$SOURCE_COPY/prisma.config.ts"
 
 cd "$SOURCE_COPY"
 echo "[o2switch] Installing dependencies with npm ci..."
 npm ci
-
-echo "[o2switch] Generating Prisma client..."
-npm run prisma:generate
 
 echo "[o2switch] Building production bundle with Webpack..."
 npm run build

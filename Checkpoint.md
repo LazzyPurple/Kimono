@@ -1,4 +1,4 @@
-# Kimono - Checkpoint
+﻿# Kimono - Checkpoint
 
 Ce document sert de resume d'etat du projet et de memo de progression.
 
@@ -38,7 +38,7 @@ En production :
 
 Le support Prisma a ete reintroduit cote source pour le developpement local :
 
-- `prisma/schema.prisma` pointe de nouveau vers SQLite en local
+- `prisma/schema.prisma` reste dedie au mode local SQLite
 - client Prisma local dedie
 - scripts `prisma:generate` et `prisma:push`
 - tests de couverture du mode local
@@ -89,7 +89,27 @@ Des jobs serveurs existent pour alimenter la base de cache :
 
 Ils sont prevus pour etre appeles via cron cPanel en production.
 
-### 7. Deploiement o2switch
+### 7. Phase `Popular` serveur-first
+
+Un chantier specifique a ete lance pour faire de `Popular` la premiere surface vraiment prechauffee cote serveur.
+
+Ce qui est deja en place :
+
+- detection de la plus longue video d'un post
+- calcul de la duree cote serveur
+- generation de thumbnail et mini clip de preview
+- stockage des assets sur disque serveur
+- referencement des assets en base
+- deduplication des previews deja traitees via empreinte video stable
+- reutilisation d'un asset si une video reste populaire plusieurs jours
+
+Objectif :
+
+- reduire la charge CPU / GPU et reseau cote client
+- eviter de recalculer la duree et la preview dans le navigateur
+- preparer une extension future du meme modele a `home`, `creator`, `favorites`, `discover` et autres listings
+
+### 8. Deploiement o2switch
 
 Le flux de deploiement a ete fortement remis a plat.
 
@@ -108,7 +128,7 @@ Objectif :
 - ne plus faire de build Next.js sur o2switch
 - ne laisser au serveur que l'installation runtime et le redemarrage Passenger
 
-### 8. Logging et debug
+### 9. Logging et debug
 
 Une couche de logging centralisee a ete ajoutee :
 
@@ -122,9 +142,10 @@ Notes :
 
 - `/logs` est volontairement publique temporairement pour debloquer le debug prod
 - `/api/debug/auth-check` est encore present comme secours temporaire
+- `/api/debug/env-db` aide a diagnostiquer la valeur runtime de `DATABASE_URL`
 - ces routes doivent etre fermees ou supprimees une fois la stabilisation terminee
 
-### 9. Correctifs UI / hydration
+### 10. Correctifs UI / hydration
 
 Plusieurs correctifs de stabilite et de presentation ont ete appliques :
 
@@ -134,6 +155,16 @@ Plusieurs correctifs de stabilite et de presentation ont ete appliques :
 - correction du flux de login qui pouvait spinner a l'infini
 - correction du proxy / lecture de session qui creait une boucle vers `/login`
 - page `/logs` rendue plus compacte et responsive
+
+### 11. UI / contenu visible
+
+Un chantier de polish UI a ete entame :
+
+- passage progressif de l'interface vers l'anglais
+- titres de pages dynamiques
+- durees video sur les cards
+- nettoyage de plusieurs textes mal encodes
+- travail en cours sur la stabilite visuelle des cards et des previews
 
 ## Tests et outillage ajoutes
 
@@ -150,6 +181,7 @@ Une couverture de tests a ete ajoutee ou etendue autour de :
 - hybrid content
 - logs dashboard / logs route / logs layout
 - packaging o2switch
+- preview assets `Popular`
 - correctif Sakura / UI copy
 
 ## Etat actuel de la production
@@ -158,22 +190,23 @@ Le projet est fonctionnel, mais encore en phase de stabilisation.
 
 Points a surveiller en ce moment :
 
-- erreurs DB encore visibles par moments dans `/logs`
-- sensibilite de `DATABASE_URL` en production quand le mot de passe MySQL contient des caracteres speciaux
-- debug auth encore volontairement expose pour investigation
-- quelques regressions UI / responsive / traduction encore a traiter
+- la DB de production est fonctionnelle, mais reste sensible a une mauvaise valeur de `DATABASE_URL`
+- debug auth et debug DB encore volontairement exposes pour investigation
+- la page `Popular` reste encore trop lourde visuellement sur certaines configurations client
+- certaines cards media affichent encore des artefacts de chargement ou des etats noirs
+- les assets serveur de `Popular` ne sont pas encore reutilises partout dans le site
 - certains endpoints likes / favorites / kimono session ont deja ete durcis, mais l'ensemble n'est pas encore totalement fiabilise
 
 ## Recommandations court terme
 
 ### A faire en priorite
 
-1. stabiliser completement la configuration DB de production
-2. fermer ou securiser `/logs` et `/api/debug/auth-check`
-3. finaliser l'anglais de l'UI
-4. corriger le responsive des cards
-5. ajouter les titres de page dynamiques
-6. ajouter la duree video sur les post cards / media cards
+1. propager les assets serveur issus de `Popular` a toutes les surfaces ou ces posts reapparaissent
+2. reduire les artefacts de chargement et les cartes noires sur `Popular`
+3. continuer a reduire le cout client des previews video
+4. finaliser l'anglais de l'UI et les titres de page
+5. refermer ou securiser `/logs`, `/api/debug/auth-check` et `/api/debug/env-db`
+6. nettoyer les warnings restants et les routes de debug temporaires
 
 ### A verifier apres chaque deploy
 
@@ -181,8 +214,9 @@ Points a surveiller en ce moment :
 - `/api/logs`
 - `/api/search-creators`
 - `/api/popular-posts`
+- `/api/preview-assets/...`
 - login admin
-- navigation `/search`, `/creator`, `/post`
+- navigation `/search`, `/creator`, `/post`, `/popular`
 
 ## Commandes utiles
 
@@ -217,6 +251,7 @@ Kimono a beaucoup evolue pendant cette passe :
 - caching hybride et prechauffage
 - deploiement Linux prebuild pour o2switch
 - outils de debug serveur enfin visibles via `/logs`
+- phase `Popular` serveur-first avec preview assets dedupliques
 - plusieurs correctifs auth, session, hydration et UX
 
-Le projet est beaucoup mieux structure qu'au depart, mais la phase actuelle reste une phase de hardening avant de refermer les routes de debug et de finaliser la polish UI.
+Le projet est beaucoup mieux structure qu'au depart, mais la phase actuelle reste une phase de hardening orientee performance media, avant de refermer les routes de debug et de finaliser la polish UI.

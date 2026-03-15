@@ -1,5 +1,4 @@
 import { isLocalDevMode } from "./local-dev-mode.ts";
-import type { PrismaClient } from "@prisma/client";
 
 export type SupportedSite = "kemono" | "coomer";
 
@@ -66,6 +65,35 @@ export interface DataStore {
 }
 
 type ProductionDbModule = typeof import("./db.ts");
+type LocalPrismaDataStoreClient = {
+  user: {
+    findFirst(input: unknown): Promise<any>;
+    findUnique(input: unknown): Promise<any>;
+    create(input: unknown): Promise<any>;
+    update(input: unknown): Promise<any>;
+  };
+  kimonoSession: {
+    findFirst(input: unknown): Promise<any>;
+    findMany(input: unknown): Promise<any>;
+    create(input: unknown): Promise<any>;
+    deleteMany(input: unknown): Promise<{ count: number }>;
+  };
+  creatorsCache: {
+    findUnique(input: unknown): Promise<any>;
+    upsert(input: unknown): Promise<any>;
+  };
+  discoveryBlock: {
+    findMany(input: unknown): Promise<any[]>;
+    create(input: unknown): Promise<any>;
+    deleteMany(input: unknown): Promise<{ count: number }>;
+  };
+  discoveryCache: {
+    findUnique(input: unknown): Promise<any>;
+    upsert(input: unknown): Promise<any>;
+  };
+  $disconnect(): Promise<void>;
+};
+
 
 let localStorePromise: Promise<DataStore> | undefined;
 let productionStorePromise: Promise<DataStore> | undefined;
@@ -227,7 +255,7 @@ function createProductionDataStore(db: ProductionDbModule): DataStore {
   };
 }
 
-function createPrismaDataStore(prisma: PrismaClient): DataStore {
+function createPrismaDataStore(prisma: LocalPrismaDataStoreClient): DataStore {
   return {
     async getOrCreateAdminUser() {
       let user = await prisma.user.findFirst({
@@ -375,7 +403,7 @@ export async function createLocalDataStore(options?: {
   databaseUrl?: string;
 }): Promise<DataStore> {
   const { getLocalPrismaClient } = await import("./prisma.ts");
-  const prisma = getLocalPrismaClient(options?.databaseUrl);
+  const prisma = getLocalPrismaClient(options?.databaseUrl) as unknown as LocalPrismaDataStoreClient;
   return createPrismaDataStore(prisma);
 }
 
