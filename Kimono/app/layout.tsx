@@ -19,6 +19,12 @@ export default function RootLayout({
 
   return (
     <html lang="en">
+      <head>
+        <link rel="preconnect" href="https://img.kemono.cr" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://img.coomer.st" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://kemono.cr" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://coomer.st" crossOrigin="anonymous" />
+      </head>
       <body className="antialiased">
         <Providers localDevMode={localDevMode}>
           <BrowserErrorLogger />

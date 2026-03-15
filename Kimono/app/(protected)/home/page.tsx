@@ -5,7 +5,7 @@ import { Loader2 } from "lucide-react";
 import MediaCard from "@/components/MediaCard";
 import { Button } from "@/components/ui/button";
 import type { UnifiedPost } from "@/lib/api/helpers";
-import { getPostVideoUrls, resolvePostMedia } from "@/lib/api/helpers";
+import { resolveListingPostMedia } from "@/lib/api/helpers";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { buildAppPageTitle } from "@/lib/page-titles";
 
@@ -82,8 +82,8 @@ export default function HomePage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {posts.map((post) => {
-              const media = resolvePostMedia(post);
+            {posts.map((post, index) => {
+              const media = resolveListingPostMedia(post);
 
               return (
                 <MediaCard
@@ -97,8 +97,10 @@ export default function HomePage() {
                   postId={post.id}
                   user={post.user}
                   publishedAt={post.published}
-                  videoPreviewMode="viewport"
-                  videoCandidates={getPostVideoUrls(post)}
+                  priority={index < 4}
+                  durationSeconds={media.durationSeconds}
+                  videoPreviewMode="hover"
+                  videoCandidates={media.videoCandidates}
                 />
               );
             })}
@@ -127,3 +129,6 @@ export default function HomePage() {
     </div>
   );
 }
+
+
+

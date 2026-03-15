@@ -1,35 +1,28 @@
-export const dynamic = "force-dynamic";
+﻿export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import {
   collectAuthDebugSnapshot,
   collectPublicRuntimeEnvProbe,
-  probeAdminPassword,
-  simulateMasterPasswordAuthorize,
 } from "@/lib/auth-debug-route";
+import { getCurrentDiagnosticAccessDecision } from "@/lib/diagnostic-access";
 
-export async function GET() {
-  const runtime = collectPublicRuntimeEnvProbe();
-  const auth = await collectAuthDebugSnapshot();
-
-  return NextResponse.json({
-    ok: true,
-    runtime,
-    auth,
-    passwordProbe: probeAdminPassword(undefined),
-    authorizationProbe: await simulateMasterPasswordAuthorize(undefined),
-  });
+function notFoundResponse() {
+  return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
-export async function POST(request: Request) {
-  let password: string | undefined;
-  try {
-    const body = await request.json();
-    if (body && typeof body.password === "string") {
-      password = body.password;
-    }
-  } catch {
-    password = undefined;
+async function isAuthorized(request: Request) {
+  const decision = await getCurrentDiagnosticAccessDecision({
+    headers: request.headers,
+    url: request.url,
+  });
+
+  return decision.type === "allowed";
+}
+
+export async function GET(request: Request) {
+  if (!(await isAuthorized(request))) {
+    return notFoundResponse();
   }
 
   const runtime = collectPublicRuntimeEnvProbe();
@@ -39,7 +32,13 @@ export async function POST(request: Request) {
     ok: true,
     runtime,
     auth,
-    passwordProbe: probeAdminPassword(password),
-    authorizationProbe: await simulateMasterPasswordAuthorize(password),
   });
+}
+
+export async function POST(request: Request) {
+  if (!(await isAuthorized(request))) {
+    return notFoundResponse();
+  }
+
+  return GET(request);
 }

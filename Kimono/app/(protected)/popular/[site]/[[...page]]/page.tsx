@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
@@ -9,7 +9,7 @@ import Pagination from "@/components/Pagination";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
-import { getPostVideoUrls, resolvePostMedia, type UnifiedPost } from "@/lib/api/helpers";
+import { resolveListingPostMedia, type UnifiedPost } from "@/lib/api/helpers";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { buildPopularCacheKey, type PopularPeriod } from "@/lib/perf-cache";
@@ -280,26 +280,25 @@ function PopularPageContent() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {data.posts.map((post) => {
-              const media = resolvePostMedia(post);
-              const previewImageUrl = post.previewThumbnailUrl ?? media.previewImageUrl;
-              const previewVideoUrl = post.previewClipUrl ?? media.videoUrl;
+            {data.posts.map((post, index) => {
+              const media = resolveListingPostMedia(post);
 
               return (
                 <MediaCard
                   key={`${post.site}-${post.service}-${post.id}`}
                   title={post.title}
-                  previewImageUrl={previewImageUrl}
-                  videoUrl={previewVideoUrl}
-                  type={previewVideoUrl ? "video" : media.type}
+                  previewImageUrl={media.previewImageUrl}
+                  videoUrl={media.videoUrl}
+                  type={media.type}
                   site={post.site}
                   service={post.service}
                   postId={post.id}
                   user={post.user}
                   publishedAt={post.published}
-                  durationSeconds={post.longestVideoDurationSeconds ?? null}
+                  priority={index < 4}
+                  durationSeconds={media.durationSeconds}
                   videoPreviewMode="hover"
-                  videoCandidates={previewVideoUrl ? [previewVideoUrl] : getPostVideoUrls(post)}
+                  videoCandidates={media.videoCandidates}
                 />
               );
             })}
@@ -327,4 +326,7 @@ export default function PopularPage() {
     </Suspense>
   );
 }
+
+
+
 

@@ -3,6 +3,7 @@ import { getDataStore } from "./data-store.ts";
 import { resolveLocalDevMode } from "./local-dev-mode.ts";
 import { shouldEnableCredentialAuth } from "./auth-guards.ts";
 import { toAuthDebugErrorDetails, shouldEnableAuthDebugLog } from "./auth-debug.ts";
+import { getDiagnosticAccessDecision } from "./diagnostic-access.ts";
 
 import type { DataStore, StoredUser } from "./data-store.ts";
 
@@ -25,13 +26,13 @@ type AuthorizationProbeResult =
   | "success";
 
 type AdminUserSnapshot = {
-  id: string;
-  email: string;
+  exists: boolean;
   totpEnabled: boolean;
-  createdAt: string;
 };
 
-export type AuthDebugRouteAccessDecision = { type: "allowed" };
+export type AuthDebugRouteAccessDecision =
+  | { type: "allowed"; via: "local-dev" | "debug-token" | "session" }
+  | { type: "denied" };
 
 export type PasswordProbeSnapshot = {
   checked: boolean;
@@ -71,13 +72,10 @@ export type AuthDebugSnapshot = {
 
 export type DatabaseUrlDebugSnapshot = {
   scheme: string | null;
-  username: string | null;
-  hostname: string | null;
-  port: string | null;
-  databaseName: string | null;
-  passwordLength: number;
-  passwordPreviewStart: string | null;
-  passwordPreviewEnd: string | null;
+  hasCredentials: boolean;
+  hasHostname: boolean;
+  hasPort: boolean;
+  hasDatabaseName: boolean;
   hasWhitespace: boolean;
   hasNewline: boolean;
   hasQuotes: boolean;
@@ -123,10 +121,8 @@ function createBuildProbeSkippedErrorDetails(): ReturnType<typeof toAuthDebugErr
 
 function toAdminUserSnapshot(user: StoredUser): AdminUserSnapshot {
   return {
-    id: user.id,
-    email: user.email,
+    exists: true,
     totpEnabled: Boolean(user.totpEnabled),
-    createdAt: user.createdAt.toISOString(),
   };
 }
 
@@ -138,18 +134,13 @@ function getDatabaseUrlDebugSnapshot(databaseUrl: string | undefined): DatabaseU
   const rawValue = databaseUrl;
   const trimmedValue = rawValue.trim();
   const match = trimmedValue.match(/^([a-z0-9+.-]+):\/\/([^:@/?#]+)(?::([^@/?#]*))?@([^:/?#]+)(?::(\d+))?(?:\/([^?#]*))?/i);
-  const password = match?.[3] ?? "";
-  const databaseName = match?.[6] ? decodeURIComponent(match[6]) : null;
 
   return {
     scheme: match?.[1] ?? null,
-    username: match?.[2] ? decodeURIComponent(match[2]) : null,
-    hostname: match?.[4] ?? null,
-    port: match?.[5] ?? null,
-    databaseName,
-    passwordLength: password.length,
-    passwordPreviewStart: password ? password.slice(0, Math.min(3, password.length)) : null,
-    passwordPreviewEnd: password ? password.slice(Math.max(0, password.length - 2)) : null,
+    hasCredentials: Boolean(match?.[2]),
+    hasHostname: Boolean(match?.[4]),
+    hasPort: Boolean(match?.[5]),
+    hasDatabaseName: Boolean(match?.[6]),
     hasWhitespace: /\s/.test(rawValue),
     hasNewline: /[\r\n]/.test(rawValue),
     hasQuotes: /["'`]/.test(rawValue),
@@ -200,10 +191,15 @@ export function resolveAuthDebugToken(env: EnvShape = process.env): string | nul
 }
 
 export function getAuthDebugRouteAccessDecision(
-  _providedToken: string | null | undefined,
-  _env: EnvShape = process.env
+  providedToken: string | null | undefined,
+  env: EnvShape = process.env
 ): AuthDebugRouteAccessDecision {
-  return { type: "allowed" };
+  return getDiagnosticAccessDecision({
+    localDevMode: resolveLocalDevMode(env),
+    session: null,
+    providedToken,
+    env,
+  });
 }
 
 export function probeAdminPassword(
@@ -394,3 +390,4 @@ export async function collectAuthDebugSnapshot(options?: {
     }
   }
 }
+

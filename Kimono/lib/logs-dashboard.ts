@@ -1,4 +1,4 @@
-﻿import { collectAuthDebugSnapshot, collectPublicRuntimeEnvProbe, probeAdminPassword, simulateMasterPasswordAuthorize } from "./auth-debug-route.ts";
+﻿import { collectAuthDebugSnapshot, collectPublicRuntimeEnvProbe } from "./auth-debug-route.ts";
 import { getLogsRoutePayload } from "./logs-route.ts";
 
 import type { DataStore } from "./data-store.ts";
@@ -20,10 +20,6 @@ export async function getLogsDashboardData(options: {
     auth: {
       runtime,
       auth,
-      passwordProbe: probeAdminPassword(undefined),
-      authorizationProbe: await simulateMasterPasswordAuthorize(undefined, {
-        getStore: options.getStore,
-      }),
     },
   };
 }
