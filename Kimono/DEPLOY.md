@@ -1,4 +1,4 @@
-# Deploiement Kimono sur o2switch
+﻿# Deploiement Kimono sur o2switch
 
 Ce guide correspond au flux de prod actuel:
 - source principale dans `Kimono/`
@@ -60,6 +60,9 @@ WEBAUTHN_RP_NAME="Kimono"
 WEBAUTHN_RP_ID="kimono.paracosm.fr"
 WEBAUTHN_ORIGIN="https://kimono.paracosm.fr"
 CRON_SECRET="..."
+PREVIEW_ASSET_DIR="/home/dosa4307/tmp/kimono-preview-assets"
+POPULAR_PREVIEW_RETENTION_DAYS="7"
+POPULAR_PREVIEW_CLIP_SECONDS="3"
 NODE_ENV="production"
 AUTH_DEBUG_LOG="false"
 AUTH_DEBUG_LOG_PATH="tmp/auth-debug.log"
@@ -169,6 +172,12 @@ curl -X POST 'https://kimono.paracosm.fr/api/cache-jobs/popular-warmup?secret=TO
 Recommandation cron cPanel:
 - `creator-snapshot` une fois par nuit
 - `popular-warmup` juste apres, ou quelques minutes plus tard
+
+Notes preview assets `Popular`:
+- `popular-warmup` genere et/ou reutilise les thumbnails, mini clips et durees video des posts `Popular`
+- les assets sont stockes sur disque dans `PREVIEW_ASSET_DIR`
+- un meme post/video populaire sur plusieurs jours reutilise ses assets si la source et le fingerprint sont identiques
+- la retention par defaut est de 7 jours
 
 ## 7. Verification apres mise en ligne
 

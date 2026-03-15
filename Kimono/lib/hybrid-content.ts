@@ -1,5 +1,12 @@
-import { proxyCdnUrl, resolvePostMedia, type UnifiedCreator, type UnifiedPost } from "./api/helpers.ts";
+﻿import { proxyCdnUrl, resolvePostMedia, type UnifiedCreator, type UnifiedPost } from "./api/helpers.ts";
+import {
+  buildPreviewAssetPublicUrl,
+  createPopularPreviewAssetService,
+  getPopularPreviewRetentionDays,
+  type PreparedPopularPreview,
+} from "./popular-preview-assets.ts";
 import { fetchAllCreatorsFromSite, fetchPopularPostsFromSite, fetchPostDetailFromSite, type PopularResponse } from "./api/upstream.ts";
+import { appendAppLog } from "./app-logger.ts";
 import {
   POPULAR_FULL_DETAIL_LIMIT,
   POPULAR_SNAPSHOT_TTL_MS,
@@ -31,6 +38,49 @@ export interface HybridPopularResult extends PopularResponse {
   source: "cache" | "live" | "live-refresh" | "stale-cache" | "empty";
 }
 
+export interface PopularWarmupPreviewSummary {
+  totalPosts: number;
+  generated: number;
+  reused: number;
+  skippedNoFfmpeg: number;
+  failed: number;
+  notVideo: number;
+}
+
+function createEmptyPopularWarmupPreviewSummary(): PopularWarmupPreviewSummary {
+  return {
+    totalPosts: 0,
+    generated: 0,
+    reused: 0,
+    skippedNoFfmpeg: 0,
+    failed: 0,
+    notVideo: 0,
+  };
+}
+
+function addPopularPreviewOutcomeToSummary(summary: PopularWarmupPreviewSummary, outcome: PreparedPopularPreview["previewOutcome"] | null | undefined) {
+  summary.totalPosts += 1;
+  switch (outcome) {
+    case "generated":
+      summary.generated += 1;
+      break;
+    case "reused":
+      summary.reused += 1;
+      break;
+    case "skipped-no-ffmpeg":
+      summary.skippedNoFfmpeg += 1;
+      break;
+    case "not-video":
+      summary.notVideo += 1;
+      break;
+    case "failed":
+    case "missing":
+    default:
+      summary.failed += 1;
+      break;
+  }
+}
+
 interface HybridDependencies {
   repository?: PerformanceRepository;
   getRepository?: () => Promise<PerformanceRepository>;
@@ -50,9 +100,19 @@ interface HybridDependencies {
     postId: string;
     cookie?: string;
   }) => Promise<UnifiedPost>;
+  preparePopularPreviewAssets?: (input: { site: Site; post: UnifiedPost; now?: Date }) => Promise<PreparedPopularPreview>;
+  cleanupPopularPreviewAssets?: (input?: {
+    now?: Date;
+    retentionDays?: number;
+    activeFingerprints?: Array<{ site: Site; sourceFingerprint: string }>;
+  }) => Promise<{ deletedEntries: number }>;
 }
 
-function buildCreatorSnapshotRows(site: Site, creators: any[]): CreatorSnapshotInput[] {
+export function createCreatorSnapshotRows(site: Site, creators: any[]): CreatorSnapshotInput[] {
+  if (!Array.isArray(creators) || creators.length === 0) {
+    throw new Error(`Creator snapshot refresh for ${site} returned no creators.`);
+  }
+
   return creators.map((creator) => ({
     site,
     service: creator.service,
@@ -83,41 +143,72 @@ function toUnifiedCreators(items: Awaited<ReturnType<PerformanceRepository["sear
   }));
 }
 
+function applyPreparedPreviewToUnifiedPost(post: UnifiedPost, preview: PreparedPopularPreview): UnifiedPost {
+  return {
+    ...post,
+    longestVideoUrl: preview.longestVideoUrl,
+    longestVideoDurationSeconds: preview.longestVideoDurationSeconds,
+    previewThumbnailUrl: buildPreviewAssetPublicUrl(preview.previewThumbnailAssetPath),
+    previewClipUrl: buildPreviewAssetPublicUrl(preview.previewClipAssetPath),
+    previewStatus: preview.previewStatus,
+    previewGeneratedAt: preview.previewGeneratedAt?.toISOString() ?? null,
+    previewError: preview.previewError,
+    previewSourceFingerprint: preview.previewSourceFingerprint,
+  };
+}
+
 function mapCachedPostToUnifiedPost(record: Awaited<ReturnType<PerformanceRepository["getPostCache"]>> extends infer T ? T : never): UnifiedPost | null {
   if (!record) {
     return null;
   }
 
   const raw = (record.rawDetailPayload ?? record.rawPreviewPayload) as UnifiedPost | null;
-  if (raw) {
-    return {
-      ...raw,
-      site: record.site,
-    };
-  }
+  const basePost: UnifiedPost = raw
+    ? {
+        ...raw,
+        site: record.site,
+      }
+    : {
+        site: record.site,
+        service: record.service,
+        user: record.creatorId,
+        id: record.postId,
+        title: record.title ?? "",
+        content: record.excerpt ?? "",
+        published: record.publishedAt?.toISOString() ?? "",
+        added: record.addedAt?.toISOString() ?? "",
+        edited: record.editedAt?.toISOString() ?? "",
+        embed: {},
+        file: record.previewImageUrl
+          ? {
+              name: record.previewImageUrl.split("/").pop() ?? "preview",
+              path: record.previewImageUrl,
+            }
+          : { name: "", path: "" },
+        attachments: [],
+      };
 
   return {
+    ...basePost,
     site: record.site,
-    service: record.service,
-    user: record.creatorId,
-    id: record.postId,
-    title: record.title ?? "",
-    content: record.excerpt ?? "",
-    published: record.publishedAt?.toISOString() ?? "",
-    added: record.addedAt?.toISOString() ?? "",
-    edited: record.editedAt?.toISOString() ?? "",
-    embed: {},
-    file: record.previewImageUrl
-      ? {
-          name: record.previewImageUrl.split("/").pop() ?? "preview",
-          path: record.previewImageUrl,
-        }
-      : { name: "", path: "" },
-    attachments: [],
+    longestVideoUrl: record.longestVideoUrl,
+    longestVideoDurationSeconds: record.longestVideoDurationSeconds,
+    previewThumbnailUrl: buildPreviewAssetPublicUrl(record.previewThumbnailAssetPath),
+    previewClipUrl: buildPreviewAssetPublicUrl(record.previewClipAssetPath),
+    previewStatus: record.previewStatus,
+    previewGeneratedAt: record.previewGeneratedAt?.toISOString() ?? null,
+    previewError: record.previewError,
+    previewSourceFingerprint: record.previewSourceFingerprint,
   };
 }
 
-function createPostCacheInputFromUnifiedPost(post: UnifiedPost, sourceKind: string, detailLevel: "metadata" | "full", ttlMs = SERVER_POST_CACHE_TTL_MS): PostCacheInput {
+function createPostCacheInputFromUnifiedPost(
+  post: UnifiedPost,
+  sourceKind: string,
+  detailLevel: "metadata" | "full",
+  ttlMs = SERVER_POST_CACHE_TTL_MS,
+  preview: PreparedPopularPreview | null = null
+): PostCacheInput {
   const media = resolvePostMedia(post);
   return {
     site: post.site,
@@ -136,9 +227,29 @@ function createPostCacheInputFromUnifiedPost(post: UnifiedPost, sourceKind: stri
     rawDetailPayload: detailLevel === "full" ? post : null,
     detailLevel,
     sourceKind,
+    longestVideoUrl: preview?.longestVideoUrl ?? post.longestVideoUrl ?? null,
+    longestVideoDurationSeconds: preview?.longestVideoDurationSeconds ?? post.longestVideoDurationSeconds ?? null,
+    previewThumbnailAssetPath:
+      preview?.previewThumbnailAssetPath
+      ?? (post.previewThumbnailUrl ? post.previewThumbnailUrl.replace(/^\/api\/preview-assets\//, "") : null),
+    previewClipAssetPath:
+      preview?.previewClipAssetPath
+      ?? (post.previewClipUrl ? post.previewClipUrl.replace(/^\/api\/preview-assets\//, "") : null),
+    previewStatus: preview?.previewStatus ?? post.previewStatus ?? null,
+    previewGeneratedAt: preview?.previewGeneratedAt ?? (post.previewGeneratedAt ? new Date(post.previewGeneratedAt) : null),
+    previewError: preview?.previewError ?? post.previewError ?? null,
+    previewSourceFingerprint: preview?.previewSourceFingerprint ?? post.previewSourceFingerprint ?? null,
     cachedAt: new Date(),
     expiresAt: new Date(Date.now() + ttlMs),
   };
+}
+
+function formatSnapshotDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+function getRetentionBoundaryDate(now: Date, retentionDays: number): string {
+  return formatSnapshotDate(new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000));
 }
 
 async function defaultSyncCreatorsSnapshotForSite(site: Site, repository: PerformanceRepository): Promise<number> {
@@ -146,7 +257,7 @@ async function defaultSyncCreatorsSnapshotForSite(site: Site, repository: Perfor
   await repository.replaceCreatorSnapshot({
     site,
     syncedAt: new Date(),
-    creators: buildCreatorSnapshotRows(site, creators),
+    creators: createCreatorSnapshotRows(site, creators),
   });
   return creators.length;
 }
@@ -185,6 +296,22 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
   const fetchCreatorPostsLive = dependencies.fetchCreatorPostsLive ?? (async (...args) => { const module = await import("./api/unified.ts"); return module.fetchCreatorPostsBySite(...args); });
   const fetchCreatorProfileLive = dependencies.fetchCreatorProfileLive ?? (async (...args) => { const module = await import("./api/unified.ts"); return module.fetchCreatorProfileBySite(...args); });
   const fetchPostLive = dependencies.fetchPostLive ?? defaultFetchPostLive;
+  let previewAssetServicePromise: Promise<ReturnType<typeof createPopularPreviewAssetService>> | null = null;
+  const getPreviewAssetService = () => {
+    previewAssetServicePromise ??= (async () =>
+      createPopularPreviewAssetService({
+        repository: await getRepository(),
+      }))();
+    return previewAssetServicePromise;
+  };
+  const preparePopularPreviewAssets = dependencies.preparePopularPreviewAssets ?? (async (input) => {
+    const previewAssetService = await getPreviewAssetService();
+    return previewAssetService.preparePreviewForPost(input);
+  });
+  const cleanupPopularPreviewAssets = dependencies.cleanupPopularPreviewAssets ?? (async (input) => {
+    const previewAssetService = await getPreviewAssetService();
+    return previewAssetService.cleanupPreviewAssets(input);
+  });
 
   return {
     async searchCreatorsPage(input: SearchCreatorsPageParams): Promise<HybridSearchResult> {
@@ -263,10 +390,21 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
 
       try {
         const live = await fetchPopularPostsLive(input);
-        for (const [index, post] of live.posts.entries()) {
+        const enrichedPosts = await Promise.all(
+          live.posts.map(async (post) => {
+            const preparedPreview = await preparePopularPreviewAssets({
+              site: input.site,
+              post: post as UnifiedPost,
+            });
+
+            return applyPreparedPreviewToUnifiedPost(post as UnifiedPost, preparedPreview);
+          })
+        );
+
+        for (const [index, post] of enrichedPosts.entries()) {
           await repository.upsertPostCache(
             createPostCacheInputFromUnifiedPost(
-              post as UnifiedPost,
+              post,
               "popular",
               index < POPULAR_FULL_DETAIL_LIMIT ? "full" : "metadata",
               POPULAR_SNAPSHOT_TTL_MS
@@ -278,8 +416,8 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
           period: input.period,
           rangeDate: input.date,
           pageOffset: input.offset,
-          snapshotDate: new Date().toISOString().slice(0, 10),
-          posts: live.posts.map((post, index) => ({
+          snapshotDate: formatSnapshotDate(new Date()),
+          posts: enrichedPosts.map((post, index) => ({
             rank: index + 1,
             site: input.site,
             service: post.service,
@@ -290,6 +428,7 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
 
         return {
           ...live,
+          posts: enrichedPosts,
           source: cached.posts.length > 0 ? "live-refresh" : "live",
         };
       } catch {
@@ -362,14 +501,33 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
 
       const results = await Promise.allSettled(
         tasks.map(async (task) => {
+          const now = new Date();
           const live = await fetchPopularPostsLive(task);
-          for (const [index, post] of live.posts.entries()) {
+          const previewSummary = createEmptyPopularWarmupPreviewSummary();
+          const enrichedPosts = await Promise.all(
+            live.posts.map(async (post) => {
+              const preparedPreview = await preparePopularPreviewAssets({
+                site: task.site,
+                post: post as UnifiedPost,
+                now,
+              });
+              addPopularPreviewOutcomeToSummary(previewSummary, preparedPreview.previewOutcome);
+
+              return {
+                post: applyPreparedPreviewToUnifiedPost(post as UnifiedPost, preparedPreview),
+                preview: preparedPreview,
+              };
+            })
+          );
+
+          for (const [index, entry] of enrichedPosts.entries()) {
             await repository.upsertPostCache(
               createPostCacheInputFromUnifiedPost(
-                post as UnifiedPost,
+                entry.post,
                 "popular",
                 index < POPULAR_FULL_DETAIL_LIMIT ? "full" : "metadata",
-                POPULAR_SNAPSHOT_TTL_MS
+                POPULAR_SNAPSHOT_TTL_MS,
+                entry.preview
               )
             );
           }
@@ -379,8 +537,8 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
             period: task.period,
             rangeDate: task.date,
             pageOffset: task.offset,
-            snapshotDate: new Date().toISOString().slice(0, 10),
-            posts: live.posts.map((post, index) => ({
+            snapshotDate: formatSnapshotDate(now),
+            posts: enrichedPosts.map(({ post }, index) => ({
               rank: index + 1,
               site: task.site,
               service: post.service,
@@ -392,21 +550,66 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
           return {
             ...task,
             count: live.posts.length,
+            previewSummary,
           };
         })
       );
 
+      const now = new Date();
+      const retentionDays = getPopularPreviewRetentionDays();
+      const snapshotDateFrom = getRetentionBoundaryDate(now, retentionDays);
+      const activeFingerprints = await repository.listActivePreviewSourceFingerprints({ snapshotDateFrom });
+      const cleanup = await cleanupPopularPreviewAssets({
+        now,
+        retentionDays,
+        activeFingerprints,
+      });
+      await repository.deletePopularSnapshotsOlderThan({
+        snapshotDateBefore: snapshotDateFrom,
+      });
+
+      const runs = results.map((result, index) =>
+        result.status === "fulfilled"
+          ? result.value
+          : {
+              ...tasks[index],
+              count: 0,
+              error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+              previewSummary: createEmptyPopularWarmupPreviewSummary(),
+            }
+      );
+      const summary = runs.reduce((aggregate, run) => {
+        aggregate.totalPosts += run.previewSummary.totalPosts;
+        aggregate.generated += run.previewSummary.generated;
+        aggregate.reused += run.previewSummary.reused;
+        aggregate.skippedNoFfmpeg += run.previewSummary.skippedNoFfmpeg;
+        aggregate.failed += run.previewSummary.failed;
+        aggregate.notVideo += run.previewSummary.notVideo;
+        return aggregate;
+      }, {
+        totalTasks: tasks.length,
+        succeededTasks: results.filter((result) => result.status === "fulfilled").length,
+        failedTasks: results.filter((result) => result.status === "rejected").length,
+        totalPosts: 0,
+        generated: 0,
+        reused: 0,
+        skippedNoFfmpeg: 0,
+        failed: 0,
+        notVideo: 0,
+      });
+
+      await appendAppLog({
+        source: "preview",
+        level: summary.failedTasks > 0 || summary.failed > 0 ? "warn" : "info",
+        message: "popular warmup complete",
+        details: summary,
+      });
+
       return {
         ok: results.every((result) => result.status === "fulfilled"),
-        runs: results.map((result, index) =>
-          result.status === "fulfilled"
-            ? result.value
-            : {
-                ...tasks[index],
-                count: 0,
-                error: result.reason instanceof Error ? result.reason.message : String(result.reason),
-              }
-        ),
+        cleanup,
+        summary,
+        runs,
       };
     },
 
@@ -529,4 +732,10 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
     },
   };
 }
+
+
+
+
+
+
 

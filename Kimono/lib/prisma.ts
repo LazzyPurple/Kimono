@@ -1,12 +1,17 @@
 import path from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { PrismaClient } from "@prisma/client";
-import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 
 const DEFAULT_LOCAL_DATABASE_URL = "file:./dev.db";
 
+type LocalPrismaClient = {
+  $disconnect(): Promise<void>;
+};
+
+const localRequire = createRequire(import.meta.url);
+
 const globalForPrisma = globalThis as typeof globalThis & {
-  __kimonoPrisma?: PrismaClient;
+  __kimonoPrisma?: LocalPrismaClient;
 };
 
 export function resolveLocalPrismaDatabaseUrl(
@@ -48,7 +53,14 @@ export function resolveLocalPrismaFilePath(
 export function createPrismaClient(
   databaseUrl = resolveLocalPrismaDatabaseUrl(),
   workspaceRoot = process.cwd()
-): PrismaClient {
+): LocalPrismaClient {
+  const { PrismaClient } = localRequire("@prisma/client") as {
+    PrismaClient: new (input?: Record<string, unknown>) => LocalPrismaClient;
+  };
+  const { PrismaBetterSqlite3 } = localRequire("@prisma/adapter-better-sqlite3") as {
+    PrismaBetterSqlite3: new (input: { url: string }) => unknown;
+  };
+
   const adapter = new PrismaBetterSqlite3({
     url: resolveLocalPrismaFilePath(databaseUrl, workspaceRoot),
   });
@@ -58,7 +70,7 @@ export function createPrismaClient(
   });
 }
 
-export function getLocalPrismaClient(databaseUrl?: string): PrismaClient {
+export function getLocalPrismaClient(databaseUrl?: string): LocalPrismaClient {
   if (databaseUrl) {
     return createPrismaClient(databaseUrl);
   }

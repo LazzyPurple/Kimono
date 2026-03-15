@@ -9,14 +9,22 @@ import MediaCard from "@/components/MediaCard";
 import CreatorCard from "@/components/CreatorCard";
 import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
-import { getPostType, proxyCdnUrl, resolvePostMedia } from "@/lib/api/helpers";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import {
+  getPostType,
+  getPostVideoUrls,
+  proxyCdnUrl,
+  resolvePostMedia,
+  type Site,
+  type UnifiedPost,
+} from "@/lib/api/helpers";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
 import {
   BROWSER_POST_CACHE_TTL_MS,
   buildCreatorPostsCacheKey,
   buildCreatorProfileCacheKey,
 } from "@/lib/perf-cache";
-import type { UnifiedPost, Site } from "@/lib/api/helpers";
+import { buildCreatorPageTitle } from "@/lib/page-titles";
 import type { Creator } from "@/lib/api/kemono";
 import {
   CalendarDays,
@@ -53,7 +61,7 @@ export default function CreatorPage() {
   const id = params.id;
 
   const isValidSite = site === "kemono" || site === "coomer";
-  const isValid = isValidSite && service && id;
+  const isValid = isValidSite && Boolean(service) && Boolean(id);
 
   const [profile, setProfile] = useState<(Creator & { site: Site }) | null>(null);
   const [posts, setPosts] = useState<UnifiedPost[]>([]);
@@ -62,6 +70,7 @@ export default function CreatorPage() {
   const [recommended, setRecommended] = useState<RecommendedCreator[]>([]);
   const [loadingRecommended, setLoadingRecommended] = useState(true);
   const [avatarError, setAvatarError] = useState(false);
+
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -71,15 +80,21 @@ export default function CreatorPage() {
 
   const query = searchParams.get("q") ?? "";
   const page = Number(searchParams.get("page") ?? "1");
+  const mediaFilter = (searchParams.get("media") as MediaFilter) || "tout";
+  const activeTab = (searchParams.get("tab") as "posts" | "recommended") || "posts";
 
   const [inputValue, setInputValue] = useState(query);
   const [knownMaxPage, setKnownMaxPage] = useState(Math.max(1, page));
-  const mediaFilter = (searchParams.get("media") as MediaFilter) || "tout";
-  const activeTab = (searchParams.get("tab") as "posts" | "recommended") || "posts";
+  const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
+  const [loadingSearch, setLoadingSearch] = useState(false);
+  const [hasNextPage, setHasNextPage] = useState(false);
 
   const creatorPageKey = `${site}-${service}-${id}`;
   const recommendedCacheKey = `creator:recommended:${site}:${service}:${id}`;
   const isDataReady = !loadingPosts && !loadingProfile;
+
+  const displayName = profile?.name ?? (loadingProfile ? "..." : `Creator ${id}`);
+  useDocumentTitle(buildCreatorPageTitle(profile?.name ?? `Creator ${id}`, service));
   useScrollRestoration(creatorPageKey, isDataReady);
 
   const handleTabChange = (tab: "posts" | "recommended") => {
@@ -96,10 +111,6 @@ export default function CreatorPage() {
     nextParams.delete("page");
     router.replace(`${pathname}?${nextParams.toString()}`, { scroll: false });
   };
-
-  const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
-  const [loadingSearch, setLoadingSearch] = useState(false);
-  const [hasNextPage, setHasNextPage] = useState(false);
 
   const updateURL = useMemo(() => {
     let timeout: ReturnType<typeof setTimeout>;
@@ -156,9 +167,7 @@ export default function CreatorPage() {
           }),
           ttlMs: BROWSER_POST_CACHE_TTL_MS,
           loader: async () => {
-            const response = await fetch(
-              `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`
-            );
+            const response = await fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`);
             const raw = await response.json();
             return Array.isArray(raw) ? raw : [];
           },
@@ -236,13 +245,7 @@ export default function CreatorPage() {
       while (true) {
         try {
           const data = await fetchJsonWithBrowserCache<UnifiedPost[]>({
-            key: buildCreatorPostsCacheKey({
-              site,
-              service,
-              creatorId: id,
-              offset,
-              q: query,
-            }),
+            key: buildCreatorPostsCacheKey({ site, service, creatorId: id, offset, q: query }),
             ttlMs: BROWSER_POST_CACHE_TTL_MS,
             loader: async () => {
               const response = await fetch(
@@ -252,6 +255,7 @@ export default function CreatorPage() {
               return Array.isArray(json) ? json : [];
             },
           });
+
           if (cancelled) return;
           if (!Array.isArray(data) || data.length === 0) break;
           all.push(...data);
@@ -296,15 +300,11 @@ export default function CreatorPage() {
     return true;
   });
 
-  const displayName = profile?.name ?? (loadingProfile ? "..." : `Créateur ${id}`);
-
   if (!isValid) {
     return (
       <div className="space-y-2 rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
-        <p className="text-lg font-medium text-red-400">Paramètres invalides</p>
-        <p className="text-sm text-[#6b7280]">
-          Le site doit être "kemono" ou "coomer", et le service comme l'identifiant ne peuvent pas être vides.
-        </p>
+        <p className="text-lg font-medium text-red-400">Invalid parameters</p>
+        <p className="text-sm text-[#6b7280]">The site must be kemono or coomer, and both service and identifier are required.</p>
       </div>
     );
   }
@@ -314,7 +314,7 @@ export default function CreatorPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  function Pagination() {
+  function PaginationControls() {
     const pages: Array<number | "..."> = [];
     const maxVisiblePage = Math.max(page, knownMaxPage);
 
@@ -346,20 +346,20 @@ export default function CreatorPage() {
       <div className="flex flex-wrap items-center justify-center gap-1 pt-4">
         {page > 1 && (
           <button
-            aria-label="Première page"
+            aria-label="First page"
             className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-[#1e1e2e] text-[#6b7280] transition-colors hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
             onClick={() => goToPage(1)}
-            title="Première page"
+            title="First page"
           >
             <ChevronsLeft className="h-4 w-4" />
           </button>
         )}
         {page > 1 && (
           <button
-            aria-label="Page précédente"
+            aria-label="Previous page"
             className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-[#1e1e2e] text-[#6b7280] transition-colors hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
             onClick={() => goToPage(page - 1)}
-            title="Page précédente"
+            title="Previous page"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
@@ -385,10 +385,10 @@ export default function CreatorPage() {
         )}
         {hasNextPage && (
           <button
-            aria-label="Page suivante"
+            aria-label="Next page"
             className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-[#1e1e2e] text-[#6b7280] transition-colors hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
             onClick={() => goToPage(page + 1)}
-            title="Page suivante"
+            title="Next page"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -396,6 +396,12 @@ export default function CreatorPage() {
       </div>
     );
   }
+
+  const mediaFilterLabels: Record<MediaFilter, string> = {
+    tout: "All",
+    images: "Images",
+    videos: "Videos",
+  };
 
   return (
     <div className="space-y-6">
@@ -419,13 +425,7 @@ export default function CreatorPage() {
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="truncate text-2xl font-bold text-[#f0f0f5]">{displayName}</h1>
-              <Badge
-                className={
-                  site === "kemono"
-                    ? "bg-[#7c3aed]/20 text-[#7c3aed]"
-                    : "bg-pink-600/20 text-pink-400"
-                }
-              >
+              <Badge className={site === "kemono" ? "bg-[#7c3aed]/20 text-[#7c3aed]" : "bg-pink-600/20 text-pink-400"}>
                 {site}
               </Badge>
               <Badge variant="outline" className="border-[#1e1e2e] text-[#6b7280]">
@@ -435,14 +435,8 @@ export default function CreatorPage() {
                 onClick={() => void toggleCreatorLike(site, service, id)}
                 className="ml-auto flex cursor-pointer items-center gap-1.5 rounded-full border border-[#1e1e2e] bg-[#1e1e2e]/50 px-3 py-1.5 text-sm transition-colors hover:bg-[#1e1e2e]"
               >
-                <Heart
-                  className={`h-4 w-4 transition-colors ${
-                    liked ? "fill-red-500 text-red-500" : "text-[#6b7280] group-hover:text-red-400"
-                  }`}
-                />
-                <span className={liked ? "font-medium text-red-500" : "text-[#6b7280]"}>
-                  {liked ? "Abonné" : "S'abonner"}
-                </span>
+                <Heart className={`h-4 w-4 transition-colors ${liked ? "fill-red-500 text-red-500" : "text-[#6b7280] group-hover:text-red-400"}`} />
+                <span className={liked ? "font-medium text-red-500" : "text-[#6b7280]"}>{liked ? "Following" : "Follow"}</span>
               </button>
             </div>
 
@@ -469,15 +463,13 @@ export default function CreatorPage() {
                 {profile.favorited !== undefined && (
                   <span className="inline-flex items-center gap-1.5">
                     <Heart className="h-3.5 w-3.5 text-pink-400" />
-                    <span>{profile.favorited.toLocaleString()} favoris</span>
+                    <span>{profile.favorited.toLocaleString()} favorites</span>
                   </span>
                 )}
                 {(profile.updated !== undefined || profile.indexed !== undefined) && (
                   <span className="inline-flex items-center gap-1.5">
                     <CalendarDays className="h-3.5 w-3.5 text-[#7c3aed]" />
-                    <span>
-                      Mis à jour le {new Date(profile.updated ?? profile.indexed ?? 0).toLocaleDateString("fr-FR")}
-                    </span>
+                    <span>Updated on {new Date(profile.updated ?? profile.indexed ?? 0).toLocaleDateString("en-GB")}</span>
                   </span>
                 )}
               </div>
@@ -490,9 +482,7 @@ export default function CreatorPage() {
         <button
           onClick={() => handleTabChange("posts")}
           className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors ${
-            activeTab === "posts"
-              ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
-              : "text-[#6b7280] hover:text-[#f0f0f5]"
+            activeTab === "posts" ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm" : "text-[#6b7280] hover:text-[#f0f0f5]"
           }`}
         >
           <LayoutGrid className="h-4 w-4" />
@@ -506,13 +496,11 @@ export default function CreatorPage() {
         <button
           onClick={() => handleTabChange("recommended")}
           className={`flex flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg py-2 text-sm font-medium transition-colors ${
-            activeTab === "recommended"
-              ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm"
-              : "text-[#6b7280] hover:text-[#f0f0f5]"
+            activeTab === "recommended" ? "bg-[#1e1e2e] text-[#f0f0f5] shadow-sm" : "text-[#6b7280] hover:text-[#f0f0f5]"
           }`}
         >
           <Users className="h-4 w-4" />
-          Similaires
+          Similar
         </button>
       </div>
 
@@ -531,7 +519,7 @@ export default function CreatorPage() {
                     : "text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                 }`}
               >
-                {value.charAt(0).toUpperCase() + value.slice(1)}
+                {mediaFilterLabels[value]}
               </Button>
             ))}
           </div>
@@ -546,19 +534,18 @@ export default function CreatorPage() {
                   setInputValue(nextValue);
                   updateURL(nextValue, 1);
                 }}
-                placeholder="Chercher dans les posts..."
+                placeholder="Search within posts..."
                 className="border-[#1e1e2e] bg-[#12121a] pl-9 text-[#f0f0f5] placeholder:text-[#6b7280]"
               />
             </div>
             {loadingSearch && isSearching ? (
               <div className="flex items-center text-xs text-[#7c3aed]">
                 <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                Recherche en cours...
+                Searching...
               </div>
             ) : isSearching ? (
               <p className="text-xs text-[#6b7280]">
-                {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} trouvé
-                {filteredPosts.length > 1 ? "s" : ""}
+                {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} found
               </p>
             ) : null}
           </div>
@@ -566,23 +553,18 @@ export default function CreatorPage() {
           {(loadingPosts && !isSearching) || (loadingSearch && isSearching) ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {Array.from({ length: 18 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="aspect-square animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]"
-                />
+                <div key={index} className="aspect-square animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]" />
               ))}
             </div>
           ) : filteredPosts.length === 0 ? (
             <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
-              <p className="text-lg text-[#6b7280]">
-                {isSearching ? "Aucun post trouvé pour cette recherche." : "Aucun post disponible."}
-              </p>
+              <p className="text-lg text-[#6b7280]">{isSearching ? "No posts match this search." : "No posts available."}</p>
             </div>
           ) : (
             <>
               {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
                 <div className="pb-4">
-                  <Pagination />
+                  <PaginationControls />
                 </div>
               )}
 
@@ -596,6 +578,7 @@ export default function CreatorPage() {
                       title={post.title}
                       previewImageUrl={media.previewImageUrl}
                       videoUrl={media.videoUrl}
+                      videoCandidates={getPostVideoUrls(post)}
                       type={media.type}
                       site={post.site}
                       service={post.service}
@@ -609,7 +592,7 @@ export default function CreatorPage() {
 
               {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
                 <div className="pt-4">
-                  <Pagination />
+                  <PaginationControls />
                 </div>
               )}
             </>
@@ -620,15 +603,12 @@ export default function CreatorPage() {
           {loadingRecommended ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="aspect-[4/5] animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]"
-                />
+                <div key={index} className="aspect-[4/5] animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]" />
               ))}
             </div>
           ) : recommended.length === 0 ? (
             <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
-              <p className="text-sm text-[#6b7280]">Aucun créateur similaire trouvé.</p>
+              <p className="text-sm text-[#6b7280]">No similar creators found.</p>
             </div>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">

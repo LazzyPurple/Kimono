@@ -8,6 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { LogIn, KeyRound, Shield, Loader2 } from "lucide-react";
 import Logo from "@/components/Logo";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { buildAppPageTitle } from "@/lib/page-titles";
 import {
   getInitialLoginStep,
   getPostPasswordSuccessAction,
@@ -53,6 +55,8 @@ export default function LoginPageClient() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  useDocumentTitle(buildAppPageTitle("Sign in"));
+
   useEffect(() => {
     const nextStep = getInitialLoginStep(searchParams.get("step"));
     setStep(nextStep);
@@ -76,7 +80,7 @@ export default function LoginPageClient() {
         return;
       }
 
-      setError("La session 2FA est introuvable. Recommencez la connexion.");
+      setError("The 2FA session could not be found. Please sign in again.");
       setStep("password");
     }
 
@@ -99,7 +103,7 @@ export default function LoginPageClient() {
       });
 
       if (result?.error || !result?.ok) {
-        setError("Mot de passe incorrect.");
+        setError("Incorrect password.");
         setLoading(false);
         return;
       }
@@ -116,7 +120,7 @@ export default function LoginPageClient() {
 
       hardRedirect(action.href);
     } catch {
-      setError("Une erreur est survenue.");
+      setError("Something went wrong.");
       setLoading(false);
     }
   }
@@ -134,34 +138,34 @@ export default function LoginPageClient() {
       });
 
       if (result?.error) {
-        setError("Code 2FA invalide.");
+        setError("Invalid 2FA code.");
         setLoading(false);
         return;
       }
 
       hardRedirect("/search");
     } catch {
-      setError("Une erreur est survenue.");
+      setError("Something went wrong.");
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0a0a0f] px-4">
-      <Card className="w-full max-w-md bg-[#12121a] border-[#1e1e2e]">
-        <CardHeader className="text-center space-y-2">
+    <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f] px-4">
+      <Card className="w-full max-w-md border-[#1e1e2e] bg-[#12121a]">
+        <CardHeader className="space-y-2 text-center">
           <CardTitle className="flex justify-center py-2">
-            <Logo className="h-8 sm:h-10 w-auto" />
+            <Logo className="h-8 w-auto sm:h-10" />
           </CardTitle>
-          <p className="text-[#6b7280] text-sm">
+          <p className="text-sm text-[#6b7280]">
             {step === "password"
-              ? "Entrez votre mot de passe pour acceder a votre espace"
-              : "Entrez le code de votre application Authenticator"}
+              ? "Enter your password to access your space"
+              : "Enter the code from your authenticator app"}
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-red-400 text-sm text-center">
+            <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-center text-sm text-red-400">
               {error}
             </div>
           )}
@@ -171,10 +175,10 @@ export default function LoginPageClient() {
               <div className="space-y-2">
                 <Input
                   type="password"
-                  placeholder={"Mot de passe d'acces"}
+                  placeholder="Access password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280]"
+                  className="border-[#1e1e2e] bg-[#0a0a0f] text-[#f0f0f5] placeholder:text-[#6b7280]"
                   required
                   autoFocus
                 />
@@ -182,7 +186,7 @@ export default function LoginPageClient() {
 
               <Button
                 type="submit"
-                className="w-full bg-[#7c3aed] hover:bg-[#6d28d9] text-white cursor-pointer"
+                className="w-full cursor-pointer bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
                 size="lg"
                 disabled={loading}
               >
@@ -191,16 +195,16 @@ export default function LoginPageClient() {
                 ) : (
                   <LogIn className="mr-2 h-4 w-4" />
                 )}
-                Se connecter
+                Sign in
               </Button>
             </form>
           )}
 
           {step === "totp" && (
             <form onSubmit={handleTotpSubmit} className="space-y-4">
-              <div className="flex items-center justify-center gap-2 text-[#7c3aed] mb-2">
+              <div className="mb-2 flex items-center justify-center gap-2 text-[#7c3aed]">
                 <Shield className="h-5 w-5" />
-                <span className="text-sm font-medium">Verification en 2 etapes</span>
+                <span className="text-sm font-medium">Two-factor verification</span>
               </div>
 
               <div className="space-y-2">
@@ -209,7 +213,7 @@ export default function LoginPageClient() {
                   inputMode="numeric"
                   pattern="[0-9]*"
                   maxLength={6}
-                  placeholder={"Code a 6 chiffres"}
+                  placeholder="6-digit code"
                   value={totpCode}
                   onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ""))}
                   className="bg-[#0a0a0f] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280] text-center text-2xl tracking-[0.5em]"
@@ -229,7 +233,7 @@ export default function LoginPageClient() {
                 ) : (
                   <Shield className="mr-2 h-4 w-4" />
                 )}
-                Verifier
+                Verify
               </Button>
 
               <Button
@@ -242,7 +246,7 @@ export default function LoginPageClient() {
                   setTotpCode("");
                 }}
               >
-                Retour
+                Back
               </Button>
             </form>
           )}
@@ -254,7 +258,7 @@ export default function LoginPageClient() {
                   <span className="w-full border-t border-[#1e1e2e]" />
                 </div>
                 <div className="relative flex justify-center text-xs uppercase">
-                  <span className="bg-[#12121a] px-2 text-[#6b7280]">ou</span>
+                  <span className="bg-[#12121a] px-2 text-[#6b7280]">or</span>
                 </div>
               </div>
 
@@ -265,8 +269,8 @@ export default function LoginPageClient() {
                 disabled
               >
                 <KeyRound className="mr-2 h-4 w-4" />
-                Utiliser une Passkey
-                <span className="ml-2 text-xs text-[#6b7280]">(bientot)</span>
+                Use a Passkey
+                <span className="ml-2 text-xs text-[#6b7280]">(soon)</span>
               </Button>
             </>
           )}

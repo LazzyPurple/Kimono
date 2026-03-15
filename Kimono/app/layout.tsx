@@ -1,13 +1,13 @@
-﻿import type { Metadata } from "next";
+import type { Metadata } from "next";
 import BrowserErrorLogger from "@/components/BrowserErrorLogger";
 import Providers from "@/components/Providers";
 import { isLocalDevMode } from "@/lib/local-dev-mode";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Kimono - Frontend Kemono & Coomer",
+  title: "Kimono",
   description:
-    "Frontend personnel unifie pour Kemono.cr et Coomer.st. Explorez, recherchez et gerez vos favoris.",
+    "A personal unified frontend for Kemono.cr and Coomer.st. Browse, search, and manage your favorites faster.",
 };
 
 export default function RootLayout({
@@ -18,7 +18,7 @@ export default function RootLayout({
   const localDevMode = isLocalDevMode();
 
   return (
-    <html lang="fr">
+    <html lang="en">
       <body className="antialiased">
         <Providers localDevMode={localDevMode}>
           <BrowserErrorLogger />
@@ -28,5 +28,3 @@ export default function RootLayout({
     </html>
   );
 }
-
-

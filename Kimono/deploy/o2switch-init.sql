@@ -1,4 +1,4 @@
-CREATE TABLE
+﻿CREATE TABLE
   IF NOT EXISTS `User` (
     id VARCHAR(191) PRIMARY KEY,
     email VARCHAR(191) UNIQUE NOT NULL,
@@ -85,11 +85,36 @@ CREATE TABLE
     rawDetailPayload LONGTEXT NULL,
     detailLevel VARCHAR(32) NOT NULL DEFAULT 'metadata',
     sourceKind VARCHAR(64) NOT NULL DEFAULT 'live',
+    longestVideoUrl TEXT NULL,
+    longestVideoDurationSeconds DOUBLE NULL,
+    previewThumbnailAssetPath TEXT NULL,
+    previewClipAssetPath TEXT NULL,
+    previewStatus VARCHAR(64) NULL,
+    previewGeneratedAt DATETIME (3) NULL,
+    previewError LONGTEXT NULL,
+    previewSourceFingerprint VARCHAR(191) NULL,
     cachedAt DATETIME (3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     expiresAt DATETIME (3) NOT NULL,
     PRIMARY KEY (site, service, creatorId, postId),
     KEY `PostCache_creator_idx` (site, service, creatorId, publishedAt),
-    KEY `PostCache_expiresAt_idx` (expiresAt)
+    KEY `PostCache_expiresAt_idx` (expiresAt),
+    KEY `PostCache_previewSourceFingerprint_idx` (site, previewSourceFingerprint)
+  ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE
+  IF NOT EXISTS `PreviewAssetCache` (
+    site VARCHAR(32) NOT NULL,
+    sourceVideoUrl TEXT NOT NULL,
+    sourceFingerprint VARCHAR(191) NOT NULL,
+    durationSeconds DOUBLE NULL,
+    thumbnailAssetPath TEXT NULL,
+    clipAssetPath TEXT NULL,
+    status VARCHAR(64) NOT NULL DEFAULT 'pending',
+    generatedAt DATETIME (3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    lastSeenAt DATETIME (3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    error LONGTEXT NULL,
+    PRIMARY KEY (site, sourceFingerprint),
+    KEY `PreviewAssetCache_lastSeenAt_idx` (lastSeenAt)
   ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE
@@ -107,7 +132,8 @@ CREATE TABLE
     creatorId VARCHAR(191) NOT NULL,
     postId VARCHAR(191) NOT NULL,
     PRIMARY KEY (snapshotRunId, rank),
-    KEY `PopularSnapshot_lookup_idx` (site, period, rangeKey, pageOffset, syncedAt)
+    KEY `PopularSnapshot_lookup_idx` (site, period, rangeKey, pageOffset, syncedAt),
+    KEY `PopularSnapshot_snapshotDate_idx` (snapshotDate)
   ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE

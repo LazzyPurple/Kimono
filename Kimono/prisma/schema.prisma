@@ -71,30 +71,55 @@ model CreatorIndex {
 }
 
 model PostCache {
-  site              String
-  service           String
-  creatorId         String
-  postId            String
-  title             String?
-  excerpt           String?
-  publishedAt       DateTime?
-  addedAt           DateTime?
-  editedAt          DateTime?
-  previewImageUrl   String?
-  videoUrl          String?
-  thumbUrl          String?
-  mediaType         String?
-  authorName        String?
-  rawPreviewPayload String?
-  rawDetailPayload  String?
-  detailLevel       String
-  sourceKind        String
-  cachedAt          DateTime @default(now())
-  expiresAt         DateTime
+  site                        String
+  service                     String
+  creatorId                   String
+  postId                      String
+  title                       String?
+  excerpt                     String?
+  publishedAt                 DateTime?
+  addedAt                     DateTime?
+  editedAt                    DateTime?
+  previewImageUrl             String?
+  videoUrl                    String?
+  thumbUrl                    String?
+  mediaType                   String?
+  authorName                  String?
+  rawPreviewPayload           String?
+  rawDetailPayload            String?
+  detailLevel                 String
+  sourceKind                  String
+  longestVideoUrl             String?
+  longestVideoDurationSeconds Float?
+  previewThumbnailAssetPath   String?
+  previewClipAssetPath        String?
+  previewStatus               String?
+  previewGeneratedAt          DateTime?
+  previewError                String?
+  previewSourceFingerprint    String?
+  cachedAt                    DateTime @default(now())
+  expiresAt                   DateTime
 
   @@id([site, service, creatorId, postId])
   @@index([site, service, creatorId, publishedAt], map: "PostCache_creator_idx")
   @@index([expiresAt], map: "PostCache_expiresAt_idx")
+  @@index([site, previewSourceFingerprint], map: "PostCache_previewSourceFingerprint_idx")
+}
+
+model PreviewAssetCache {
+  site               String
+  sourceVideoUrl     String
+  sourceFingerprint  String
+  durationSeconds    Float?
+  thumbnailAssetPath String?
+  clipAssetPath      String?
+  status             String   @default("pending")
+  generatedAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  error              String?
+
+  @@id([site, sourceFingerprint])
+  @@index([lastSeenAt], map: "PreviewAssetCache_lastSeenAt_idx")
 }
 
 model PopularSnapshot {
@@ -113,6 +138,7 @@ model PopularSnapshot {
 
   @@id([snapshotRunId, rank])
   @@index([site, period, rangeKey, pageOffset, syncedAt], map: "PopularSnapshot_lookup_idx")
+  @@index([snapshotDate], map: "PopularSnapshot_snapshotDate_idx")
 }
 
 model DiscoveryBlock {
@@ -130,3 +156,4 @@ model DiscoveryCache {
   data      String
   updatedAt DateTime @default(now())
 }
+

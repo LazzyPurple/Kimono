@@ -5,13 +5,15 @@ import { Loader2 } from "lucide-react";
 import MediaCard from "@/components/MediaCard";
 import { Button } from "@/components/ui/button";
 import type { UnifiedPost } from "@/lib/api/helpers";
-import { resolvePostMedia } from "@/lib/api/helpers";
+import { getPostVideoUrls, resolvePostMedia } from "@/lib/api/helpers";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { buildAppPageTitle } from "@/lib/page-titles";
 
 function SkeletonGrid() {
   return (
     <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
       {Array.from({ length: 12 }).map((_, index) => (
-        <div key={index} className="overflow-hidden rounded-xl border border-[#1e1e2e] bg-[#12121a] animate-pulse">
+        <div key={index} className="animate-pulse overflow-hidden rounded-xl border border-[#1e1e2e] bg-[#12121a]">
           <div className="aspect-video bg-[#1e1e2e]" />
           <div className="space-y-2 p-3">
             <div className="h-3 w-full rounded bg-[#1e1e2e]" />
@@ -25,6 +27,8 @@ function SkeletonGrid() {
 }
 
 export default function HomePage() {
+  useDocumentTitle(buildAppPageTitle("Recent"));
+
   const [posts, setPosts] = useState<UnifiedPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -59,23 +63,21 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    fetchPosts(0);
+    void fetchPosts(0);
   }, [fetchPosts]);
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h1 className="text-2xl font-bold text-[#f0f0f5]">Recents</h1>
-        <p className="text-sm text-[#6b7280]">
-          Les derniers posts publies sur Kemono et Coomer.
-        </p>
+        <h1 className="text-2xl font-bold text-[#f0f0f5]">Recent</h1>
+        <p className="text-sm text-[#6b7280]">The latest posts published on Kemono and Coomer.</p>
       </div>
 
       {loading ? (
         <SkeletonGrid />
       ) : posts.length === 0 ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
-          <p className="text-[#6b7280]">Aucun post disponible pour le moment.</p>
+          <p className="text-[#6b7280]">No posts are available right now.</p>
         </div>
       ) : (
         <>
@@ -96,6 +98,7 @@ export default function HomePage() {
                   user={post.user}
                   publishedAt={post.published}
                   videoPreviewMode="viewport"
+                  videoCandidates={getPostVideoUrls(post)}
                 />
               );
             })}
@@ -104,17 +107,17 @@ export default function HomePage() {
           {hasMore && (
             <div className="flex justify-center pt-2">
               <Button
-                onClick={() => fetchPosts(offset)}
+                onClick={() => void fetchPosts(offset)}
                 disabled={loadingMore}
                 className="cursor-pointer bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
               >
                 {loadingMore ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Chargement...
+                    Loading...
                   </>
                 ) : (
-                  "Voir plus"
+                  "Load more"
                 )}
               </Button>
             </div>

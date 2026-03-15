@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+﻿import type { Metadata } from "next";
 import Link from "next/link";
 import { getLogsDashboardData } from "@/lib/logs-dashboard";
 
@@ -42,6 +42,7 @@ export default async function LogsPage({
   const logs = dashboard.logs.logs;
   const authSnapshot = dashboard.auth.auth;
   const runtimeSnapshot = dashboard.auth.runtime;
+  const databaseUrlDebug = runtimeSnapshot.env.databaseUrlDebug;
 
   return (
     <main className="min-h-screen bg-[#05050a] px-3 py-5 text-[#f0f0f5] sm:px-5 sm:py-6 lg:px-6 lg:py-8">
@@ -137,6 +138,26 @@ export default async function LogsPage({
                 </pre>
               )}
             </div>
+
+            {databaseUrlDebug ? (
+              <div className="mt-4 rounded-2xl border border-[#202034] bg-[#09090f] p-4 text-sm text-[#d1d5db]">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-[#8b5cf6]">Database URL diagnostics</p>
+                <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  <p><span className="text-[#9ca3af]">Scheme:</span> {databaseUrlDebug.scheme ?? "unknown"}</p>
+                  <p className="break-all"><span className="text-[#9ca3af]">Username:</span> {databaseUrlDebug.username ?? "unknown"}</p>
+                  <p><span className="text-[#9ca3af]">Host:</span> {databaseUrlDebug.hostname ?? "unknown"}</p>
+                  <p><span className="text-[#9ca3af]">Port:</span> {databaseUrlDebug.port ?? "unknown"}</p>
+                  <p className="break-all"><span className="text-[#9ca3af]">Database:</span> {databaseUrlDebug.databaseName ?? "unknown"}</p>
+                  <p><span className="text-[#9ca3af]">Password length:</span> {databaseUrlDebug.passwordLength}</p>
+                  <p><span className="text-[#9ca3af]">Has whitespace:</span> {databaseUrlDebug.hasWhitespace ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Has newline:</span> {databaseUrlDebug.hasNewline ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Has quotes:</span> {databaseUrlDebug.hasQuotes ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Edge whitespace:</span> {databaseUrlDebug.hasLeadingOrTrailingWhitespace ? "yes" : "no"}</p>
+                  <p><span className="text-[#9ca3af]">Parseable:</span> {databaseUrlDebug.parseable ? "yes" : "no"}</p>
+                  <p className="break-all"><span className="text-[#9ca3af]">Runtime hash:</span> {databaseUrlDebug.valueHash}</p>
+                </div>
+              </div>
+            ) : null}
           </article>
 
           <article className="rounded-[26px] border border-[#1e1e2e] bg-[#10101a] p-4 shadow-[0_16px_40px_rgba(0,0,0,0.32)] sm:p-5">

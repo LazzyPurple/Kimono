@@ -4,6 +4,14 @@ export type Site = "kemono" | "coomer";
 
 export interface UnifiedPost extends Post {
   site: Site;
+  previewThumbnailUrl?: string | null;
+  previewClipUrl?: string | null;
+  longestVideoUrl?: string | null;
+  longestVideoDurationSeconds?: number | null;
+  previewStatus?: string | null;
+  previewGeneratedAt?: string | null;
+  previewError?: string | null;
+  previewSourceFingerprint?: string | null;
 }
 
 export interface UnifiedCreator extends Omit<Creator, "indexed" | "updated"> {
@@ -94,6 +102,17 @@ export function getPostType(post: UnifiedPost): "image" | "video" | "text" {
 
 export function getPostVideoUrl(post: UnifiedPost): string | undefined {
   return resolvePostMedia(post).videoUrl;
+}
+
+export function getPostVideoUrls(post: UnifiedPost): string[] {
+  const paths = [
+    post.file?.path,
+    ...(post.attachments?.map((attachment) => attachment.path) ?? []),
+  ].filter((path): path is string => Boolean(path) && isVideo(path));
+
+  return paths
+    .map((path) => toDataUrl(post.site, path))
+    .filter((path): path is string => Boolean(path));
 }
 
 export function deduplicatePosts(posts: UnifiedPost[]): UnifiedPost[] {

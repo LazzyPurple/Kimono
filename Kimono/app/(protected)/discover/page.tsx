@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, Suspense } from "react";
-import { Compass, Loader2, Play, Search, SlidersHorizontal, Ban } from "lucide-react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Ban, Compass, Loader2, Play, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
-import type { Site } from "@/lib/api/helpers";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { buildAppPageTitle } from "@/lib/page-titles";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import type { Site } from "@/lib/api/helpers";
 
 interface DiscoveryCreator {
   id: string;
@@ -26,6 +28,8 @@ function DiscoverPageContent() {
   const searchParams = useSearchParams();
   const pathname = usePathname();
 
+  useDocumentTitle(buildAppPageTitle("Discover"));
+
   const qParam = searchParams.get("q") ?? "";
   const sortParam = (searchParams.get("sort") as "score" | "az") ?? "score";
   const serviceParam = searchParams.get("service") ?? "Tous";
@@ -36,38 +40,45 @@ function DiscoverPageContent() {
   const [computing, setComputing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  
   const [searchQuery, setSearchQuery] = useState(qParam);
 
   const { isCreatorLiked } = useLikes();
 
   useScrollRestoration(`discover-${pageParam}`, !loading);
 
-  const updateParams = useCallback((updates: Record<string, string | null>) => {
-    const params = new URLSearchParams(searchParams.toString());
-    let resettingPage = false;
-    
-    Object.entries(updates).forEach(([key, value]) => {
-      if (key !== "page" && key !== "q") resettingPage = true;
-      if (key === "q" && value !== qParam) resettingPage = true;
+  const updateParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      const params = new URLSearchParams(searchParams.toString());
+      let resettingPage = false;
 
-      if (value === null) {
-        params.delete(key);
-      } else {
-        if (key === "q" && value === "") params.delete(key);
-        else if (key === "sort" && value === "score") params.delete(key);
-        else if (key === "service" && value === "Tous") params.delete(key);
-        else if (key === "page" && value === "1") params.delete(key);
-        else params.set(key, value);
+      Object.entries(updates).forEach(([key, value]) => {
+        if (key !== "page" && key !== "q") resettingPage = true;
+        if (key === "q" && value !== qParam) resettingPage = true;
+
+        if (value === null) {
+          params.delete(key);
+        } else if (key === "q" && value === "") {
+          params.delete(key);
+        } else if (key === "sort" && value === "score") {
+          params.delete(key);
+        } else if (key === "service" && value === "Tous") {
+          params.delete(key);
+        } else if (key === "page" && value === "1") {
+          params.delete(key);
+        } else {
+          params.set(key, value);
+        }
+      });
+
+      if (resettingPage && !Object.prototype.hasOwnProperty.call(updates, "page")) {
+        params.delete("page");
       }
-    });
 
-    if (resettingPage && !updates.hasOwnProperty("page")) {
-      params.delete("page");
-    }
-
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [searchParams, pathname, router, qParam]);
+      const query = params.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, qParam, router, searchParams]
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -75,33 +86,37 @@ function DiscoverPageContent() {
         updateParams({ q: searchQuery || null });
       }
     }, 300);
+
     return () => clearTimeout(timer);
-  }, [searchQuery, qParam, updateParams]);
+  }, [qParam, searchQuery, updateParams]);
 
-
-  // On mount, load cache if exists
   useEffect(() => {
-    fetchResults();
+    void fetchResults();
   }, []);
 
-  // Simulate progress when computing
   useEffect(() => {
-    if (!computing) return;
+    if (!computing) {
+      return;
+    }
+
     setProgress(0);
     const interval = setInterval(() => {
-      setProgress((p) => {
-        if (p >= 95) return 95; // Stop ascending at 95% until actually done
-        return p + Math.random() * 5;
+      setProgress((value) => {
+        if (value >= 95) {
+          return 95;
+        }
+        return value + Math.random() * 5;
       });
     }, 1000);
+
     return () => clearInterval(interval);
   }, [computing]);
 
   async function fetchResults() {
     try {
       setLoading(true);
-      const res = await fetch("/api/discover/results");
-      const data = await res.json();
+      const response = await fetch("/api/discover/results");
+      const data = await response.json();
       if (data.creators) {
         setCreators(data.creators);
         setUpdatedAt(data.updatedAt);
@@ -116,31 +131,32 @@ function DiscoverPageContent() {
   async function handleCompute() {
     setComputing(true);
     try {
-      const res = await fetch("/api/discover/compute", { method: "POST" });
-      const data = await res.json();
-      if (res.ok) {
+      const response = await fetch("/api/discover/compute", { method: "POST" });
+      const data = await response.json();
+      if (response.ok) {
         setProgress(100);
-        await new Promise(r => setTimeout(r, 500)); // Let the user see 100%
+        await new Promise((resolve) => setTimeout(resolve, 500));
         await fetchResults();
       } else {
-        alert(data.error || "Erreur lors du calcul");
+        alert(data.error || "Failed to compute recommendations.");
       }
     } catch (error) {
       console.error("Compute error:", error);
-      alert("Erreur réseau lors du calcul");
+      alert("Network error while computing recommendations.");
     } finally {
       setComputing(false);
       setProgress(0);
     }
   }
 
-  async function handleBlock(creator: DiscoveryCreator, e: React.MouseEvent) {
-    e.preventDefault();
-    e.stopPropagation();
+  async function handleBlock(creator: DiscoveryCreator, event: React.MouseEvent) {
+    event.preventDefault();
+    event.stopPropagation();
 
-    // Optimistic UI updates
-    setCreators((prev) => 
-      prev.filter((c) => !(c.site === creator.site && c.service === creator.service && c.id === creator.id))
+    setCreators((previous) =>
+      previous.filter(
+        (item) => !(item.site === creator.site && item.service === creator.service && item.id === creator.id)
+      )
     );
 
     try {
@@ -150,135 +166,115 @@ function DiscoverPageContent() {
         body: JSON.stringify({
           site: creator.site,
           service: creator.service,
-          creatorId: creator.id
-        })
+          creatorId: creator.id,
+        }),
       });
     } catch (error) {
       console.error("Failed to block creator", error);
     }
   }
 
-  // Derived state for filtering and sorting
   const dynamicServices = useMemo(() => {
-    const s = new Set(creators.map(c => c.service));
-    return ["Tous", ...Array.from(s).sort()];
+    const values = new Set(creators.map((creator) => creator.service));
+    return ["Tous", ...Array.from(values).sort()];
   }, [creators]);
 
   const filteredAndSorted = useMemo(() => {
-    let result = creators.filter((c) => {
-      // 1. Filter out inherently liked
-      if (isCreatorLiked(c.site, c.service, c.id)) return false;
-      // 2. Filter by service
-      if (serviceParam !== "Tous" && c.service !== serviceParam) return false;
-      // 3. Filter by search text
-      if (qParam && !c.name.toLowerCase().includes(qParam.toLowerCase())) return false;
+    const result = creators.filter((creator) => {
+      if (isCreatorLiked(creator.site, creator.service, creator.id)) return false;
+      if (serviceParam !== "Tous" && creator.service !== serviceParam) return false;
+      if (qParam && !creator.name.toLowerCase().includes(qParam.toLowerCase())) return false;
       return true;
     });
 
-    result.sort((a, b) => {
-      if (sortParam === "az") return a.name.localeCompare(b.name);
-      return b.score - a.score; // default "score"
+    result.sort((left, right) => {
+      if (sortParam === "az") {
+        return left.name.localeCompare(right.name);
+      }
+      return right.score - left.score;
     });
 
     return result;
-  }, [creators, qParam, serviceParam, sortParam, isCreatorLiked]);
+  }, [creators, isCreatorLiked, qParam, serviceParam, sortParam]);
 
   const paginatedResults = useMemo(() => {
     const startIndex = (pageParam - 1) * 50;
     return filteredAndSorted.slice(startIndex, startIndex + 50);
   }, [filteredAndSorted, pageParam]);
 
-
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+      <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
         <div>
-          <div className="flex items-center gap-2 mb-2">
+          <div className="mb-2 flex items-center gap-2">
             <Compass className="h-6 w-6 text-[#7c3aed]" />
-            <h1 className="text-2xl font-bold text-[#f0f0f5]">Découverte</h1>
+            <h1 className="text-2xl font-bold text-[#f0f0f5]">Discover</h1>
           </div>
-          <p className="text-[#6b7280]">
-            Créateurs recommandés basés sur vos favoris actuels
-          </p>
+          <p className="text-[#6b7280]">Recommended creators based on your current favorites.</p>
           {updatedAt && (
-            <p className="text-xs text-[#6b7280] mt-1">
-              Dernière mise à jour : {new Date(updatedAt).toLocaleString("fr-FR")}
-            </p>
+            <p className="mt-1 text-xs text-[#6b7280]">Last updated: {new Date(updatedAt).toLocaleString("en-GB")}</p>
           )}
         </div>
-        
-        <Button 
-          onClick={handleCompute} 
-          disabled={computing}
-          className="bg-[#7c3aed] text-white hover:bg-[#6d28d9] min-w-[200px]"
-        >
+
+        <Button onClick={() => void handleCompute()} disabled={computing} className="min-w-[200px] bg-[#7c3aed] text-white hover:bg-[#6d28d9]">
           {computing ? (
             <>
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Calcul en cours... {Math.round(progress)}%
+              Computing... {Math.round(progress)}%
             </>
           ) : (
             <>
               <Play className="mr-2 h-4 w-4 fill-current" />
-              {updatedAt ? "Recalculer" : "Calculer"}
+              {updatedAt ? "Recompute" : "Compute"}
             </>
           )}
         </Button>
       </div>
 
       {loading ? (
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-          {[...Array(12)].map((_, i) => (
-            <div key={i} className="aspect-[4/5] bg-[#1e1e2e] animate-pulse rounded-xl" />
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {Array.from({ length: 12 }).map((_, index) => (
+            <div key={index} className="aspect-[4/5] animate-pulse rounded-xl bg-[#1e1e2e]" />
           ))}
         </div>
       ) : creators.length === 0 ? (
-        <div className="text-center py-20 bg-[#12121a] rounded-xl border border-[#1e1e2e]">
-          <Compass className="mx-auto h-12 w-12 text-[#6b7280] mb-4 opacity-50" />
-          <h3 className="text-lg font-medium text-[#f0f0f5] mb-2">
-            Aucune recommandation
-          </h3>
-          <p className="text-[#6b7280] mb-6">
-            Cliquez sur "Calculer" pour générer des recommandations basées sur vos favoris.
-          </p>
-          <Button onClick={handleCompute} disabled={computing} className="bg-[#7c3aed] text-white hover:bg-[#6d28d9]">
+        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] py-20 text-center">
+          <Compass className="mx-auto mb-4 h-12 w-12 text-[#6b7280] opacity-50" />
+          <h3 className="mb-2 text-lg font-medium text-[#f0f0f5]">No recommendations yet</h3>
+          <p className="mb-6 text-[#6b7280]">Click compute to generate recommendations based on your favorites.</p>
+          <Button onClick={() => void handleCompute()} disabled={computing} className="bg-[#7c3aed] text-white hover:bg-[#6d28d9]">
             {computing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4 fill-current" />}
-            Calculer les recommandations
+            Compute recommendations
           </Button>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Controls Bar */}
-          <div className="flex flex-col lg:flex-row gap-4">
+          <div className="flex flex-col gap-4 lg:flex-row">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#6b7280]" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6b7280]" />
               <Input
-                placeholder="Rechercher un créateur..."
+                placeholder="Search creators..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 bg-[#12121a] border-[#1e1e2e] text-[#f0f0f5] placeholder:text-[#6b7280]"
+                onChange={(event) => setSearchQuery(event.target.value)}
+                className="border-[#1e1e2e] bg-[#12121a] pl-9 text-[#f0f0f5] placeholder:text-[#6b7280]"
               />
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <SlidersHorizontal className="h-4 w-4 text-[#6b7280]" />
-              <div className="flex bg-[#12121a] border border-[#1e1e2e] rounded-lg p-1">
+              <div className="flex rounded-lg border border-[#1e1e2e] bg-[#12121a] p-1">
                 <button
                   onClick={() => updateParams({ sort: "score" })}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
-                    sortParam === "score"
-                      ? "bg-[#1e1e2e] text-[#f0f0f5]"
-                      : "text-[#6b7280] hover:text-[#f0f0f5]"
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    sortParam === "score" ? "bg-[#1e1e2e] text-[#f0f0f5]" : "text-[#6b7280] hover:text-[#f0f0f5]"
                   }`}
                 >
-                  Pertinence
+                  Relevance
                 </button>
                 <button
                   onClick={() => updateParams({ sort: "az" })}
-                  className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer ${
-                    sortParam === "az"
-                      ? "bg-[#1e1e2e] text-[#f0f0f5]"
-                      : "text-[#6b7280] hover:text-[#f0f0f5]"
+                  className={`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    sortParam === "az" ? "bg-[#1e1e2e] text-[#f0f0f5]" : "text-[#6b7280] hover:text-[#f0f0f5]"
                   }`}
                 >
                   A-Z
@@ -290,27 +286,27 @@ function DiscoverPageContent() {
               {dynamicServices.map((service) => (
                 <Badge
                   key={service}
-                  onClick={() => updateParams({ service: service })}
+                  onClick={() => updateParams({ service })}
                   variant={serviceParam === service ? "default" : "outline"}
                   className={`cursor-pointer ${
                     serviceParam === service
-                      ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9] border-transparent"
-                      : "border-[#1e1e2e] text-[#6b7280] hover:border-[#7c3aed]/50 hover:text-[#f0f0f5] bg-[#12121a]"
+                      ? "border-transparent bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                      : "border-[#1e1e2e] bg-[#12121a] text-[#6b7280] hover:border-[#7c3aed]/50 hover:text-[#f0f0f5]"
                   }`}
                 >
-                  {service}
+                  {service === "Tous" ? "All" : service}
                 </Badge>
               ))}
             </div>
           </div>
-          
+
           <div className="text-sm text-[#6b7280]">
-            {filteredAndSorted.length} recommandation{filteredAndSorted.length > 1 ? 's' : ''} trouvée{filteredAndSorted.length > 1 ? 's' : ''}
+            {filteredAndSorted.length} recommendation{filteredAndSorted.length > 1 ? "s" : ""} found
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
             {paginatedResults.map((creator) => (
-              <div key={`${creator.site}-${creator.service}-${creator.id}`} className="relative group">
+              <div key={`${creator.site}-${creator.service}-${creator.id}`} className="group relative">
                 <CreatorCard
                   id={creator.id}
                   name={creator.name}
@@ -319,9 +315,9 @@ function DiscoverPageContent() {
                   updated={creator.updated}
                 />
                 <button
-                  onClick={(e) => handleBlock(creator, e)}
-                  title="Masquer ce créateur"
-                  className="absolute bottom-2 left-2 p-2 rounded-full bg-black/40 hover:bg-black/80 text-[#6b7280] hover:text-red-500 transition-all z-10 opacity-0 group-hover:opacity-100 backdrop-blur-sm cursor-pointer"
+                  onClick={(event) => void handleBlock(creator, event)}
+                  title="Hide this creator"
+                  className="absolute bottom-2 left-2 z-10 cursor-pointer rounded-full bg-black/40 p-2 text-[#6b7280] opacity-0 backdrop-blur-sm transition-all hover:bg-black/80 hover:text-red-500 group-hover:opacity-100"
                 >
                   <Ban className="h-4 w-4" />
                 </button>
@@ -331,12 +327,12 @@ function DiscoverPageContent() {
 
           {filteredAndSorted.length > 0 && (
             <div className="py-6">
-              <Pagination 
+              <Pagination
                 current={pageParam}
                 total={Math.ceil(filteredAndSorted.length / 50)}
-                onChange={(p) => {
-                  updateParams({ page: String(p) });
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                onChange={(page) => {
+                  updateParams({ page: String(page) });
+                  window.scrollTo({ top: 0, behavior: "smooth" });
                 }}
               />
             </div>
@@ -349,8 +345,14 @@ function DiscoverPageContent() {
 
 export default function DiscoverPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center min-h-[50vh] items-center"><Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" /></div>}>
+    <Suspense
+      fallback={
+        <div className="flex min-h-[50vh] items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" />
+        </div>
+      }
+    >
       <DiscoverPageContent />
     </Suspense>
-  )
+  );
 }

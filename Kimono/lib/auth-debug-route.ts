@@ -1,3 +1,4 @@
+﻿import { createHash } from "node:crypto";
 import { getDataStore } from "./data-store.ts";
 import { resolveLocalDevMode } from "./local-dev-mode.ts";
 import { shouldEnableCredentialAuth } from "./auth-guards.ts";
@@ -68,6 +69,23 @@ export type AuthDebugSnapshot = {
       };
 };
 
+export type DatabaseUrlDebugSnapshot = {
+  scheme: string | null;
+  username: string | null;
+  hostname: string | null;
+  port: string | null;
+  databaseName: string | null;
+  passwordLength: number;
+  passwordPreviewStart: string | null;
+  passwordPreviewEnd: string | null;
+  hasWhitespace: boolean;
+  hasNewline: boolean;
+  hasQuotes: boolean;
+  hasLeadingOrTrailingWhitespace: boolean;
+  parseable: boolean;
+  valueHash: string;
+};
+
 export type PublicRuntimeEnvProbe = {
   routeVersion: "2026-03-13-open-auth-debug-v2";
   nodeEnv: string | null;
@@ -83,6 +101,7 @@ export type PublicRuntimeEnvProbe = {
     webauthnRpNameConfigured: boolean;
     authDebugLogEnabled: boolean;
     authDebugTokenConfigured: boolean;
+    databaseUrlDebug: DatabaseUrlDebugSnapshot | null;
   };
 };
 
@@ -111,6 +130,35 @@ function toAdminUserSnapshot(user: StoredUser): AdminUserSnapshot {
   };
 }
 
+function getDatabaseUrlDebugSnapshot(databaseUrl: string | undefined): DatabaseUrlDebugSnapshot | null {
+  if (!databaseUrl) {
+    return null;
+  }
+
+  const rawValue = databaseUrl;
+  const trimmedValue = rawValue.trim();
+  const match = trimmedValue.match(/^([a-z0-9+.-]+):\/\/([^:@/?#]+)(?::([^@/?#]*))?@([^:/?#]+)(?::(\d+))?(?:\/([^?#]*))?/i);
+  const password = match?.[3] ?? "";
+  const databaseName = match?.[6] ? decodeURIComponent(match[6]) : null;
+
+  return {
+    scheme: match?.[1] ?? null,
+    username: match?.[2] ? decodeURIComponent(match[2]) : null,
+    hostname: match?.[4] ?? null,
+    port: match?.[5] ?? null,
+    databaseName,
+    passwordLength: password.length,
+    passwordPreviewStart: password ? password.slice(0, Math.min(3, password.length)) : null,
+    passwordPreviewEnd: password ? password.slice(Math.max(0, password.length - 2)) : null,
+    hasWhitespace: /\s/.test(rawValue),
+    hasNewline: /[\r\n]/.test(rawValue),
+    hasQuotes: /["'`]/.test(rawValue),
+    hasLeadingOrTrailingWhitespace: rawValue !== trimmedValue,
+    parseable: Boolean(match),
+    valueHash: createHash("sha256").update(rawValue).digest("hex").slice(0, 12),
+  };
+}
+
 export function collectPublicRuntimeEnvProbe(
   env: EnvShape = process.env
 ): PublicRuntimeEnvProbe {
@@ -131,7 +179,18 @@ export function collectPublicRuntimeEnvProbe(
       webauthnRpNameConfigured: hasConfiguredValue(env.WEBAUTHN_RP_NAME),
       authDebugLogEnabled: shouldEnableAuthDebugLog(env),
       authDebugTokenConfigured: hasConfiguredValue(env.AUTH_DEBUG_TOKEN),
+      databaseUrlDebug: getDatabaseUrlDebugSnapshot(env.DATABASE_URL),
     },
+  };
+}
+
+export function collectDatabaseUrlDebugPayload(env: EnvShape = process.env) {
+  const runtime = collectPublicRuntimeEnvProbe(env);
+
+  return {
+    ok: true,
+    databaseUrlConfigured: runtime.env.databaseUrlConfigured,
+    databaseUrlDebug: runtime.env.databaseUrlDebug,
   };
 }
 

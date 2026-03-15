@@ -19,8 +19,8 @@ export default function ProtectedLayoutAuthGate({
 
   if (state === "loading") {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="animate-pulse text-[#7c3aed] text-lg">Chargement...</div>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f]">
+        <div className="animate-pulse text-lg text-[#7c3aed]">Loading...</div>
       </div>
     );
   }
@@ -30,10 +30,7 @@ export default function ProtectedLayoutAuthGate({
   }
 
   return (
-    <ProtectedLayoutShell
-      showSecurityControls
-      onLogout={() => signOut({ callbackUrl: "/" })}
-    >
+    <ProtectedLayoutShell showSecurityControls onLogout={() => signOut({ callbackUrl: "/" })}>
       {children}
     </ProtectedLayoutShell>
   );

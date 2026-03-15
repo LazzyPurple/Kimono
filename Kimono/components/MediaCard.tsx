@@ -1,53 +1,186 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Film, Heart, Image as ImageIcon, Play } from "lucide-react";
+import { Clock3, FileText, Film, Heart, Image as ImageIcon, Play } from "lucide-react";
 import type { Site } from "@/lib/api/helpers";
 import { useLikes } from "@/contexts/LikesContext";
+import {
+  formatVideoDurationLabel,
+  pickLongestVideoDuration,
+} from "@/lib/media-card-utils";
+import {
+  getDefaultVideoPreviewCache,
+  markVideoPreviewWarm,
+  readVideoPreviewState,
+  rememberVideoPreviewDuration,
+} from "@/lib/video-preview-cache";
 
 interface MediaCardProps {
   title: string;
   previewImageUrl?: string;
   videoUrl?: string;
+  videoCandidates?: string[];
   type?: "image" | "video" | "text";
   site: Site;
   service: string;
   postId: string;
   user: string;
   publishedAt?: string | number;
+  durationSeconds?: number | null;
   videoPreviewMode?: "hover" | "viewport";
+}
+
+const videoDurationCache = new Map<string, number | null>();
+
+function readVideoDuration(url: string): Promise<number | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    let settled = false;
+
+    const finalize = (duration: number | null) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      video.removeAttribute("src");
+      video.load();
+      resolve(duration);
+    };
+
+    const timeout = window.setTimeout(() => finalize(null), 12000);
+
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+    video.onloadedmetadata = () => {
+      window.clearTimeout(timeout);
+      finalize(Number.isFinite(video.duration) ? video.duration : null);
+    };
+    video.onerror = () => {
+      window.clearTimeout(timeout);
+      finalize(null);
+    };
+    video.src = url;
+  });
+}
+
+function formatPublishedDate(publishedAt?: string | number): string | null {
+  if (!publishedAt) {
+    return null;
+  }
+
+  const date = new Date(typeof publishedAt === "number" ? publishedAt * 1000 : publishedAt);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date.toLocaleDateString("en-GB");
 }
 
 export default function MediaCard({
   title,
   previewImageUrl,
   videoUrl,
+  videoCandidates,
   type = "image",
   site,
   service,
   postId,
   user,
   publishedAt,
+  durationSeconds = null,
   videoPreviewMode = "hover",
 }: MediaCardProps) {
   const [hovered, setHovered] = useState(false);
   const [hasHovered, setHasHovered] = useState(false);
   const [imgError, setImgError] = useState(false);
   const [shouldWarmVideo, setShouldWarmVideo] = useState(false);
+  const [durationLabel, setDurationLabel] = useState<string | null>(null);
 
   const cardRef = useRef<HTMLAnchorElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isHoveredRef = useRef(hovered);
   const videoRef = useRef<HTMLVideoElement>(null);
   const playPromiseRef = useRef<Promise<void> | undefined>(undefined);
+  const previewCacheRef = useRef(getDefaultVideoPreviewCache());
 
   const { isPostLiked, togglePostLike } = useLikes();
   const liked = isPostLiked(site, service, postId);
   const showImage = Boolean(previewImageUrl) && !imgError;
+  const publishedLabel = formatPublishedDate(publishedAt);
+  const resolvedVideoCandidates = Array.from(
+    new Set((videoCandidates?.length ? videoCandidates : videoUrl ? [videoUrl] : []).filter(Boolean))
+  ) as string[];
 
   useEffect(() => {
-    if (videoPreviewMode !== "viewport" || !videoUrl || !cardRef.current) {
+    if (type !== "video" || resolvedVideoCandidates.length === 0) {
+      setDurationLabel(null);
+      setShouldWarmVideo(false);
+      return;
+    }
+
+    let cancelled = false;
+    let idleCallbackId: number | null = null;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const cachedDurations: Array<number | null | undefined> = [];
+    let hasCachedWarmPreview = false;
+
+    for (const candidateUrl of resolvedVideoCandidates) {
+      if (durationSeconds != null) {
+        cachedDurations.push(durationSeconds);
+        continue;
+      }
+
+      const cachedState = readVideoPreviewState(previewCacheRef.current, candidateUrl);
+      if (!cachedState) {
+        cachedDurations.push(undefined);
+        continue;
+      }
+
+      if (cachedState.durationSeconds != null) {
+        videoDurationCache.set(candidateUrl, cachedState.durationSeconds);
+      }
+
+      cachedDurations.push(cachedState.durationSeconds);
+      hasCachedWarmPreview = hasCachedWarmPreview || cachedState.warmed;
+    }
+
+    setDurationLabel(formatVideoDurationLabel(durationSeconds ?? pickLongestVideoDuration(cachedDurations)));
+
+    if (hasCachedWarmPreview) {
+      setShouldWarmVideo(true);
+    }
+
+    const warmSoon = () => {
+      if (!cancelled) {
+        setShouldWarmVideo(true);
+      }
+    };
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      idleCallbackId = window.requestIdleCallback(warmSoon, { timeout: 900 });
+    } else {
+      timeoutId = setTimeout(warmSoon, 180);
+    }
+
+    return () => {
+      cancelled = true;
+
+      if (idleCallbackId != null && typeof window !== "undefined" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleCallbackId);
+      }
+
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [durationSeconds, resolvedVideoCandidates, type]);
+
+  useEffect(() => {
+    if (type !== "video" || !videoUrl || !cardRef.current) {
       return;
     }
 
@@ -59,7 +192,7 @@ export default function MediaCard({
         }
       },
       {
-        rootMargin: "320px 0px",
+        rootMargin: videoPreviewMode === "viewport" ? "1200px 0px" : "800px 0px",
         threshold: 0.01,
       }
     );
@@ -67,14 +200,14 @@ export default function MediaCard({
     observer.observe(cardRef.current);
 
     return () => observer.disconnect();
-  }, [videoPreviewMode, videoUrl]);
+  }, [type, videoPreviewMode, videoUrl]);
 
   const handleMouseEnter = useCallback(() => {
     hoverTimerRef.current = setTimeout(() => {
       setHovered(true);
       setHasHovered(true);
       setShouldWarmVideo(true);
-    }, 200);
+    }, 120);
   }, []);
 
   const handleMouseLeave = useCallback(() => {
@@ -121,14 +254,84 @@ export default function MediaCard({
     video.currentTime = 0;
   }, [hovered, shouldMountVideo]);
 
+  useEffect(() => {
+    if (type !== "video") {
+      setDurationLabel(null);
+      return;
+    }
+
+    const longestKnownDuration = durationSeconds ?? pickLongestVideoDuration(
+      resolvedVideoCandidates.map((url) => videoDurationCache.get(url))
+    );
+    setDurationLabel(formatVideoDurationLabel(longestKnownDuration));
+
+    if (durationSeconds != null || resolvedVideoCandidates.length === 0 || !(shouldWarmVideo || shouldMountVideo || hovered)) {
+      return;
+    }
+
+    const unresolvedUrls = resolvedVideoCandidates.filter((url) => !videoDurationCache.has(url));
+    if (unresolvedUrls.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void Promise.all(
+      unresolvedUrls.map(async (url) => {
+        const duration = await readVideoDuration(url);
+        videoDurationCache.set(url, duration);
+        rememberVideoPreviewDuration(previewCacheRef.current, url, duration);
+
+        if (duration != null) {
+          markVideoPreviewWarm(previewCacheRef.current, url);
+        }
+      })
+    ).then(() => {
+      if (cancelled) {
+        return;
+      }
+
+      const nextDuration = pickLongestVideoDuration(
+        resolvedVideoCandidates.map((url) => videoDurationCache.get(url))
+      );
+      setDurationLabel(formatVideoDurationLabel(nextDuration));
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [durationSeconds, hovered, resolvedVideoCandidates, shouldMountVideo, shouldWarmVideo, type]);
+
+  const handleVideoReady = useCallback(() => {
+    if (!videoUrl) {
+      return;
+    }
+
+    markVideoPreviewWarm(previewCacheRef.current, videoUrl);
+
+    const videoElement = videoRef.current;
+    if (!videoElement) {
+      return;
+    }
+
+    const duration = Number.isFinite(videoElement.duration) ? videoElement.duration : null;
+    if (duration != null) {
+      videoDurationCache.set(videoUrl, duration);
+      rememberVideoPreviewDuration(previewCacheRef.current, videoUrl, duration);
+      if (durationSeconds == null) {
+        setDurationLabel((currentLabel) => currentLabel ?? formatVideoDurationLabel(duration));
+      }
+    }
+  }, [durationSeconds, videoUrl]);
+
   const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
-  const videoPreload = videoPreviewMode === "viewport" || !showImage ? "metadata" : "none";
+  const videoPreload = shouldWarmVideo ? "auto" : videoPreviewMode === "viewport" || !showImage ? "metadata" : "none";
 
   return (
     <a
       ref={cardRef}
       href={`/post/${site}/${service}/${user}/${postId}`}
-      className={`block overflow-hidden rounded-xl border bg-[#12121a] transition-all duration-300 group cursor-pointer ${
+      className={`group block overflow-hidden rounded-xl border bg-[#12121a] transition-all duration-300 cursor-pointer ${
         liked
           ? "border-red-500/50 shadow-[0_0_15px_-5px_theme(colors.red.500)] hover:border-red-500"
           : "border-[#1e1e2e] hover:border-[#7c3aed]/50"
@@ -136,7 +339,7 @@ export default function MediaCard({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >
-      <div className="relative aspect-square overflow-hidden bg-[#0a0a0f] flex items-center justify-center">
+      <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-[#0a0a0f]">
         {type === "video" ? (
           <>
             {showImage ? (
@@ -162,6 +365,8 @@ export default function MediaCard({
                 loop
                 playsInline
                 preload={videoPreload}
+                onLoadedData={handleVideoReady}
+                onCanPlay={handleVideoReady}
                 className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
                   shouldShowVideo ? "z-10 opacity-100" : "-z-10 opacity-0"
                 }`}
@@ -191,7 +396,7 @@ export default function MediaCard({
           </div>
         )}
 
-        <div className={`absolute top-2 left-2 z-20 transition-opacity duration-200 ${liked ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
+        <div className={`absolute left-2 top-2 z-20 transition-opacity duration-200 ${liked ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
           <button
             onClick={(event) => {
               event.preventDefault();
@@ -206,7 +411,7 @@ export default function MediaCard({
           </button>
         </div>
 
-        <div className="absolute top-2 right-2 z-20 flex items-center gap-2">
+        <div className="absolute right-2 top-2 z-20 flex flex-col items-end gap-2">
           <div
             className={`rounded-md p-1.5 backdrop-blur-sm ${
               type === "video"
@@ -222,20 +427,28 @@ export default function MediaCard({
               <ImageIcon className="h-4 w-4" />
             )}
           </div>
+
+          {durationLabel && (
+            <div className="inline-flex items-center gap-1 rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+              <Clock3 className="h-3.5 w-3.5" />
+              <span>{durationLabel}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="space-y-1 p-3">
-        <h3 className="truncate text-sm font-medium text-[#f0f0f5]">
-          {title || "Sans titre"}
+      <div className="space-y-2.5 p-3">
+        <h3 className="min-h-[2.5rem] break-words text-sm font-medium leading-tight text-[#f0f0f5]">
+          {title || "Untitled"}
         </h3>
-        <div className="flex items-center gap-2 text-xs text-[#6b7280]">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-[#6b7280]">
           <Badge variant="outline" className="border-[#1e1e2e] text-xs text-[#6b7280]">
             {service}
           </Badge>
-          {publishedAt && (
-            <span>
-              {new Date(typeof publishedAt === "number" ? publishedAt * 1000 : publishedAt).toLocaleDateString("fr-FR")}
+          {publishedLabel && <span className="rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1">{publishedLabel}</span>}
+          {type === "video" && resolvedVideoCandidates.length > 1 && (
+            <span className="rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1">
+              {resolvedVideoCandidates.length} videos
             </span>
           )}
         </div>
@@ -243,3 +456,5 @@ export default function MediaCard({
     </a>
   );
 }
+
+

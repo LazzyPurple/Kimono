@@ -5,6 +5,8 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { getDefaultTurboVideoMemoryCache, readTurboVideoChunk, writeTurboVideoChunk } from "@/lib/turbo-video-memory-cache";
+import { getDefaultVideoPreviewCache, markVideoPreviewWarm } from "@/lib/video-preview-cache";
 
 interface TurboConfig {
   initialChunkSize?: number;
@@ -56,6 +58,8 @@ export function useTurboVideo(
   const chunksQueueRef = useRef<ChunkEntry[]>([]);
   const objectUrlRef = useRef<string | null>(null);
   const retryTimeoutsRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const chunkCacheRef = useRef(getDefaultTurboVideoMemoryCache());
+  const previewCacheRef = useRef(getDefaultVideoPreviewCache());
 
   const clearRetryTimeouts = useCallback(() => {
     retryTimeoutsRef.current.forEach((timeoutId) => clearTimeout(timeoutId));
@@ -82,10 +86,27 @@ export function useTurboVideo(
   useEffect(() => {
     cleanupResources();
     setSourceUrl(originalUrl || "");
-    setIsPreloaded(false);
-    setProgress(0);
     setIsLoading(false);
     setIsFallback(false);
+
+    if (!originalUrl) {
+      setIsPreloaded(false);
+      setProgress(0);
+      return cleanupResources;
+    }
+
+    const cachedChunk = readTurboVideoChunk(chunkCacheRef.current, originalUrl);
+    if (cachedChunk) {
+      preloadedChunkRef.current = cachedChunk.buffer.slice(0);
+      totalSizeRef.current = cachedChunk.totalSize;
+      nextByteOffsetRef.current = cachedChunk.buffer.byteLength;
+      setIsPreloaded(true);
+      setProgress((cachedChunk.buffer.byteLength / cachedChunk.totalSize) * 100);
+      markVideoPreviewWarm(previewCacheRef.current, originalUrl);
+    } else {
+      setIsPreloaded(false);
+      setProgress(0);
+    }
 
     return cleanupResources;
   }, [cleanupResources, originalUrl]);
@@ -149,7 +170,7 @@ export function useTurboVideo(
         void processQueue();
       }
     } catch (error) {
-      console.error("Erreur durant l'assemblage MSE :", error);
+      console.error("MSE assembly failed", error);
       fallbackToNative();
     }
   }, [appendToSourceBuffer, fallbackToNative]);
@@ -181,9 +202,6 @@ export function useTurboVideo(
 
         if (attempt < maxRetries) {
           const waitTime = Math.pow(2, attempt - 1) * 1000;
-          console.warn(
-            `Cold storage detecte pour le chunk ${start}-${end}, retry ${attempt}/${maxRetries} dans ${waitTime}ms...`
-          );
 
           await new Promise<void>((resolve) => {
             const timeoutId = setTimeout(() => {
@@ -259,10 +277,7 @@ export function useTurboVideo(
           return;
         }
 
-        console.error(
-          `Erreur fatale telechargement chunk ${start}-${end} apres ${maxRetries} tentatives`,
-          error
-        );
+        console.error(`Fatal chunk download error ${start}-${end} after ${maxRetries} retries`, error);
         hasFailed = true;
         fallbackToNative();
       } finally {
@@ -270,11 +285,7 @@ export function useTurboVideo(
 
         if (!hasFailed && nextByteOffsetRef.current < totalSize) {
           void worker();
-        } else if (
-          activeRequests === 0 &&
-          !hasFailed &&
-          mediaSourceRef.current?.readyState === "open"
-        ) {
+        } else if (activeRequests === 0 && !hasFailed && mediaSourceRef.current?.readyState === "open") {
           mediaSourceRef.current.endOfStream();
           setProgress(100);
         }
@@ -284,17 +295,7 @@ export function useTurboVideo(
     for (let index = 0; index < concurrentRequests; index += 1) {
       void worker();
     }
-  }, [
-    concurrentRequests,
-    fetchChunk,
-    fallbackToNative,
-    initialChunkSize,
-    maxBufferAhead,
-    maxChunkSize,
-    maxRetries,
-    processQueue,
-    videoRef,
-  ]);
+  }, [concurrentRequests, fallbackToNative, fetchChunk, initialChunkSize, maxBufferAhead, maxChunkSize, maxRetries, processQueue, videoRef]);
 
   const preloadFirstChunk = useCallback(async () => {
     if (!originalUrl || isFallback || isPreloaded) {
@@ -325,12 +326,13 @@ export function useTurboVideo(
       preloadedChunkRef.current = buffer;
       nextByteOffsetRef.current = buffer.byteLength;
       setIsPreloaded(true);
-      setProgress(
-        totalSizeRef.current ? (buffer.byteLength / totalSizeRef.current) * 100 : 0
-      );
+      if (totalSizeRef.current) {
+        setProgress((buffer.byteLength / totalSizeRef.current) * 100);
+        writeTurboVideoChunk(chunkCacheRef.current, originalUrl, buffer.slice(0), totalSizeRef.current);
+      }
+      markVideoPreviewWarm(previewCacheRef.current, originalUrl);
     } catch (error) {
       if (!(error instanceof Error) || error.name !== "AbortError") {
-        console.warn("Prechargement echoue, fallback vers mode classique");
         fallbackToNative();
       }
     }
@@ -367,7 +369,6 @@ export function useTurboVideo(
 
     const mimeCodec = 'video/mp4; codecs="avc1.4D401E, mp4a.40.2"';
     if (!window.MediaSource || !MediaSource.isTypeSupported(mimeCodec)) {
-      console.warn("MediaSource / codec non supporte, fallback natif.");
       fallbackToNative();
       return;
     }
@@ -399,14 +400,7 @@ export function useTurboVideo(
       console.error("MSE initialization failed", error);
       fallbackToNative();
     }
-  }, [
-    appendToSourceBuffer,
-    fallbackToNative,
-    isFallback,
-    isLoading,
-    originalUrl,
-    startParallelWorkers,
-  ]);
+  }, [appendToSourceBuffer, fallbackToNative, isFallback, isLoading, originalUrl, startParallelWorkers]);
 
   return {
     sourceUrl,
