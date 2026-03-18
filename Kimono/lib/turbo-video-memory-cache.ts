@@ -1,4 +1,4 @@
-export const TURBO_VIDEO_MEMORY_TTL_MS = 60 * 60 * 1000;
+export const TURBO_VIDEO_MEMORY_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface TurboVideoChunkEntry {
   buffer: ArrayBuffer;

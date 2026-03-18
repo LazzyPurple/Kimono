@@ -1,6 +1,6 @@
 const VIDEO_PREVIEW_CACHE_PREFIX = "kimono:video-preview:";
 
-export const VIDEO_PREVIEW_CACHE_TTL_MS = 60 * 60 * 1000;
+export const VIDEO_PREVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface VideoPreviewState {
   warmed: boolean;

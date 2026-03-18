@@ -89,7 +89,7 @@ export function writeBrowserCacheValue<T>(
 
 export function getDefaultBrowserDataCache(): BrowserDataCache {
   if (!globalBrowserCache.__kimonoBrowserDataCache) {
-    const storage = typeof window === "undefined" ? null : window.sessionStorage;
+    const storage = typeof window === "undefined" ? null : window.localStorage;
     globalBrowserCache.__kimonoBrowserDataCache = createBrowserDataCache(storage);
   }
 
