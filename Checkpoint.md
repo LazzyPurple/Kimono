@@ -41,6 +41,7 @@ Le support Prisma a ete reintroduit cote source pour le developpement local :
 - `prisma/schema.prisma` reste dedie au mode local SQLite
 - client Prisma local dedie
 - scripts `prisma:generate` et `prisma:push`
+- versions Prisma realignees pour eviter les derives entre client, adapter et CLI
 - tests de couverture du mode local
 
 ### 4. Couche de donnees partagee
@@ -97,12 +98,15 @@ Ce qui est deja en place :
 
 - detection de la plus longue video d'un post
 - calcul de la duree cote serveur
+- analyse de duree via `ffprobe` avec fallback
 - generation de thumbnail et mini clip de preview
 - stockage des assets sur disque serveur
 - referencement des assets en base
 - deduplication des previews deja traitees via empreinte video stable
 - reutilisation d'un asset si une video reste populaire plusieurs jours
+- limitation de concurrence ffmpeg via `FFMPEG_CONCURRENCY`
 - cache HTTP plus agressif et immuable sur les assets de preview
+- route preview assets streamee avec support `206` et rejet `416` des ranges invalides
 
 ### 8. Hydratation centrale des preview assets
 
@@ -125,7 +129,11 @@ Un lot de perf image a ete applique sur les listings :
 - `referrerPolicy="no-referrer"` ajoute sur les images distantes des cards media
 - priorisation des premieres cards deja visibles
 - lazy loading conserve pour le reste des images
-- rendu plus stable des previews media en mode serveur-first
+- cache browser passe a 24h
+- `browser-data-cache` migre vers `localStorage`
+- prefetch idle de la page Popular suivante
+- `MediaCard` n'analyse plus la duree client quand `durationSeconds` est deja fourni par le serveur
+- preload complet des clips serveur courts pour un hover plus reactif
 
 ### 10. Durcissement du debug et des logs
 
@@ -151,6 +159,7 @@ Ce qui a ete ajoute :
 - manifest runtime dedie
 - zip final dans `Kimono/deploy/`
 - documentation de deploiement mise a jour
+- `.gitignore` enrichi pour eviter de pousser les artefacts locaux, `.codex/`, `.next/`, `tmp/` et les DB SQLite locales
 
 Objectif :
 
@@ -190,6 +199,8 @@ Une couverture de tests a ete ajoutee ou etendue autour de :
 - preview assets `Popular`
 - hydratation centrale des preview assets
 - optimisations images CDN / loading priority / lazy loading
+- semaphore ffmpeg
+- ranges invalides `416` sur preview assets
 - packaging o2switch
 - correctif Sakura / UI copy
 
@@ -262,6 +273,7 @@ Kimono a beaucoup evolue pendant cette passe :
 - debug et logs securises
 - phase `Popular` serveur-first avec preview assets dedupliques
 - hydratation centrale des previews et optimisation images CDN sur les listings
+- limitation de concurrence ffmpeg et API Popular non bloquante cote client
 - plusieurs correctifs auth, session, hydration et UX
 
 Le projet est nettement plus structure qu'au depart. La phase actuelle est une phase de stabilisation finale avant generalisation complete des previews serveur, nettoyage du backlog lint et rotation des derniers secrets exposes.

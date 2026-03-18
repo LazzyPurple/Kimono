@@ -53,29 +53,37 @@ Important :
 
 ### Previews media serveur-first
 
-Le chantier principal en cours est une approche serveur-first sur `Popular`, reutilisee progressivement ailleurs.
+Le chantier principal en cours reste une approche serveur-first sur `Popular`, reutilisee progressivement ailleurs.
 
 Ce qui est en place :
 
 - batch `popular-warmup`
 - detection de la plus longue video
+- analyse de duree via `ffprobe` avec fallback
 - duree precalculee cote serveur
 - generation de thumbnail et mini clip serveur
 - deduplication des assets deja traites via empreinte stable
-- serving des assets via `/api/preview-assets/...`
+- limitation de concurrence ffmpeg via `FFMPEG_CONCURRENCY` (defaut : `6`)
 - helper central d'hydratation des preview assets en sortie serveur
-- reutilisation des previews serveur dans les principaux flux de listing deja branches sur la couche hybride
+- `getPopularPosts()` ne bloque plus le client sur ffmpeg quand le cache est froid
+- serving des assets via `/api/preview-assets/...`
 
-### Optimisations images
+### Optimisations images et chargement
 
-Les listings medias utilisent maintenant une strategie plus legere :
+Les listings medias utilisent maintenant une strategie plus legere et plus stable :
 
 - thumbnails CDN Kemono / Coomer pour les previews de listing
 - image pleine resolution conservee pour la page post detail
 - preconnect global vers `img.kemono.cr`, `img.coomer.st`, `kemono.cr`, `coomer.st`
-- cache HTTP immuable et plus agressif sur `/api/preview-assets/...`
+- cache browser de listing passe a 24h
+- `browser-data-cache` migre vers `localStorage`
+- prefetch idle de la page Popular suivante
+- cache HTTP immuable plus agressif sur `/api/preview-assets/...`
+- streaming des preview assets avec support `206 Partial Content`
+- rejet explicite des ranges invalides en `416`
 - `referrerPolicy="no-referrer"` sur les images distantes des cards media
-- mode serveur-first renforce dans `MediaCard` avec preview clip au hover desktop et rendu plus stable par defaut
+- `MediaCard` skip la decouverte client de duree quand le serveur fournit deja `durationSeconds`
+- preload complet des clips serveur courts pour un hover plus reactif
 
 ### UI / experience
 
@@ -91,6 +99,7 @@ Les listings medias utilisent maintenant une strategie plus legere :
 - packaging Linux prebuild via WSL pour o2switch
 - artefact genere dans `Kimono/deploy/`
 - bootstrap Node.js via `Kimono/server.js`
+- `.gitignore` durci pour eviter de pousser les artefacts locaux (`.codex/`, `.next/`, `tmp/`, DB SQLite locales, etc.)
 
 ## Structure du repo
 
@@ -181,6 +190,7 @@ Variables utiles pour la phase `Popular` serveur-first :
 PREVIEW_ASSET_DIR=/home/<user>/tmp/kimono-preview-assets
 POPULAR_PREVIEW_RETENTION_DAYS=7
 POPULAR_PREVIEW_CLIP_SECONDS=3
+FFMPEG_CONCURRENCY=6
 ```
 
 Important :
@@ -188,6 +198,7 @@ Important :
 - ne pas activer `LOCAL_DEV_MODE` en production
 - preferer un mot de passe MySQL URL-safe pour `DATABASE_URL`
 - ne garder `AUTH_DEBUG_TOKEN` que temporairement
+- ajuster `FFMPEG_CONCURRENCY` selon les ressources o2switch si besoin
 - si `PREVIEW_ASSET_DIR` n'est pas defini, les assets tombent dans un dossier local du projet
 
 ## Packaging o2switch
@@ -224,13 +235,14 @@ Deux jobs principaux existent :
 - preparer les snapshots `Popular`
 - generer les assets de preview
 - reutiliser les assets deja generes si la video source a deja ete traitee
+- limiter la concurrence ffmpeg
 - nettoyer les assets trop anciens selon la retention
 
 ## Verification recente
 
 Les derniers lots verifies localement passent :
 
-- `npm test`
+- `npm test` (`134/134`)
 - `npm run build`
 
 La couverture inclut notamment :
@@ -240,6 +252,7 @@ La couverture inclut notamment :
 - preview assets `Popular`
 - hydratation centrale des preview assets
 - optimisations images CDN et priorites de chargement
+- semaphore ffmpeg et ranges invalides `416`
 - packaging o2switch
 
 ## Documentation complementaire
@@ -259,6 +272,7 @@ Le projet a ete fortement refactorise ces dernieres sessions :
 - phase `Popular` serveur-first
 - hydratation centrale des previews
 - optimisation du chargement image sur les listings
+- limitation de concurrence ffmpeg
 - correction de plusieurs regressions auth / DB / hydration
 
 Le chantier principal encore en cours est le hardening final de la production et la poursuite de la reduction du cout client sur les surfaces media les plus lourdes.
