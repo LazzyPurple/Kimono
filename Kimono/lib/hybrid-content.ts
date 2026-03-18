@@ -391,18 +391,15 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
 
       try {
         const live = await fetchPopularPostsLive(input);
-        const enrichedPosts = await Promise.all(
-          live.posts.map(async (post) => {
-            const preparedPreview = await preparePopularPreviewAssets({
-              site: input.site,
-              post: post as UnifiedPost,
-            });
 
-            return applyPreparedPreviewToUnifiedPost(post as UnifiedPost, preparedPreview);
-          })
+        // P0: Hydrate with any existing preview assets from DB, return immediately
+        const hydratedPosts = await hydratePostsWithCachedPreviewAssets(
+          live.posts.map((post) => ({ ...post, site: input.site }) as UnifiedPost),
+          { repository }
         );
 
-        for (const [index, post] of enrichedPosts.entries()) {
+        // Persist hydrated posts and snapshot synchronously (fast DB writes)
+        for (const [index, post] of hydratedPosts.entries()) {
           await repository.upsertPostCache(
             createPostCacheInputFromUnifiedPost(
               post,
@@ -418,7 +415,7 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
           rangeDate: input.date,
           pageOffset: input.offset,
           snapshotDate: formatSnapshotDate(new Date()),
-          posts: enrichedPosts.map((post, index) => ({
+          posts: hydratedPosts.map((post, index) => ({
             rank: index + 1,
             site: input.site,
             service: post.service,
@@ -427,9 +424,38 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
           })),
         });
 
+        // P0: Fire-and-forget preview generation for posts missing previews
+        // (will be available on next visit or after warmup cron)
+        void Promise.all(
+          hydratedPosts
+            .filter((post) => !post.previewClipUrl && !post.previewThumbnailUrl)
+            .map(async (post) => {
+              try {
+                const preparedPreview = await preparePopularPreviewAssets({
+                  site: input.site,
+                  post,
+                });
+                if (preparedPreview.previewOutcome === "generated" || preparedPreview.previewOutcome === "reused") {
+                  const enriched = applyPreparedPreviewToUnifiedPost(post, preparedPreview);
+                  await repository.upsertPostCache(
+                    createPostCacheInputFromUnifiedPost(
+                      enriched,
+                      "popular",
+                      "metadata",
+                      POPULAR_SNAPSHOT_TTL_MS,
+                      preparedPreview
+                    )
+                  );
+                }
+              } catch {
+                // Background generation failure is non-fatal
+              }
+            })
+        );
+
         return {
           ...live,
-          posts: enrichedPosts,
+          posts: hydratedPosts,
           source: cached.posts.length > 0 ? "live-refresh" : "live",
         };
       } catch {

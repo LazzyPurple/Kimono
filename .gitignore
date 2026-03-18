@@ -10,16 +10,26 @@ debug.log
 next_error.log
 ts_errors.txt
 
+# Local tool state
+.codex/
+
 # Base de donnees locale
 *.db
+*.db-shm
+*.db-wal
 prisma/*.db
 prisma/*.db-shm
 prisma/*.db-wal
+Kimono/prisma/*.db
+Kimono/prisma/*.db-shm
+Kimono/prisma/*.db-wal
 
 # Prisma debug
 prisma_debug.txt
 
-# Build and packaging artifacts
+# Build and local runtime artifacts
+Kimono/.next/
+Kimono/tmp/
 Kimono/.npm-cache/
 Kimono/*.zip
 Kimono/deploy/*.zip

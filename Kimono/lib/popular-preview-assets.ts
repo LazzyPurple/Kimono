@@ -1,4 +1,4 @@
-﻿import path from "node:path";
+import path from "node:path";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
@@ -11,6 +11,7 @@ import type {
   PreviewAssetCacheRecord,
   Site,
 } from "./perf-repository.ts";
+import { getDefaultFfmpegSemaphore, type FfmpegSemaphore } from "./ffmpeg-semaphore.ts";
 
 const DEFAULT_PREVIEW_ASSET_DIR = path.join(process.cwd(), "tmp", "preview-assets");
 const DEFAULT_PREVIEW_RETENTION_DAYS = 7;
@@ -51,6 +52,7 @@ interface PopularPreviewAssetDependencies {
   >;
   previewAssetDir?: string;
   clipDurationSeconds?: number;
+  semaphore?: FfmpegSemaphore;
   analyzeVideoSource?: (input: { site: Site; sourceVideoUrl: string }) => Promise<VideoAnalysisResult>;
   generatePreviewAssets?: (input: {
     site: Site;
@@ -146,9 +148,15 @@ async function resolveFfmpegPath(): Promise<string | null> {
   }
 }
 
-function runFfmpeg(ffmpegPath: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+function resolveFfprobePath(ffmpegPath: string): string {
+  const dir = path.dirname(ffmpegPath);
+  const ext = path.extname(ffmpegPath);
+  return path.join(dir, `ffprobe${ext}`);
+}
+
+function runProcess(binaryPath: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(ffmpegPath, args, { windowsHide: true });
+    const child = spawn(binaryPath, args, { windowsHide: true });
     let stdout = "";
     let stderr = "";
 
@@ -165,7 +173,7 @@ function runFfmpeg(ffmpegPath: string, args: string[]): Promise<{ stdout: string
         return;
       }
 
-      const error = new Error(`ffmpeg exited with code ${code}`);
+      const error = new Error(`Process exited with code ${code}`);
       (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
       (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
       reject(error);
@@ -179,8 +187,27 @@ async function defaultAnalyzeVideoSource(input: { sourceVideoUrl: string }): Pro
     return { durationSeconds: null };
   }
 
+  // P1: Try ffprobe first (reads only container headers, much faster)
+  const ffprobePath = resolveFfprobePath(ffmpegPath);
   try {
-    const { stderr } = await runFfmpeg(ffmpegPath, ["-i", input.sourceVideoUrl, "-f", "null", "-"]);
+    const { stdout } = await runProcess(ffprobePath, [
+      "-v", "quiet",
+      "-print_format", "json",
+      "-show_format",
+      input.sourceVideoUrl,
+    ]);
+    const parsed = JSON.parse(stdout);
+    const duration = Number(parsed?.format?.duration);
+    if (Number.isFinite(duration) && duration > 0) {
+      return { durationSeconds: duration };
+    }
+  } catch {
+    // ffprobe unavailable or failed, fall back to ffmpeg
+  }
+
+  // Fallback: ffmpeg header-only probe (no full decode)
+  try {
+    const { stderr } = await runProcess(ffmpegPath, ["-i", input.sourceVideoUrl, "-f", "null", "-t", "0", "-"]);
     const match = stderr.match(DURATION_PATTERN);
     if (!match) {
       return { durationSeconds: null };
@@ -221,7 +248,7 @@ async function defaultGeneratePreviewAssets(input: {
     ? Math.max(1, Math.floor(duration * 0.2))
     : 0;
 
-  await runFfmpeg(ffmpegPath, [
+  await runProcess(ffmpegPath, [
     "-y",
     "-ss",
     String(thumbOffsetSeconds),
@@ -234,7 +261,7 @@ async function defaultGeneratePreviewAssets(input: {
     thumbAbsolutePath,
   ]);
 
-  await runFfmpeg(ffmpegPath, [
+  await runProcess(ffmpegPath, [
     "-y",
     "-ss",
     String(clipOffsetSeconds),
@@ -274,6 +301,7 @@ export function createPopularPreviewAssetService(dependencies: PopularPreviewAss
   const generatePreviewAssets = dependencies.generatePreviewAssets ?? defaultGeneratePreviewAssets;
   const fileExists = dependencies.fileExists ?? defaultFileExists;
   const clipDurationSeconds = dependencies.clipDurationSeconds ?? getPopularPreviewClipSeconds();
+  const semaphore = dependencies.semaphore ?? getDefaultFfmpegSemaphore();
 
   return {
     async preparePreviewForPost(input: { site: Site; post: UnifiedPost; now?: Date }): Promise<PreparedPopularPreview> {
@@ -403,15 +431,21 @@ export function createPopularPreviewAssetService(dependencies: PopularPreviewAss
       }
 
       try {
-        const generatedAssets = await generatePreviewAssets({
-          site: input.site,
-          sourceVideoUrl: chosenCandidate.url,
-          sourceFingerprint: chosenCandidate.fingerprint,
-          assetDir,
-          paths: previewPaths,
-          durationSeconds: chosenCandidate.durationSeconds,
-          clipDurationSeconds,
-        });
+        const releaseSlot = await semaphore.acquire();
+        let generatedAssets: GeneratedPreviewAssets;
+        try {
+          generatedAssets = await generatePreviewAssets({
+            site: input.site,
+            sourceVideoUrl: chosenCandidate.url,
+            sourceFingerprint: chosenCandidate.fingerprint,
+            assetDir,
+            paths: previewPaths,
+            durationSeconds: chosenCandidate.durationSeconds,
+            clipDurationSeconds,
+          });
+        } finally {
+          releaseSlot();
+        }
 
         const record: PreviewAssetCacheInput = {
           site: input.site,

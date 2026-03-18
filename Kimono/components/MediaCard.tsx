@@ -123,6 +123,16 @@ export default function MediaCard({
       return;
     }
 
+    // P4: If server already provides duration, skip all client-side discovery
+    if (durationSeconds != null) {
+      setDurationLabel(formatVideoDurationLabel(durationSeconds));
+      const canWarmInBackground = videoPreviewMode === "viewport" || !showImage;
+      if (canWarmInBackground) {
+        setShouldWarmVideo(true);
+      }
+      return;
+    }
+
     let cancelled = false;
     let idleCallbackId: number | null = null;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -131,11 +141,6 @@ export default function MediaCard({
     let hasCachedWarmPreview = false;
 
     for (const candidateUrl of resolvedVideoCandidates) {
-      if (durationSeconds != null) {
-        cachedDurations.push(durationSeconds);
-        continue;
-      }
-
       const cachedState = readVideoPreviewState(previewCacheRef.current, candidateUrl);
       if (!cachedState) {
         cachedDurations.push(undefined);
@@ -150,7 +155,7 @@ export default function MediaCard({
       hasCachedWarmPreview = hasCachedWarmPreview || cachedState.warmed;
     }
 
-    setDurationLabel(formatVideoDurationLabel(durationSeconds ?? pickLongestVideoDuration(cachedDurations)));
+    setDurationLabel(formatVideoDurationLabel(pickLongestVideoDuration(cachedDurations)));
 
     const canWarmInBackground = videoPreviewMode === "viewport" || !showImage;
 
@@ -274,12 +279,18 @@ export default function MediaCard({
       return;
     }
 
-    const longestKnownDuration = durationSeconds ?? pickLongestVideoDuration(
+    // P4: If server already provides duration, just display it - no client-side probing
+    if (durationSeconds != null) {
+      setDurationLabel(formatVideoDurationLabel(durationSeconds));
+      return;
+    }
+
+    const longestKnownDuration = pickLongestVideoDuration(
       resolvedVideoCandidates.map((url) => videoDurationCache.get(url))
     );
     setDurationLabel(formatVideoDurationLabel(longestKnownDuration));
 
-    if (durationSeconds != null || resolvedVideoCandidates.length === 0 || !(shouldWarmVideo || shouldMountVideo || hovered)) {
+    if (resolvedVideoCandidates.length === 0 || !(shouldWarmVideo || shouldMountVideo || hovered)) {
       return;
     }
 
@@ -339,7 +350,9 @@ export default function MediaCard({
   }, [durationSeconds, videoUrl]);
 
   const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
-  const videoPreload = shouldWarmVideo ? ((videoPreviewMode === "viewport" || !showImage) ? "auto" : "metadata") : (videoPreviewMode === "viewport" || !showImage ? "metadata" : "none");
+  // P5: Server clips are small (~3s, 640px) - always preload them fully for instant hover
+  const hasServerClip = Boolean(videoCandidates?.some((url) => url.startsWith("/api/preview-assets/")));
+  const videoPreload = hasServerClip ? "auto" : shouldWarmVideo ? ((videoPreviewMode === "viewport" || !showImage) ? "auto" : "metadata") : (videoPreviewMode === "viewport" || !showImage ? "metadata" : "none");
 
   return (
     <a

@@ -21,7 +21,7 @@ export interface ParsedLikedCreatorKey {
 export const CREATOR_SNAPSHOT_TTL_MS = 36 * 60 * 60 * 1000;
 export const POPULAR_SNAPSHOT_TTL_MS = 18 * 60 * 60 * 1000;
 export const SERVER_POST_CACHE_TTL_MS = 60 * 60 * 1000;
-export const BROWSER_POST_CACHE_TTL_MS = 60 * 60 * 1000;
+export const BROWSER_POST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 export const POPULAR_FULL_DETAIL_LIMIT = 12;
 
 export function normalizeCreatorName(value: string): string {

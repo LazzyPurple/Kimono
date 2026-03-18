@@ -43,7 +43,7 @@ interface PopularResponse {
 
 type SiteType = "kemono" | "coomer";
 
-const POPULAR_BROWSER_CACHE_TTL_MS = 10 * 60 * 1000;
+const POPULAR_BROWSER_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function SkeletonGrid() {
   return (
@@ -130,6 +130,43 @@ function PopularPageContent() {
       active = false;
     };
   }, [site, period, date, offset]);
+
+  // P6: Idle prefetch of the next page for instant pagination
+  useEffect(() => {
+    if (loading || !data?.posts || data.posts.length < 50) {
+      return;
+    }
+
+    const nextOffset = offset + 50;
+    const nextCacheKey = buildPopularCacheKey({ site, period, date, offset: nextOffset });
+
+    const prefetch = () => {
+      void fetchJsonWithBrowserCache<PopularResponse>({
+        key: nextCacheKey,
+        ttlMs: POPULAR_BROWSER_CACHE_TTL_MS,
+        loader: async () => {
+          const params = new URLSearchParams({ site, period });
+          if (date) {
+            params.set("date", date);
+          }
+          params.set("offset", String(nextOffset));
+          const response = await fetch(`/api/popular-posts?${params.toString()}`);
+          if (!response.ok) {
+            throw new Error("Prefetch failed");
+          }
+          return response.json();
+        },
+      });
+    };
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      const id = window.requestIdleCallback(prefetch, { timeout: 3000 });
+      return () => window.cancelIdleCallback(id);
+    }
+
+    const timeoutId = setTimeout(prefetch, 1000);
+    return () => clearTimeout(timeoutId);
+  }, [loading, data, site, period, date, offset]);
 
   useScrollRestoration(`popular-${site}-${pageNumber}-${period}-${date ?? "recent"}`, !loading);
 
