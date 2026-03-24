@@ -14,6 +14,7 @@ ts_errors.txt
 .codex/
 
 # Base de donnees locale
+Kimono/dev.db
 *.db
 *.db-shm
 *.db-wal
@@ -35,3 +36,6 @@ Kimono/*.zip
 Kimono/deploy/*.zip
 Kimono/deploy/.o2switch-runtime-stage/
 Kimono/deploy-package/
+
+# Test temp artifacts
+Kimono/tests/tmp/
