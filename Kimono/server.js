@@ -11,6 +11,7 @@ const {
   formatStartupDiagnostics,
   loadRuntimeEnv,
 } = require("./lib/server/startup.cjs");
+const { purgeRebuildableDataOnStartup } = require("./lib/server/startup-db-maintenance.cjs");
 
 const entryDir = __dirname;
 const loadedEnvFiles = loadRuntimeEnv({ appDir: entryDir, env: process.env });
@@ -89,6 +90,16 @@ process.on("uncaughtException", (error) => {
 });
 
 async function start() {
+  const purgeSummary = await purgeRebuildableDataOnStartup({
+    env: process.env,
+    workspaceRoot: process.cwd(),
+    logger: console,
+  });
+
+  console.log(`[BOOT] startup rebuildable data purge complete: tables=${purgeSummary.tablesPurged.length}, dirs=${purgeSummary.directoriesReset.length}, skipped=${purgeSummary.skipped ? "yes" : "no"}`);
+
+  await appendServerLog("info", "startup rebuildable data purge complete", purgeSummary);
+
   const app = next(serverConfig);
   const handle = app.getRequestHandler();
 

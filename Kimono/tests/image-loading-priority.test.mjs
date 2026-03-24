@@ -18,17 +18,45 @@ test("MediaCard exposes a priority prop and toggles image loading hints", () => 
   assert.match(source, /fetchPriority=\{priority \? "high" : undefined\}/);
 });
 
-test("listing pages prioritize the first four MediaCard instances", () => {
+test("MediaCard consumes shared media metadata for richer placeholders", () => {
+  const source = read("components/MediaCard.tsx");
+
+  assert.match(source, /mediaWidth\?: number \| null;/);
+  assert.match(source, /mediaHeight\?: number \| null;/);
+  assert.match(source, /mediaMimeType\?: string \| null;/);
+  assert.match(source, /const resolutionLabel = mediaWidth != null && mediaHeight != null/);
+  assert.doesNotMatch(source, /const formatLabel = mediaMimeType/);
+  assert.doesNotMatch(source, /mediaMetaLabel/);
+});
+
+test("listing pages prioritize the first four MediaCard instances and forward shared media metadata", () => {
   const home = read("app/(protected)/home/page.tsx");
   const popular = read("app/(protected)/popular/[site]/[[...page]]/page.tsx");
   const creator = read("app/(protected)/creator/[site]/[service]/[id]/page.tsx");
+  const favorites = read("app/(protected)/favorites/page.tsx");
 
   assert.match(home, /posts\.map\(\(post, index\) =>/);
   assert.match(home, /priority=\{index < 4\}/);
+  assert.match(home, /mediaWidth=\{media\.width\}/);
+  assert.match(home, /mediaHeight=\{media\.height\}/);
+  assert.match(home, /mediaMimeType=\{media\.mimeType\}/);
+
   assert.match(popular, /data\.posts\.map\(\(post, index\) =>/);
   assert.match(popular, /priority=\{index < 4\}/);
-  assert.match(creator, /filteredPosts\.map\(\(post, index\) =>/);
+  assert.match(popular, /mediaWidth=\{media\.width\}/);
+  assert.match(popular, /mediaHeight=\{media\.height\}/);
+  assert.match(popular, /mediaMimeType=\{media\.mimeType\}/);
+
+  assert.match(creator, /visiblePosts\.map\(\(post, index\) =>/);
   assert.match(creator, /priority=\{index < 4\}/);
+  assert.match(creator, /mediaWidth=\{media\.width\}/);
+  assert.match(creator, /mediaHeight=\{media\.height\}/);
+  assert.match(creator, /mediaMimeType=\{media\.mimeType\}/);
+
+  assert.match(favorites, /paginatedPosts\.map\(\(post, index\) =>/);
+  assert.match(favorites, /mediaWidth=\{media\.width\}/);
+  assert.match(favorites, /mediaHeight=\{media\.height\}/);
+  assert.match(favorites, /mediaMimeType=\{media\.mimeType\}/);
 });
 
 test("post gallery keeps the first image eager and lazy-loads the rest", () => {

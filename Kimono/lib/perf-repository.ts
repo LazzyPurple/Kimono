@@ -34,7 +34,7 @@ export interface SearchCreatorRecord {
   site: Site;
   service: string;
   name: string;
-  favorited: number;
+  favorited: number | null;
   updated: string | null;
   indexed: string | null;
   profileImageUrl: string | null;
@@ -128,6 +128,19 @@ export interface PreviewAssetCacheInput {
   generatedAt: Date;
   lastSeenAt: Date;
   error?: string | null;
+  mediaKind?: "image" | "video" | "unknown" | null;
+  mimeType?: string | null;
+  width?: number | null;
+  height?: number | null;
+  nativeThumbnailUrl?: string | null;
+  probeStatus?: string | null;
+  artifactStatus?: string | null;
+  firstSeenAt?: Date | null;
+  hotUntil?: Date | null;
+  retryAfter?: Date | null;
+  generationAttempts?: number | null;
+  lastError?: string | null;
+  lastObservedContext?: string | null;
 }
 
 export interface PreviewAssetCacheRecord {
@@ -141,6 +154,118 @@ export interface PreviewAssetCacheRecord {
   generatedAt: Date;
   lastSeenAt: Date;
   error: string | null;
+  mediaKind: "image" | "video" | "unknown" | null;
+  mimeType: string | null;
+  width: number | null;
+  height: number | null;
+  nativeThumbnailUrl: string | null;
+  probeStatus: string | null;
+  artifactStatus: string | null;
+  firstSeenAt: Date | null;
+  hotUntil: Date | null;
+  retryAfter: Date | null;
+  generationAttempts: number | null;
+  lastError: string | null;
+  lastObservedContext: string | null;
+}
+
+export type MediaSourcePriorityClass = "regular" | "popular" | "liked" | "playback";
+
+export interface MediaSourceCacheInput {
+  site: Site;
+  sourceVideoUrl: string;
+  sourceFingerprint: string;
+  localVideoPath?: string | null;
+  downloadStatus: string;
+  downloadedAt?: Date | null;
+  lastSeenAt: Date;
+  retentionUntil?: Date | null;
+  fileSizeBytes?: number | null;
+  mimeType?: string | null;
+  downloadError?: string | null;
+  downloadAttempts?: number | null;
+  lastObservedContext?: string | null;
+  priorityClass?: MediaSourcePriorityClass | null;
+  retryAfter?: Date | null;
+  firstSeenAt?: Date | null;
+}
+
+export interface MediaSourceCacheRecord {
+  site: Site;
+  sourceVideoUrl: string;
+  sourceFingerprint: string;
+  localVideoPath: string | null;
+  downloadStatus: string;
+  downloadedAt: Date | null;
+  lastSeenAt: Date;
+  retentionUntil: Date | null;
+  fileSizeBytes: number | null;
+  mimeType: string | null;
+  downloadError: string | null;
+  downloadAttempts: number | null;
+  lastObservedContext: string | null;
+  priorityClass: MediaSourcePriorityClass | null;
+  retryAfter: Date | null;
+  firstSeenAt: Date | null;
+}
+
+export interface PreviewAssetStats {
+  totalEntries: number;
+  readyEntries: number;
+  partialEntries: number;
+  failedEntries: number;
+}
+
+export interface MediaSourceCacheStats {
+  totalEntries: number;
+  totalSizeBytes: number;
+  readyEntries: number;
+  remoteHttpErrors: number;
+  toolMissing: number;
+}
+
+export type CreatorSearchCacheMedia = "all" | "images" | "videos";
+
+export interface CreatorSearchCachePayload {
+  posts: unknown[];
+  total: number;
+  page: number;
+  perPage: number;
+  hasNextPage: boolean;
+  scannedPages: number;
+  truncated: boolean;
+  source: string;
+  cache?: {
+    hit: boolean;
+    stale: boolean;
+    ttlSeconds: number;
+  } | null;
+}
+
+export interface CreatorSearchCacheInput {
+  site: Site;
+  service: string;
+  creatorId: string;
+  normalizedQuery: string;
+  media: CreatorSearchCacheMedia;
+  page: number;
+  perPage: number;
+  payload: CreatorSearchCachePayload;
+  cachedAt: Date;
+  expiresAt: Date;
+}
+
+export interface CreatorSearchCacheRecord {
+  site: Site;
+  service: string;
+  creatorId: string;
+  normalizedQuery: string;
+  media: CreatorSearchCacheMedia;
+  page: number;
+  perPage: number;
+  payload: CreatorSearchCachePayload;
+  cachedAt: Date;
+  expiresAt: Date;
 }
 
 export interface PopularSnapshotInput {
@@ -180,6 +305,21 @@ export interface PerformanceRepository {
   touchPreviewAssetCache(input: { site: Site; sourceFingerprint: string; lastSeenAt: Date }): Promise<void>;
   listPreviewAssetCachesOlderThan(input: { cutoff: Date }): Promise<PreviewAssetCacheRecord[]>;
   deletePreviewAssetCaches(input: { entries: Array<{ site: Site; sourceFingerprint: string }> }): Promise<void>;
+  getPreviewAssetStats(): Promise<PreviewAssetStats>;
+  getMediaSourceCache(input: { site: Site; sourceFingerprint: string }): Promise<MediaSourceCacheRecord | null>;
+  upsertMediaSourceCache(input: MediaSourceCacheInput): Promise<void>;
+  touchMediaSourceCache(input: {
+    site: Site;
+    sourceFingerprint: string;
+    lastSeenAt: Date;
+    retentionUntil?: Date | null;
+    priorityClass?: MediaSourcePriorityClass | null;
+  }): Promise<void>;
+  listExpiredMediaSourceCaches(input: { cutoff: Date }): Promise<MediaSourceCacheRecord[]>;
+  deleteMediaSourceCaches(input: { entries: Array<{ site: Site; sourceFingerprint: string }> }): Promise<void>;
+  getMediaSourceCacheStats(): Promise<MediaSourceCacheStats>;
+  getCreatorSearchCache(input: { site: Site; service: string; creatorId: string; normalizedQuery: string; media: CreatorSearchCacheMedia; page: number; perPage: number }): Promise<CreatorSearchCacheRecord | null>;
+  upsertCreatorSearchCache(input: CreatorSearchCacheInput): Promise<void>;
   listActivePreviewSourceFingerprints(input: { snapshotDateFrom: string }): Promise<Array<{ site: Site; sourceFingerprint: string }>>;
   deletePopularSnapshotsOlderThan(input: { snapshotDateBefore: string }): Promise<void>;
   disconnect(): Promise<void>;
@@ -225,19 +365,29 @@ function parseJson<T>(value: string | null | undefined): T | null {
 }
 
 function mapCreatorRow(row: any): SearchCreatorRecord {
+  const rawPreviewPayload = parseJson(row.rawPreviewPayload);
+  const rawHasFavorited = Boolean(
+    rawPreviewPayload
+    && typeof rawPreviewPayload === "object"
+    && Object.prototype.hasOwnProperty.call(rawPreviewPayload, "favorited")
+  );
+  const favorited = row.favorited === null || row.favorited === undefined
+    ? null
+    : Number(row.favorited);
+
   return {
     id: String(row.creatorId ?? row.id),
     site: row.site as Site,
     service: String(row.service),
     name: String(row.name),
-    favorited: Number(row.favorited ?? 0),
+    favorited: favorited === 0 && !rawHasFavorited ? null : favorited,
     updated: toDate(row.updatedAt)?.toISOString() ?? null,
     indexed: toDate(row.indexedAt)?.toISOString() ?? null,
     profileImageUrl: row.profileImageUrl ?? null,
     bannerImageUrl: row.bannerImageUrl ?? null,
     publicId: row.publicId ?? null,
     postCount: row.postCount === null || row.postCount === undefined ? null : Number(row.postCount),
-    rawPreviewPayload: parseJson(row.rawPreviewPayload),
+    rawPreviewPayload,
     syncedAt: toDate(row.syncedAt) ?? new Date(0),
   };
 }
@@ -293,6 +443,83 @@ function mapPreviewAssetRow(row: any): PreviewAssetCacheRecord {
     generatedAt: toDate(row.generatedAt) ?? new Date(0),
     lastSeenAt: toDate(row.lastSeenAt) ?? new Date(0),
     error: row.error ?? null,
+    mediaKind: row.mediaKind ?? null,
+    mimeType: row.mimeType ?? null,
+    width:
+      row.width === null || row.width === undefined
+        ? null
+        : Number(row.width),
+    height:
+      row.height === null || row.height === undefined
+        ? null
+        : Number(row.height),
+    nativeThumbnailUrl: row.nativeThumbnailUrl ?? null,
+    probeStatus: row.probeStatus ?? null,
+    artifactStatus: row.artifactStatus ?? null,
+    firstSeenAt: toDate(row.firstSeenAt),
+    hotUntil: toDate(row.hotUntil),
+    retryAfter: toDate(row.retryAfter),
+    generationAttempts:
+      row.generationAttempts === null || row.generationAttempts === undefined
+        ? null
+        : Number(row.generationAttempts),
+    lastError: row.lastError ?? null,
+    lastObservedContext: row.lastObservedContext ?? null,
+  };
+}
+
+function mapMediaSourceRow(row: any): MediaSourceCacheRecord {
+  return {
+    site: row.site as Site,
+    sourceVideoUrl: String(row.sourceVideoUrl),
+    sourceFingerprint: String(row.sourceFingerprint),
+    localVideoPath: row.localVideoPath ?? null,
+    downloadStatus: String(row.downloadStatus ?? "pending"),
+    downloadedAt: toDate(row.downloadedAt),
+    lastSeenAt: toDate(row.lastSeenAt) ?? new Date(0),
+    retentionUntil: toDate(row.retentionUntil),
+    fileSizeBytes:
+      row.fileSizeBytes === null || row.fileSizeBytes === undefined
+        ? null
+        : Number(row.fileSizeBytes),
+    mimeType: row.mimeType ?? null,
+    downloadError: row.downloadError ?? null,
+    downloadAttempts:
+      row.downloadAttempts === null || row.downloadAttempts === undefined
+        ? null
+        : Number(row.downloadAttempts),
+    lastObservedContext: row.lastObservedContext ?? null,
+    priorityClass:
+      row.priorityClass === "regular" || row.priorityClass === "popular" || row.priorityClass === "liked" || row.priorityClass === "playback"
+        ? row.priorityClass
+        : null,
+    retryAfter: toDate(row.retryAfter),
+    firstSeenAt: toDate(row.firstSeenAt),
+  };
+}
+
+function mapCreatorSearchCacheRow(row: any): CreatorSearchCacheRecord {
+  return {
+    site: row.site as Site,
+    service: String(row.service),
+    creatorId: String(row.creatorId),
+    normalizedQuery: String(row.normalizedQuery ?? ""),
+    media: row.media === "images" || row.media === "videos" ? row.media : "all",
+    page: Number(row.page ?? 1),
+    perPage: Number(row.perPage ?? 50),
+    payload: parseJson<CreatorSearchCachePayload>(row.payloadJson) ?? {
+      posts: [],
+      total: 0,
+      page: Number(row.page ?? 1),
+      perPage: Number(row.perPage ?? 50),
+      hasNextPage: false,
+      scannedPages: 0,
+      truncated: false,
+      source: "cache",
+      cache: null,
+    },
+    cachedAt: toDate(row.cachedAt) ?? new Date(0),
+    expiresAt: toDate(row.expiresAt) ?? new Date(0),
   };
 }
 
@@ -541,6 +768,84 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
         KEY PreviewAssetCache_lastSeenAt_idx (lastSeenAt)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    for (const column of [
+      "mediaKind VARCHAR(32) NULL",
+      "mimeType VARCHAR(191) NULL",
+      "width INT NULL",
+      "height INT NULL",
+      "nativeThumbnailUrl TEXT NULL",
+      "probeStatus VARCHAR(64) NULL",
+      "artifactStatus VARCHAR(64) NULL",
+      "firstSeenAt DATETIME(3) NULL",
+      "hotUntil DATETIME(3) NULL",
+      "retryAfter DATETIME(3) NULL",
+      "generationAttempts INT NULL",
+      "lastError LONGTEXT NULL",
+      "lastObservedContext VARCHAR(191) NULL",
+    ]) {
+      await ensureMySqlColumn(driver, "PreviewAssetCache", column);
+    }
+    await driver.execute(`
+      CREATE TABLE IF NOT EXISTS MediaSourceCache (
+        site VARCHAR(32) NOT NULL,
+        sourceVideoUrl TEXT NOT NULL,
+        sourceFingerprint VARCHAR(191) NOT NULL,
+        localVideoPath TEXT NULL,
+        downloadStatus VARCHAR(64) NOT NULL DEFAULT 'pending',
+        downloadedAt DATETIME(3) NULL,
+        lastSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        retentionUntil DATETIME(3) NULL,
+        fileSizeBytes BIGINT NULL,
+        mimeType VARCHAR(191) NULL,
+        downloadError LONGTEXT NULL,
+        downloadAttempts INT NULL,
+        lastObservedContext VARCHAR(191) NULL,
+        priorityClass VARCHAR(32) NULL,
+        retryAfter DATETIME(3) NULL,
+        firstSeenAt DATETIME(3) NULL,
+        PRIMARY KEY (site, sourceFingerprint),
+        KEY MediaSourceCache_lastSeenAt_idx (lastSeenAt),
+        KEY MediaSourceCache_retentionUntil_idx (retentionUntil),
+        KEY MediaSourceCache_priorityClass_idx (priorityClass)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    for (const column of [
+      "localVideoPath TEXT NULL",
+      "downloadStatus VARCHAR(64) NOT NULL DEFAULT 'pending'",
+      "downloadedAt DATETIME(3) NULL",
+      "lastSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)",
+      "retentionUntil DATETIME(3) NULL",
+      "fileSizeBytes BIGINT NULL",
+      "mimeType VARCHAR(191) NULL",
+      "downloadError LONGTEXT NULL",
+      "downloadAttempts INT NULL",
+      "lastObservedContext VARCHAR(191) NULL",
+      "priorityClass VARCHAR(32) NULL",
+      "retryAfter DATETIME(3) NULL",
+      "firstSeenAt DATETIME(3) NULL"
+    ]) {
+      await ensureMySqlColumn(driver, "MediaSourceCache", column);
+    }
+    await driver.execute(`CREATE INDEX IF NOT EXISTS MediaSourceCache_lastSeenAt_idx ON MediaSourceCache(lastSeenAt)`);
+    await driver.execute(`CREATE INDEX IF NOT EXISTS MediaSourceCache_retentionUntil_idx ON MediaSourceCache(retentionUntil)`);
+    await driver.execute(`CREATE INDEX IF NOT EXISTS MediaSourceCache_priorityClass_idx ON MediaSourceCache(priorityClass)`);
+    await driver.execute(`
+      CREATE TABLE IF NOT EXISTS CreatorSearchCache (
+        site VARCHAR(32) NOT NULL,
+        service VARCHAR(191) NOT NULL,
+        creatorId VARCHAR(191) NOT NULL,
+        normalizedQuery VARCHAR(255) NOT NULL DEFAULT '',
+        media VARCHAR(32) NOT NULL DEFAULT 'all',
+        page INT NOT NULL,
+        perPage INT NOT NULL,
+        payloadJson LONGTEXT NOT NULL,
+        cachedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        expiresAt DATETIME(3) NOT NULL,
+        PRIMARY KEY (site, service, creatorId, normalizedQuery, media, page, perPage),
+        KEY CreatorSearchCache_expiresAt_idx (expiresAt)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    await driver.execute(`CREATE INDEX IF NOT EXISTS CreatorSearchCache_expiresAt_idx ON CreatorSearchCache(expiresAt)`);
     await driver.execute(`
       CREATE TABLE IF NOT EXISTS PopularSnapshot (
         snapshotRunId VARCHAR(191) NOT NULL,
@@ -648,7 +953,81 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
       PRIMARY KEY (site, sourceFingerprint)
     )
   `);
+  for (const column of [
+    "mediaKind VARCHAR(32) NULL",
+    "mimeType VARCHAR(191) NULL",
+    "width INT NULL",
+    "height INT NULL",
+    "nativeThumbnailUrl TEXT NULL",
+    "probeStatus VARCHAR(64) NULL",
+    "artifactStatus VARCHAR(64) NULL",
+    "firstSeenAt DATETIME NULL",
+    "hotUntil DATETIME NULL",
+    "retryAfter DATETIME NULL",
+    "generationAttempts INT NULL",
+    "lastError TEXT NULL",
+    "lastObservedContext VARCHAR(191) NULL",
+  ]) {
+    await ensureSqliteColumn(driver, "PreviewAssetCache", column);
+  }
   await driver.execute(`CREATE INDEX IF NOT EXISTS PreviewAssetCache_lastSeenAt_idx ON PreviewAssetCache(lastSeenAt)`);
+  await driver.execute(`
+    CREATE TABLE IF NOT EXISTS MediaSourceCache (
+      site VARCHAR(32) NOT NULL,
+      sourceVideoUrl TEXT NOT NULL,
+      sourceFingerprint VARCHAR(191) NOT NULL,
+      localVideoPath TEXT NULL,
+      downloadStatus VARCHAR(64) NOT NULL DEFAULT 'pending',
+      downloadedAt DATETIME NULL,
+      lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      retentionUntil DATETIME NULL,
+      fileSizeBytes BIGINT NULL,
+      mimeType VARCHAR(191) NULL,
+      downloadError TEXT NULL,
+      downloadAttempts INT NULL,
+      lastObservedContext VARCHAR(191) NULL,
+      priorityClass VARCHAR(32) NULL,
+      retryAfter DATETIME NULL,
+      firstSeenAt DATETIME NULL,
+      PRIMARY KEY (site, sourceFingerprint)
+    )
+  `);
+  for (const column of [
+    "localVideoPath TEXT NULL",
+    "downloadStatus VARCHAR(64) NOT NULL DEFAULT 'pending'",
+    "downloadedAt DATETIME NULL",
+    "lastSeenAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    "retentionUntil DATETIME NULL",
+    "fileSizeBytes BIGINT NULL",
+    "mimeType VARCHAR(191) NULL",
+    "downloadError TEXT NULL",
+    "downloadAttempts INT NULL",
+    "lastObservedContext VARCHAR(191) NULL",
+    "priorityClass VARCHAR(32) NULL",
+    "retryAfter DATETIME NULL",
+    "firstSeenAt DATETIME NULL",
+  ]) {
+    await ensureSqliteColumn(driver, "MediaSourceCache", column);
+  }
+  await driver.execute(`CREATE INDEX IF NOT EXISTS MediaSourceCache_lastSeenAt_idx ON MediaSourceCache(lastSeenAt)`);
+  await driver.execute(`CREATE INDEX IF NOT EXISTS MediaSourceCache_retentionUntil_idx ON MediaSourceCache(retentionUntil)`);
+  await driver.execute(`CREATE INDEX IF NOT EXISTS MediaSourceCache_priorityClass_idx ON MediaSourceCache(priorityClass)`);
+  await driver.execute(`
+    CREATE TABLE IF NOT EXISTS CreatorSearchCache (
+      site VARCHAR(32) NOT NULL,
+      service VARCHAR(191) NOT NULL,
+      creatorId VARCHAR(191) NOT NULL,
+      normalizedQuery VARCHAR(255) NOT NULL DEFAULT '',
+      media VARCHAR(32) NOT NULL DEFAULT 'all',
+      page INT NOT NULL,
+      perPage INT NOT NULL,
+      payloadJson LONGTEXT NOT NULL,
+      cachedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expiresAt DATETIME NOT NULL,
+      PRIMARY KEY (site, service, creatorId, normalizedQuery, media, page, perPage)
+    )
+  `);
+  await driver.execute(`CREATE INDEX IF NOT EXISTS CreatorSearchCache_expiresAt_idx ON CreatorSearchCache(expiresAt)`);
   await driver.execute(`
     CREATE TABLE IF NOT EXISTS PopularSnapshot (
       snapshotRunId VARCHAR(191) NOT NULL,
@@ -672,8 +1051,8 @@ async function ensurePerformanceTables(driver: DatabaseDriver): Promise<void> {
 
 function getPreviewAssetUpsertSql(driver: DatabaseDriver): string {
   if (driver.kind === "sqlite") {
-    return `INSERT INTO PreviewAssetCache (site, sourceVideoUrl, sourceFingerprint, durationSeconds, thumbnailAssetPath, clipAssetPath, status, generatedAt, lastSeenAt, error)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    return `INSERT INTO PreviewAssetCache (site, sourceVideoUrl, sourceFingerprint, durationSeconds, thumbnailAssetPath, clipAssetPath, status, generatedAt, lastSeenAt, error, mediaKind, mimeType, width, height, nativeThumbnailUrl, probeStatus, artifactStatus, firstSeenAt, hotUntil, retryAfter, generationAttempts, lastError, lastObservedContext)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(site, sourceFingerprint) DO UPDATE SET
         sourceVideoUrl = excluded.sourceVideoUrl,
         durationSeconds = excluded.durationSeconds,
@@ -682,11 +1061,24 @@ function getPreviewAssetUpsertSql(driver: DatabaseDriver): string {
         status = excluded.status,
         generatedAt = excluded.generatedAt,
         lastSeenAt = excluded.lastSeenAt,
-        error = excluded.error`;
+        error = excluded.error,
+        mediaKind = excluded.mediaKind,
+        mimeType = excluded.mimeType,
+        width = excluded.width,
+        height = excluded.height,
+        nativeThumbnailUrl = excluded.nativeThumbnailUrl,
+        probeStatus = excluded.probeStatus,
+        artifactStatus = excluded.artifactStatus,
+        firstSeenAt = excluded.firstSeenAt,
+        hotUntil = excluded.hotUntil,
+        retryAfter = excluded.retryAfter,
+        generationAttempts = excluded.generationAttempts,
+        lastError = excluded.lastError,
+        lastObservedContext = excluded.lastObservedContext`;
   }
 
-  return `INSERT INTO PreviewAssetCache (site, sourceVideoUrl, sourceFingerprint, durationSeconds, thumbnailAssetPath, clipAssetPath, status, generatedAt, lastSeenAt, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  return `INSERT INTO PreviewAssetCache (site, sourceVideoUrl, sourceFingerprint, durationSeconds, thumbnailAssetPath, clipAssetPath, status, generatedAt, lastSeenAt, error, mediaKind, mimeType, width, height, nativeThumbnailUrl, probeStatus, artifactStatus, firstSeenAt, hotUntil, retryAfter, generationAttempts, lastError, lastObservedContext)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON DUPLICATE KEY UPDATE
       sourceVideoUrl = VALUES(sourceVideoUrl),
       durationSeconds = VALUES(durationSeconds),
@@ -695,9 +1087,79 @@ function getPreviewAssetUpsertSql(driver: DatabaseDriver): string {
       status = VALUES(status),
       generatedAt = VALUES(generatedAt),
       lastSeenAt = VALUES(lastSeenAt),
-      error = VALUES(error)`;
+      error = VALUES(error),
+      mediaKind = VALUES(mediaKind),
+      mimeType = VALUES(mimeType),
+      width = VALUES(width),
+      height = VALUES(height),
+      nativeThumbnailUrl = VALUES(nativeThumbnailUrl),
+      probeStatus = VALUES(probeStatus),
+      artifactStatus = VALUES(artifactStatus),
+      firstSeenAt = VALUES(firstSeenAt),
+      hotUntil = VALUES(hotUntil),
+      retryAfter = VALUES(retryAfter),
+      generationAttempts = VALUES(generationAttempts),
+      lastError = VALUES(lastError),
+      lastObservedContext = VALUES(lastObservedContext)`;
 }
 
+function getMediaSourceCacheUpsertSql(driver: DatabaseDriver): string {
+  if (driver.kind === "sqlite") {
+    return `INSERT INTO MediaSourceCache (site, sourceVideoUrl, sourceFingerprint, localVideoPath, downloadStatus, downloadedAt, lastSeenAt, retentionUntil, fileSizeBytes, mimeType, downloadError, downloadAttempts, lastObservedContext, priorityClass, retryAfter, firstSeenAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(site, sourceFingerprint) DO UPDATE SET
+        sourceVideoUrl = excluded.sourceVideoUrl,
+        localVideoPath = excluded.localVideoPath,
+        downloadStatus = excluded.downloadStatus,
+        downloadedAt = excluded.downloadedAt,
+        lastSeenAt = excluded.lastSeenAt,
+        retentionUntil = excluded.retentionUntil,
+        fileSizeBytes = excluded.fileSizeBytes,
+        mimeType = excluded.mimeType,
+        downloadError = excluded.downloadError,
+        downloadAttempts = excluded.downloadAttempts,
+        lastObservedContext = excluded.lastObservedContext,
+        priorityClass = excluded.priorityClass,
+        retryAfter = excluded.retryAfter,
+        firstSeenAt = excluded.firstSeenAt`;
+  }
+
+  return `INSERT INTO MediaSourceCache (site, sourceVideoUrl, sourceFingerprint, localVideoPath, downloadStatus, downloadedAt, lastSeenAt, retentionUntil, fileSizeBytes, mimeType, downloadError, downloadAttempts, lastObservedContext, priorityClass, retryAfter, firstSeenAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      sourceVideoUrl = VALUES(sourceVideoUrl),
+      localVideoPath = VALUES(localVideoPath),
+      downloadStatus = VALUES(downloadStatus),
+      downloadedAt = VALUES(downloadedAt),
+      lastSeenAt = VALUES(lastSeenAt),
+      retentionUntil = VALUES(retentionUntil),
+      fileSizeBytes = VALUES(fileSizeBytes),
+      mimeType = VALUES(mimeType),
+      downloadError = VALUES(downloadError),
+      downloadAttempts = VALUES(downloadAttempts),
+      lastObservedContext = VALUES(lastObservedContext),
+      priorityClass = VALUES(priorityClass),
+      retryAfter = VALUES(retryAfter),
+      firstSeenAt = VALUES(firstSeenAt)`;
+}
+
+function getCreatorSearchCacheUpsertSql(driver: DatabaseDriver): string {
+  if (driver.kind === "sqlite") {
+    return `INSERT INTO CreatorSearchCache (site, service, creatorId, normalizedQuery, media, page, perPage, payloadJson, cachedAt, expiresAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(site, service, creatorId, normalizedQuery, media, page, perPage) DO UPDATE SET
+        payloadJson = excluded.payloadJson,
+        cachedAt = excluded.cachedAt,
+        expiresAt = excluded.expiresAt`;
+  }
+
+  return `INSERT INTO CreatorSearchCache (site, service, creatorId, normalizedQuery, media, page, perPage, payloadJson, cachedAt, expiresAt)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      payloadJson = VALUES(payloadJson),
+      cachedAt = VALUES(cachedAt),
+      expiresAt = VALUES(expiresAt)`;
+}
 function getUpsertSql(driver: DatabaseDriver, table: "CreatorIndex" | "PostCache"): string {
   if (driver.kind === "sqlite") {
     if (table === "CreatorIndex") {
@@ -803,7 +1265,7 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
           creator.creatorId,
           creator.name,
           normalizeCreatorName(creator.name),
-          Number(creator.favorited ?? 0),
+          creator.favorited === null || creator.favorited === undefined ? 0 : Number(creator.favorited),
           toDate(creator.updated),
           toDate(creator.indexed),
           creator.profileImageUrl ?? null,
@@ -823,13 +1285,22 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
     },
 
     async upsertCreatorProfile(input) {
+      let favorited = input.favorited;
+      if (favorited === null || favorited === undefined) {
+        const existingRows = await driver.query<any>(
+          "SELECT favorited FROM CreatorIndex WHERE site = ? AND service = ? AND creatorId = ? LIMIT 1",
+          [input.site, input.service, input.creatorId]
+        );
+        favorited = existingRows[0]?.favorited ?? 0;
+      }
+
       await driver.execute(getUpsertSql(driver, "CreatorIndex"), [
         input.site,
         input.service,
         input.creatorId,
         input.name,
         normalizeCreatorName(input.name),
-        Number(input.favorited ?? 0),
+        favorited === null || favorited === undefined ? 0 : Number(favorited),
         toDate(input.updated),
         toDate(input.indexed),
         input.profileImageUrl ?? null,
@@ -1006,6 +1477,19 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
         input.generatedAt,
         input.lastSeenAt,
         input.error ?? null,
+        input.mediaKind ?? null,
+        input.mimeType ?? null,
+        input.width ?? null,
+        input.height ?? null,
+        input.nativeThumbnailUrl ?? null,
+        input.probeStatus ?? null,
+        input.artifactStatus ?? null,
+        input.firstSeenAt ?? null,
+        input.hotUntil ?? null,
+        input.retryAfter ?? null,
+        input.generationAttempts ?? null,
+        input.lastError ?? null,
+        input.lastObservedContext ?? null,
       ]);
     },
 
@@ -1030,6 +1514,122 @@ function createRepository(driver: DatabaseDriver): PerformanceRepository {
           chunk.flatMap((entry) => [entry.site, entry.sourceFingerprint])
         );
       }
+    },
+
+    async getPreviewAssetStats() {
+      const rows = await driver.query<any>(
+        `SELECT
+           COUNT(*) AS totalEntries,
+           SUM(CASE WHEN status IN ('ready', 'thumbnail-ready') THEN 1 ELSE 0 END) AS readyEntries,
+           SUM(CASE WHEN status IN ('pending', 'metadata-only') THEN 1 ELSE 0 END) AS partialEntries,
+           SUM(CASE WHEN status NOT IN ('ready', 'thumbnail-ready', 'pending', 'metadata-only') THEN 1 ELSE 0 END) AS failedEntries
+         FROM PreviewAssetCache`
+      );
+      const row = rows[0] ?? {};
+      return {
+        totalEntries: Number(row.totalEntries ?? 0),
+        readyEntries: Number(row.readyEntries ?? 0),
+        partialEntries: Number(row.partialEntries ?? 0),
+        failedEntries: Number(row.failedEntries ?? 0),
+      };
+    },
+
+    async getMediaSourceCache({ site, sourceFingerprint }) {
+      const rows = await driver.query<any>("SELECT * FROM MediaSourceCache WHERE site = ? AND sourceFingerprint = ? LIMIT 1", [site, sourceFingerprint]);
+      return rows[0] ? mapMediaSourceRow(rows[0]) : null;
+    },
+
+    async upsertMediaSourceCache(input) {
+      await driver.execute(getMediaSourceCacheUpsertSql(driver), [
+        input.site,
+        input.sourceVideoUrl,
+        input.sourceFingerprint,
+        input.localVideoPath ?? null,
+        input.downloadStatus,
+        input.downloadedAt ?? null,
+        input.lastSeenAt,
+        input.retentionUntil ?? null,
+        input.fileSizeBytes ?? null,
+        input.mimeType ?? null,
+        input.downloadError ?? null,
+        input.downloadAttempts ?? null,
+        input.lastObservedContext ?? null,
+        input.priorityClass ?? null,
+        input.retryAfter ?? null,
+        input.firstSeenAt ?? null,
+      ]);
+    },
+
+    async touchMediaSourceCache({ site, sourceFingerprint, lastSeenAt, retentionUntil, priorityClass }) {
+      await driver.execute(
+        "UPDATE MediaSourceCache SET lastSeenAt = ?, retentionUntil = COALESCE(?, retentionUntil), priorityClass = COALESCE(?, priorityClass) WHERE site = ? AND sourceFingerprint = ?",
+        [lastSeenAt, retentionUntil ?? null, priorityClass ?? null, site, sourceFingerprint]
+      );
+    },
+
+    async listExpiredMediaSourceCaches({ cutoff }) {
+      const rows = await driver.query<any>(
+        "SELECT * FROM MediaSourceCache WHERE COALESCE(retentionUntil, lastSeenAt) < ? ORDER BY COALESCE(retentionUntil, lastSeenAt) ASC",
+        [cutoff]
+      );
+      return rows.map(mapMediaSourceRow);
+    },
+
+    async deleteMediaSourceCaches({ entries }) {
+      if (entries.length === 0) {
+        return;
+      }
+
+      for (const chunk of chunkArray(entries, 250)) {
+        const predicates = chunk.map(() => "(site = ? AND sourceFingerprint = ?)").join(" OR ");
+        await driver.execute(
+          `DELETE FROM MediaSourceCache WHERE ${predicates}`,
+          chunk.flatMap((entry) => [entry.site, entry.sourceFingerprint])
+        );
+      }
+    },
+
+    async getMediaSourceCacheStats() {
+      const rows = await driver.query<any>(
+        `SELECT
+           COUNT(*) AS totalEntries,
+           COALESCE(SUM(COALESCE(fileSizeBytes, 0)), 0) AS totalSizeBytes,
+           SUM(CASE WHEN downloadStatus = 'source-ready' THEN 1 ELSE 0 END) AS readyEntries,
+           SUM(CASE WHEN downloadStatus IN ('remote-http-error', 'remote-rate-limited', 'source-not-found') THEN 1 ELSE 0 END) AS remoteHttpErrors,
+           SUM(CASE WHEN downloadStatus = 'tool-missing' THEN 1 ELSE 0 END) AS toolMissing
+         FROM MediaSourceCache`
+      );
+      const row = rows[0] ?? {};
+      return {
+        totalEntries: Number(row.totalEntries ?? 0),
+        totalSizeBytes: Number(row.totalSizeBytes ?? 0),
+        readyEntries: Number(row.readyEntries ?? 0),
+        remoteHttpErrors: Number(row.remoteHttpErrors ?? 0),
+        toolMissing: Number(row.toolMissing ?? 0),
+      };
+    },
+
+    async getCreatorSearchCache({ site, service, creatorId, normalizedQuery, media, page, perPage }) {
+      const rows = await driver.query<any>(
+        "SELECT * FROM CreatorSearchCache WHERE site = ? AND service = ? AND creatorId = ? AND normalizedQuery = ? AND media = ? AND page = ? AND perPage = ? LIMIT 1",
+        [site, service, creatorId, normalizedQuery, media, page, perPage]
+      );
+      return rows[0] ? mapCreatorSearchCacheRow(rows[0]) : null;
+    },
+
+    async upsertCreatorSearchCache(input) {
+      await driver.execute(getCreatorSearchCacheUpsertSql(driver), [
+        input.site,
+        input.service,
+        input.creatorId,
+        input.normalizedQuery,
+        input.media,
+        input.page,
+        input.perPage,
+        serializeJson(input.payload),
+        input.cachedAt,
+        input.expiresAt,
+      ]);
     },
 
     async listActivePreviewSourceFingerprints({ snapshotDateFrom }) {
@@ -1083,3 +1683,6 @@ export async function getPerformanceRepository(): Promise<PerformanceRepository>
   await ensurePerformanceTables(driver);
   return createRepository(driver);
 }
+
+
+

@@ -1,8 +1,12 @@
-import axios, { AxiosInstance, AxiosError } from "axios";
+import axios, { AxiosError, type AxiosInstance } from "axios";
 
 import { getCachedCreators, setCachedCreators } from "@/lib/api/creators-cache";
+import {
+  createRateLimitError,
+  getGlobalUpstreamRateGuard,
+  resolveUpstreamBucket,
+} from "@/lib/api/upstream-rate-guard";
 
-// Types pour l'API Kemono
 export interface Creator {
   id: string;
   name: string;
@@ -47,26 +51,46 @@ const client: AxiosInstance = axios.create({
   timeout: 15000,
 });
 
-// Retry interceptor: 2 retries avec backoff sur 429/5xx
 const RETRY_DELAYS = [1000, 3000];
+const rateGuard = getGlobalUpstreamRateGuard();
+
+client.interceptors.request.use(async (config) => {
+  const bucket = resolveUpstreamBucket(config.url);
+  const decision = rateGuard.canRequest("kemono", bucket);
+  if (!decision.allowed) {
+    throw createRateLimitError("kemono", decision.retryAfterMs, bucket);
+  }
+  return config;
+});
+
 client.interceptors.response.use(undefined, async (error: AxiosError) => {
-  const config = error.config as any;
-  if (!config) throw error;
-  config.__retryCount = config.__retryCount || 0;
+  const config = error.config as AxiosError["config"] & { __retryCount?: number };
   const status = error.response?.status ?? 0;
-  if ((status === 429 || status >= 500) && config.__retryCount < RETRY_DELAYS.length) {
+
+  if (status === 429) {
+    const bucket = resolveUpstreamBucket(config?.url);
+    rateGuard.registerRateLimit("kemono", {
+      status,
+      headers: error.response?.headers as Record<string, string | number | null | undefined> | undefined,
+    }, bucket);
+    throw error;
+  }
+
+  if (!config) {
+    throw error;
+  }
+
+  config.__retryCount = config.__retryCount || 0;
+  if ((status === 0 || status >= 500) && config.__retryCount < RETRY_DELAYS.length) {
     const delay = RETRY_DELAYS[config.__retryCount];
-    config.__retryCount++;
-    console.log(`[KEMONO] Retry ${config.__retryCount} after ${delay}ms (status ${status})`);
-    await new Promise(r => setTimeout(r, delay));
+    config.__retryCount += 1;
+    await new Promise((resolve) => setTimeout(resolve, delay));
     return client(config);
   }
+
   throw error;
 });
 
-/**
- * Récupère les posts d'un créateur
- */
 export async function fetchCreatorPosts(
   service: string,
   creatorId: string,
@@ -79,38 +103,25 @@ export async function fetchCreatorPosts(
   if (query) params.q = query;
   if (tags && tags.length) params.tag = tags;
 
-  const { data } = await client.get<Post[]>(
-    `/v1/${service}/user/${creatorId}/posts`,
-    {
-      params,
-      ...(cookie ? { headers: { Cookie: cookie } } : {}),
-    }
-  );
+  const { data } = await client.get<Post[]>(`/v1/${service}/user/${creatorId}/posts`, {
+    params,
+    ...(cookie ? { headers: { Cookie: cookie } } : {}),
+  });
   return data;
 }
 
-/**
- * Récupère le profil d'un créateur
- */
 export async function fetchCreatorProfile(
   service: string,
   creatorId: string
 ): Promise<Creator | null> {
   try {
-    const { data } = await client.get<Creator>(
-      `/v1/${service}/user/${creatorId}/profile`
-    );
+    const { data } = await client.get<Creator>(`/v1/${service}/user/${creatorId}/profile`);
     return data;
   } catch {
     return null;
   }
 }
 
-/**
- * Recherche des créateurs par nom (filtre client-side).
- * Essaie /v1/creators.txt puis /v1/creators en fallback,
- * car l'endpoint peut changer selon les versions de l'API.
- */
 export async function searchCreators(query: string): Promise<Creator[]> {
   let allCreators = await getCachedCreators("kemono");
 
@@ -119,41 +130,29 @@ export async function searchCreators(query: string): Promise<Creator[]> {
 
     for (const endpoint of endpoints) {
       try {
-        console.log("[SEARCH/kemono] Trying endpoint:", endpoint);
         const { data } = await client.get(endpoint);
-        console.log("[SEARCH/kemono] response type:", typeof data,
-          "| isArray:", Array.isArray(data), "| length:", data?.length);
-
         const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
 
         if (Array.isArray(creators) && creators.length > 0) {
           allCreators = creators;
           await setCachedCreators("kemono", allCreators);
-          console.log("[SEARCH/kemono] Fetched creators count:", creators.length, "from", endpoint);
           break;
         }
-      } catch (err: any) {
-        console.log(`[SEARCH/kemono] ${endpoint} failed:`, err?.response?.status || err?.message);
+      } catch {
         continue;
       }
     }
 
     if (!allCreators || allCreators.length === 0) {
-      console.log("[SEARCH/kemono] No creators endpoint available");
       return [];
     }
   }
 
   if (!query.trim()) return allCreators;
   const lower = query.toLowerCase();
-  const result = allCreators.filter((c: Creator) => c.name.toLowerCase().includes(lower)).slice(0, 50);
-  console.log("[SEARCH/kemono] Results for query", query, ":", result.length, "matches");
-  return result;
+  return allCreators.filter((c: Creator) => c.name.toLowerCase().includes(lower)).slice(0, 50);
 }
 
-/**
- * Récupère les posts récents
- */
 export async function fetchRecentPosts(offset: number = 0): Promise<Post[]> {
   const { data } = await client.get<Post[]>("/v1/recent", {
     params: { o: offset },
@@ -161,13 +160,18 @@ export async function fetchRecentPosts(offset: number = 0): Promise<Post[]> {
   return data;
 }
 
-/**
- * Récupère les favoris d'un compte avec le cookie de session
- */
 export async function fetchFavorites(cookie: string): Promise<Creator[]> {
   const { data } = await client.get<Creator[]>("/v1/account/favorites", {
     headers: { Accept: "text/css", Cookie: cookie },
     params: { type: "artist" },
+  });
+  return data;
+}
+
+export async function fetchFavoritePosts(cookie: string): Promise<Post[]> {
+  const { data } = await client.get<Post[]>("/v1/account/favorites", {
+    headers: { Accept: "text/css", Cookie: cookie },
+    params: { type: "post" },
   });
   return data;
 }

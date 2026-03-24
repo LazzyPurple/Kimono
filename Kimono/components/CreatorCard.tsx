@@ -11,7 +11,7 @@ interface CreatorCardProps {
   name: string;
   service: string;
   site: Site;
-  favorited?: number;
+  favorited?: number | null;
   updated?: string | number;
 }
 
@@ -155,7 +155,7 @@ export default function CreatorCard({
           </div>
 
           <div className="flex flex-wrap gap-2 text-xs text-[#6b7280]">
-            {favorited !== undefined && (
+            {favorited != null && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1">
                 <Heart className="h-3.5 w-3.5" />
                 <span>{favorited.toLocaleString()}</span>

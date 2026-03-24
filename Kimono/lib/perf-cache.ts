@@ -80,8 +80,12 @@ export function buildCreatorPostsCacheKey(input: {
   creatorId: string;
   offset: number;
   q?: string;
+  scope?: "page" | "snapshot" | "search";
+  media?: string;
+  page?: number;
+  perPage?: number;
 }): string {
-  return `creator-posts:${input.site}:${input.service}:${input.creatorId}:offset=${input.offset}:q=${input.q ?? ""}`;
+  return `creator-posts:${input.site}:${input.service}:${input.creatorId}:offset=${input.offset}:scope=${input.scope ?? "page"}:media=${input.media ?? "tout"}:page=${input.page ?? 1}:perPage=${input.perPage ?? 50}:q=${input.q ?? ""}`;
 }
 
 export function buildCreatorProfileCacheKey(input: {

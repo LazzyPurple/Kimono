@@ -11,7 +11,6 @@ import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import {
-  getPostType,
   proxyCdnUrl,
   resolveListingPostMedia,
   type Site,
@@ -78,7 +77,8 @@ export default function CreatorPage() {
   const liked = isCreatorLiked(site, service, id);
 
   const query = searchParams.get("q") ?? "";
-  const page = Number(searchParams.get("page") ?? "1");
+  const rawPage = Number(searchParams.get("page") ?? "1");
+  const page = Number.isFinite(rawPage) && rawPage > 0 ? Math.trunc(rawPage) : 1;
   const mediaFilter = (searchParams.get("media") as MediaFilter) || "tout";
   const activeTab = (searchParams.get("tab") as "posts" | "recommended") || "posts";
 
@@ -87,6 +87,10 @@ export default function CreatorPage() {
   const [searchResults, setSearchResults] = useState<UnifiedPost[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [hasNextPage, setHasNextPage] = useState(false);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchSource, setSearchSource] = useState<"cache" | "upstream" | "stale-cache" | null>(null);
+  const [searchTruncated, setSearchTruncated] = useState(false);
+  const [searchError, setSearchError] = useState(false);
 
   const creatorPageKey = `${site}-${service}-${id}`;
   const recommendedCacheKey = `creator:recommended:${site}:${service}:${id}`;
@@ -222,82 +226,129 @@ export default function CreatorPage() {
   }, [id, recommendedCacheKey, service, site]);
 
   useEffect(() => {
-    if (!query) {
+    if (!query && mediaFilter === "tout") {
       void fetchPosts(page);
     }
-  }, [fetchPosts, page, query]);
+  }, [fetchPosts, mediaFilter, page, query]);
 
   useEffect(() => {
-    if (!query) {
+    if (!query && mediaFilter === "tout") {
       setSearchResults([]);
       setLoadingSearch(false);
+      setSearchTotal(0);
+      setSearchSource(null);
+      setSearchTruncated(false);
+      setSearchError(false);
       return;
     }
 
     let cancelled = false;
     setLoadingSearch(true);
+    setSearchError(false);
 
-    void (async () => {
-      const all: UnifiedPost[] = [];
-      let offset = 0;
-
-      while (true) {
-        try {
-          const data = await fetchJsonWithBrowserCache<UnifiedPost[]>({
-            key: buildCreatorPostsCacheKey({ site, service, creatorId: id, offset, q: query }),
-            ttlMs: BROWSER_POST_CACHE_TTL_MS,
-            loader: async () => {
-              const response = await fetch(
-                `/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${offset}&q=${encodeURIComponent(query)}`
-              );
-              const json = await response.json();
-              return Array.isArray(json) ? json : [];
-            },
-          });
-
-          if (cancelled) return;
-          if (!Array.isArray(data) || data.length === 0) break;
-          all.push(...data);
-          if (data.length < 50) break;
-          offset += 50;
-        } catch {
-          break;
+    void fetchJsonWithBrowserCache<{
+      posts?: UnifiedPost[];
+      total?: number;
+      source?: "cache" | "upstream" | "stale-cache";
+      hasNextPage?: boolean;
+      truncated?: boolean;
+    }>({
+      key: buildCreatorPostsCacheKey({
+        site,
+        service,
+        creatorId: id,
+        offset: 0,
+        q: query,
+        scope: "search",
+        media: mediaFilter,
+        page,
+        perPage: 50,
+      }),
+      ttlMs: BROWSER_POST_CACHE_TTL_MS,
+      loader: async () => {
+        const params = new URLSearchParams({
+          site,
+          service,
+          id,
+          page: String(page),
+          perPage: "50",
+          media: mediaFilter === "tout" ? "all" : mediaFilter,
+        });
+        if (query) {
+          params.set("q", query);
         }
-      }
 
-      if (!cancelled) {
-        setSearchResults(all);
+        const response = await fetch("/api/creator-posts/search?" + params.toString());
+        if (!response.ok) {
+          throw new Error("filtered creator search unavailable");
+        }
+
+        const json = await response.json();
+        return typeof json === "object" && json ? json : { posts: [] };
+      },
+    })
+      .then((data) => {
+        if (cancelled) {
+          return;
+        }
+
+        const nextPosts = Array.isArray(data?.posts) ? data.posts : [];
+        const nextTotal = Number(data?.total ?? nextPosts.length);
+        const nextHasNextPage = Boolean(data?.hasNextPage);
+        const nextTruncated = Boolean(data?.truncated);
+
+        setSearchResults(nextPosts);
+        setSearchTotal(nextTotal);
+        setHasNextPage(nextHasNextPage);
+        setSearchSource((data?.source as "cache" | "upstream" | "stale-cache" | undefined) ?? null);
+        setSearchTruncated(nextTruncated);
+        setSearchError(false);
+        setKnownMaxPage(
+          nextTruncated
+            ? Math.max(1, page + (nextHasNextPage ? 1 : 0))
+            : Math.max(1, Math.ceil(nextTotal / 50))
+        );
         setLoadingSearch(false);
-      }
-    })();
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSearchResults([]);
+          setSearchTotal(0);
+          setHasNextPage(false);
+          setSearchSource(null);
+          setSearchTruncated(false);
+          setSearchError(true);
+          setKnownMaxPage(Math.max(1, page));
+          setLoadingSearch(false);
+        }
+      });
 
     return () => {
       cancelled = true;
     };
-  }, [id, query, service, site]);
+  }, [id, mediaFilter, page, query, service, site]);
 
   useEffect(() => {
     setSearchResults([]);
+    setSearchTotal(0);
+    setSearchSource(null);
+    setSearchTruncated(false);
+    setSearchError(false);
   }, [id, service, site]);
 
   const isSearching = query.length > 0;
-  const basePosts = isSearching ? searchResults : posts;
-
-  const filteredPosts = basePosts.filter((post) => {
-    if (mediaFilter === "images" && getPostType(post) !== "image") return false;
-    if (mediaFilter === "videos" && getPostType(post) !== "video") return false;
-
-    if (isSearching) {
-      const loweredQuery = query.toLowerCase();
-      const inTitle = (post.title || "").toLowerCase().includes(loweredQuery);
-      const inContent = (post.content || "").toLowerCase().includes(loweredQuery);
-      if (!inTitle && !inContent) {
-        return false;
-      }
-    }
-
-    return true;
-  });
+  const usesFilteredSearch = isSearching || mediaFilter !== "tout";
+  const visiblePosts = usesFilteredSearch ? searchResults : posts;
+  const totalVisiblePages = Math.max(1, knownMaxPage);
+  const showInitialPostsSkeleton = (loadingPosts && !usesFilteredSearch && posts.length === 0)
+    || (loadingSearch && usesFilteredSearch && searchResults.length === 0);
+  const showRefreshingPostsState = (loadingPosts && !usesFilteredSearch && posts.length > 0)
+    || (loadingSearch && usesFilteredSearch && searchResults.length > 0);
+  const searchStatusSuffix = searchSource === "cache"
+    ? " (cached)"
+    : searchSource === "stale-cache"
+      ? " (cached fallback)"
+      : "";
 
   if (!isValid) {
     return (
@@ -537,38 +588,60 @@ export default function CreatorPage() {
                 className="border-[#1e1e2e] bg-[#12121a] pl-9 text-[#f0f0f5] placeholder:text-[#6b7280]"
               />
             </div>
-            {loadingSearch && isSearching ? (
+            {loadingSearch && usesFilteredSearch ? (
               <div className="flex items-center text-xs text-[#7c3aed]">
                 <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
                 Searching...
               </div>
-            ) : isSearching ? (
-              <p className="text-xs text-[#6b7280]">
-                {filteredPosts.length} post{filteredPosts.length > 1 ? "s" : ""} found
-              </p>
+            ) : usesFilteredSearch ? (
+              searchError ? (
+                <p className="text-xs text-red-400">Search is temporarily unavailable.</p>
+              ) : (
+                <div className="space-y-1 text-xs text-[#6b7280]">
+                  <p>
+                    {searchTotal} post{searchTotal > 1 ? "s" : ""} found{searchStatusSuffix}
+                  </p>
+                  {searchTruncated ? <p className="text-amber-300">Results may be incomplete.</p> : null}
+                </div>
+              )
             ) : null}
           </div>
 
-          {(loadingPosts && !isSearching) || (loadingSearch && isSearching) ? (
+          {showInitialPostsSkeleton ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
               {Array.from({ length: 18 }).map((_, index) => (
                 <div key={index} className="aspect-square animate-pulse rounded-xl border border-[#1e1e2e] bg-[#12121a]" />
               ))}
             </div>
-          ) : filteredPosts.length === 0 ? (
+          ) : visiblePosts.length === 0 ? (
             <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
-              <p className="text-lg text-[#6b7280]">{isSearching ? "No posts match this search." : "No posts available."}</p>
+              <p className="text-lg text-[#6b7280]">
+                {searchError
+                  ? "Search is temporarily unavailable."
+                  : isSearching
+                    ? "No posts match this search."
+                    : usesFilteredSearch
+                      ? "No posts match the current filters."
+                      : "No posts available."}
+              </p>
             </div>
           ) : (
             <>
-              {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
+              {showRefreshingPostsState && (
+                <div className="inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#12121a] px-3 py-1 text-xs text-[#6b7280]">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#7c3aed]" />
+                  Refreshing creator posts...
+                </div>
+              )}
+
+              {!loadingSearch && !loadingPosts && (totalVisiblePages > 1 || page > 1) && (
                 <div className="pb-4">
                   <PaginationControls />
                 </div>
               )}
 
               <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-                {filteredPosts.map((post, index) => {
+                {visiblePosts.map((post, index) => {
                   const media = resolveListingPostMedia(post);
 
                   return (
@@ -586,13 +659,16 @@ export default function CreatorPage() {
                       publishedAt={post.published}
                       priority={index < 4}
                       durationSeconds={media.durationSeconds}
+                  mediaWidth={media.width}
+                  mediaHeight={media.height}
+                  mediaMimeType={media.mimeType}
                       videoPreviewMode="hover"
                     />
                   );
                 })}
               </div>
 
-              {!isSearching && !loadingPosts && (knownMaxPage > 1 || page > 1) && (
+              {!loadingSearch && !loadingPosts && (totalVisiblePages > 1 || page > 1) && (
                 <div className="pt-4">
                   <PaginationControls />
                 </div>
@@ -631,6 +707,8 @@ export default function CreatorPage() {
     </div>
   );
 }
+
+
 
 
 

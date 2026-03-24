@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { getDataStore, type SupportedSite } from "@/lib/data-store";
+import { createRateLimitError, getGlobalUpstreamRateGuard } from "@/lib/api/upstream-rate-guard";
 
 export const dynamic = "force-dynamic";
 
 const MAX_FAVORITES = 50;
+const DISCOVER_BATCH_SIZE = 15;
+const DISCOVER_BATCH_DELAY_MS = 500;
 
 interface Favorite {
   id: string;
@@ -27,60 +30,39 @@ interface ScoredCreator extends RecommendedCreator {
   score: number;
 }
 
-async function fetchSiteFavorites(site: SupportedSite, cookie: string): Promise<Favorite[]> {
-  const baseUrl = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
-
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(`${baseUrl}/api/v1/account/favorites?type=artist`, {
-      headers: {
-        Accept: "text/css",
-        Cookie: cookie,
-      },
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      console.warn(`[DISCOVER] Failed to fetch favorites for ${site}: ${res.status}`);
-      return [];
-    }
-
-    const data = await res.json();
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((creator: any) => ({
-      id: creator.id,
-      name: creator.name,
-      service: creator.service,
-      site,
-    }));
-  } catch (error) {
-    console.error(`[DISCOVER] Error fetching favorites for ${site}:`, error);
-    return [];
-  }
-}
-
 async function fetchRecommendations(
   site: SupportedSite,
   service: string,
   id: string
 ): Promise<RecommendedCreator[]> {
   const baseUrl = site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
+  const url = `${baseUrl}/api/v1/${service}/user/${id}/recommended`;
+  const guard = getGlobalUpstreamRateGuard();
+  const decision = guard.canRequest(site, "discover");
+
+  if (!decision.allowed) {
+    throw createRateLimitError(site, decision.retryAfterMs, "discover");
+  }
 
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-    const res = await fetch(`${baseUrl}/api/v1/${service}/user/${id}/recommended`, {
+    const res = await fetch(url, {
       headers: { Accept: "text/css" },
       signal: controller.signal,
     });
     clearTimeout(timeoutId);
+
+    if (res.status === 429) {
+      const retryAfterMs = guard.registerRateLimit(site, {
+        status: res.status,
+        headers: {
+          "retry-after": res.headers.get("retry-after"),
+        },
+      }, "discover");
+      throw createRateLimitError(site, retryAfterMs, "discover");
+    }
 
     if (!res.ok) {
       return [];
@@ -88,8 +70,41 @@ async function fetchRecommendations(
 
     const data = await res.json();
     return Array.isArray(data) ? data : [];
-  } catch {
+  } catch (error) {
+    if ((error as { code?: string } | null)?.code === "UPSTREAM_COOLDOWN") {
+      throw error;
+    }
     return [];
+  }
+}
+
+async function readFavoriteSnapshot(site: SupportedSite): Promise<{ items: Favorite[]; updatedAt: string | null }> {
+  const store = await getDataStore();
+
+  try {
+    const snapshot = await store.getFavoriteSnapshot({ kind: "creator", site });
+    if (!snapshot?.data) {
+      return { items: [], updatedAt: null };
+    }
+
+    const parsed = JSON.parse(snapshot.data);
+    if (!Array.isArray(parsed)) {
+      return { items: [], updatedAt: snapshot.updatedAt?.toISOString?.() ?? null };
+    }
+
+    return {
+      items: parsed.map((creator: any) => ({
+        id: String(creator.id ?? ""),
+        name: String(creator.name ?? ""),
+        service: String(creator.service ?? ""),
+        site,
+      })).filter((creator) => Boolean(creator.id) && Boolean(creator.service)),
+      updatedAt: snapshot.updatedAt?.toISOString?.() ?? null,
+    };
+  } catch {
+    return { items: [], updatedAt: null };
+  } finally {
+    await store.disconnect();
   }
 }
 
@@ -104,23 +119,26 @@ function chunkArray<T>(array: T[], size: number): T[][] {
 }
 
 export async function POST() {
+  let store: Awaited<ReturnType<typeof getDataStore>> | null = null;
+
   try {
-    const store = await getDataStore();
-    const sessions = await store.getKimonoSessions();
-
-    if (sessions.length === 0) {
-      return NextResponse.json(
-        { error: "Aucune session trouvee. Veuillez vous connecter." },
-        { status: 400 }
-      );
-    }
-
-    let allFavorites = (await Promise.all(
-      sessions.map((session) => fetchSiteFavorites(session.site, session.cookie))
-    )).flat();
+    store = await getDataStore();
+    const favoriteSnapshots = await Promise.all((["kemono", "coomer"] as SupportedSite[]).map((site) => readFavoriteSnapshot(site)));
+    let allFavorites = favoriteSnapshots.flatMap((snapshot) => snapshot.items);
+    const snapshotUpdatedAt = favoriteSnapshots
+      .map((snapshot) => snapshot.updatedAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null;
 
     if (allFavorites.length === 0) {
-      return NextResponse.json({ error: "Aucun favori trouve." }, { status: 400 });
+      return NextResponse.json(
+        {
+          error: "Aucun snapshot de favoris disponible. Lance d'abord une synchronisation des favoris.",
+          source: "snapshot-only",
+          snapshotUpdatedAt,
+        },
+        { status: 409 }
+      );
     }
 
     const totalFavorites = allFavorites.length;
@@ -134,40 +152,46 @@ export async function POST() {
       allFavorites.map((favorite) => `${favorite.site}-${favorite.service}-${favorite.id}`)
     );
 
-    const batches = chunkArray(allFavorites, 15);
+    const batches = chunkArray(allFavorites, DISCOVER_BATCH_SIZE);
     const scoreMap = new Map<string, ScoredCreator>();
+    const rateLimitedSites = new Set<SupportedSite>();
 
     for (let index = 0; index < batches.length; index += 1) {
       const batch = batches[index];
-      console.log(`[DISCOVER] Processing batch ${index + 1}/${batches.length}...`);
 
       await Promise.all(
         batch.map(async (favorite) => {
-          const recommendations = await fetchRecommendations(
-            favorite.site,
-            favorite.service,
-            favorite.id
-          );
+          try {
+            const recommendations = await fetchRecommendations(
+              favorite.site,
+              favorite.service,
+              favorite.id
+            );
 
-          for (const recommendation of recommendations) {
-            const key = `${favorite.site}-${recommendation.service}-${recommendation.id}`;
-            const existing = scoreMap.get(key);
+            for (const recommendation of recommendations) {
+              const key = `${favorite.site}-${recommendation.service}-${recommendation.id}`;
+              const existing = scoreMap.get(key);
 
-            if (existing) {
-              existing.score += 1;
-            } else {
-              scoreMap.set(key, {
-                ...recommendation,
-                site: favorite.site,
-                score: 1,
-              });
+              if (existing) {
+                existing.score += 1;
+              } else {
+                scoreMap.set(key, {
+                  ...recommendation,
+                  site: favorite.site,
+                  score: 1,
+                });
+              }
+            }
+          } catch (error) {
+            if ((error as { code?: string; site?: SupportedSite } | null)?.code === "UPSTREAM_COOLDOWN") {
+              rateLimitedSites.add((error as { site: SupportedSite }).site);
             }
           }
         })
       );
 
       if (index < batches.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, DISCOVER_BATCH_DELAY_MS));
       }
     }
 
@@ -189,6 +213,9 @@ export async function POST() {
     return NextResponse.json({
       total: finalRecommendations.length,
       updatedAt: now.toISOString(),
+      source: "snapshot-only",
+      snapshotUpdatedAt,
+      rateLimitedSites: Array.from(rateLimitedSites),
       ...(wasTruncated && {
         warning: `Seuls ${MAX_FAVORITES} favoris sur ${totalFavorites} ont ete traites pour respecter les limites du serveur.`,
       }),
@@ -196,5 +223,7 @@ export async function POST() {
   } catch (error) {
     console.error("[DISCOVER] Error in compute:", error);
     return NextResponse.json({ error: "Erreur lors du calcul" }, { status: 500 });
+  } finally {
+    await store?.disconnect();
   }
 }

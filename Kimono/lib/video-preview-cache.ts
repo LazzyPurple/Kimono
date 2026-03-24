@@ -1,4 +1,4 @@
-const VIDEO_PREVIEW_CACHE_PREFIX = "kimono:video-preview:";
+﻿const VIDEO_PREVIEW_CACHE_PREFIX = "kimono:video-preview:";
 
 export const VIDEO_PREVIEW_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -88,8 +88,7 @@ let defaultVideoPreviewCache: VideoPreviewCache | null = null;
 
 export function getDefaultVideoPreviewCache(): VideoPreviewCache {
   if (!defaultVideoPreviewCache) {
-    const storage = typeof window === "undefined" ? null : window.localStorage;
-    defaultVideoPreviewCache = createVideoPreviewCache(storage);
+    defaultVideoPreviewCache = createVideoPreviewCache(null);
   }
 
   return defaultVideoPreviewCache;
@@ -130,7 +129,11 @@ export function writeVideoPreviewState(
     expiresAt: currentTime + ttlMs,
   };
 
-  storage.setItem(getCacheKey(cache, url), JSON.stringify(nextValue));
+  try {
+    storage.setItem(getCacheKey(cache, url), JSON.stringify(nextValue));
+  } catch {
+    storage.removeItem(getCacheKey(cache, url));
+  }
 }
 
 export function markVideoPreviewWarm(

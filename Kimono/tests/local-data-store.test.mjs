@@ -154,3 +154,137 @@ test("local data store blocks and unblocks discovery creators", async (t) => {
   blocks = await store.getDiscoveryBlocks();
   assert.equal(blocks.some((block) => block.creatorId === "123"), false);
 });
+
+
+test("local data store persists favorite chronology for creators and posts", async (t) => {
+  const { tempDir, databaseUrl } = createTempDatabaseCopy();
+  const store = await createLocalDataStore({ databaseUrl });
+
+  t.after(async () => {
+    await store.disconnect();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  await store.upsertFavoriteChronology({
+    kind: "creator",
+    site: "kemono",
+    service: "patreon",
+    creatorId: "creator-1",
+    favoritedAt: new Date("2026-03-19T10:00:00.000Z"),
+  });
+  await store.upsertFavoriteChronology({
+    kind: "post",
+    site: "coomer",
+    service: "onlyfans",
+    creatorId: "creator-2",
+    postId: "post-9",
+    favoritedAt: new Date("2026-03-19T11:00:00.000Z"),
+  });
+
+  let creatorEntries = await store.listFavoriteChronology({ kind: "creator" });
+  let postEntries = await store.listFavoriteChronology({ kind: "post" });
+
+  assert.equal(creatorEntries.length, 1);
+  assert.equal(creatorEntries[0].creatorId, "creator-1");
+  assert.equal(creatorEntries[0].postId, null);
+  assert.equal(creatorEntries[0].favoritedAt.toISOString(), "2026-03-19T10:00:00.000Z");
+
+  assert.equal(postEntries.length, 1);
+  assert.equal(postEntries[0].creatorId, "creator-2");
+  assert.equal(postEntries[0].postId, "post-9");
+  assert.equal(postEntries[0].favoritedAt.toISOString(), "2026-03-19T11:00:00.000Z");
+
+  await store.deleteFavoriteChronology({
+    kind: "post",
+    site: "coomer",
+    service: "onlyfans",
+    creatorId: "creator-2",
+    postId: "post-9",
+  });
+
+  creatorEntries = await store.listFavoriteChronology({ kind: "creator" });
+  postEntries = await store.listFavoriteChronology({ kind: "post" });
+
+  assert.equal(creatorEntries.length, 1);
+  assert.equal(postEntries.length, 0);
+});
+
+
+test("local data store persists favorite snapshots for creators and posts", async (t) => {
+  const { tempDir, databaseUrl } = createTempDatabaseCopy();
+  const store = await createLocalDataStore({ databaseUrl });
+
+  t.after(async () => {
+    await store.disconnect();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  await store.setFavoriteSnapshot({
+    kind: "creator",
+    site: "coomer",
+    data: [{ id: "creator-1", name: "Maple" }],
+    updatedAt: new Date("2026-03-19T10:00:00.000Z"),
+  });
+  await store.setFavoriteSnapshot({
+    kind: "post",
+    site: "kemono",
+    data: [{ id: "post-1", title: "Hello" }],
+    updatedAt: new Date("2026-03-19T11:00:00.000Z"),
+  });
+
+  const creatorSnapshot = await store.getFavoriteSnapshot({ kind: "creator", site: "coomer" });
+  const postSnapshot = await store.getFavoriteSnapshot({ kind: "post", site: "kemono" });
+
+  assert.deepEqual(JSON.parse(creatorSnapshot?.data ?? "[]"), [{ id: "creator-1", name: "Maple" }]);
+  assert.deepEqual(JSON.parse(postSnapshot?.data ?? "[]"), [{ id: "post-1", title: "Hello" }]);
+  assert.equal(creatorSnapshot?.kind, "creator");
+  assert.equal(postSnapshot?.kind, "post");
+});
+
+
+test("local data store persists creator snapshots for profiles and post pages", async (t) => {
+  const { tempDir, databaseUrl } = createTempDatabaseCopy();
+  const store = await createLocalDataStore({ databaseUrl });
+
+  t.after(async () => {
+    await store.disconnect();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  await store.setCreatorSnapshot({
+    kind: "profile",
+    site: "coomer",
+    service: "fansly",
+    creatorId: "creator-7",
+    data: { id: "creator-7", name: "ClaireMoon" },
+    updatedAt: new Date("2026-03-19T12:00:00.000Z"),
+  });
+  await store.setCreatorSnapshot({
+    kind: "posts",
+    site: "coomer",
+    service: "fansly",
+    creatorId: "creator-7",
+    offset: 50,
+    data: [{ id: "post-1", title: "Warm post" }],
+    updatedAt: new Date("2026-03-19T12:05:00.000Z"),
+  });
+
+  const profileSnapshot = await store.getCreatorSnapshot({
+    kind: "profile",
+    site: "coomer",
+    service: "fansly",
+    creatorId: "creator-7",
+  });
+  const postsSnapshot = await store.getCreatorSnapshot({
+    kind: "posts",
+    site: "coomer",
+    service: "fansly",
+    creatorId: "creator-7",
+    offset: 50,
+  });
+
+  assert.deepEqual(JSON.parse(profileSnapshot?.data ?? "null"), { id: "creator-7", name: "ClaireMoon" });
+  assert.deepEqual(JSON.parse(postsSnapshot?.data ?? "[]"), [{ id: "post-1", title: "Warm post" }]);
+  assert.equal(profileSnapshot?.kind, "profile");
+  assert.equal(postsSnapshot?.kind, "posts");
+});

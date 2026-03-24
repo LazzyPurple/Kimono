@@ -1,4 +1,4 @@
-﻿CREATE TABLE
+CREATE TABLE
   IF NOT EXISTS `User` (
     id VARCHAR(191) PRIMARY KEY,
     email VARCHAR(191) UNIQUE NOT NULL,
@@ -118,7 +118,47 @@ CREATE TABLE
   ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE
-  IF NOT EXISTS `PopularSnapshot` (
+  IF NOT EXISTS `MediaSourceCache` (
+    site VARCHAR(32) NOT NULL,
+    sourceVideoUrl TEXT NOT NULL,
+    sourceFingerprint VARCHAR(191) NOT NULL,
+    localVideoPath TEXT NULL,
+    downloadStatus VARCHAR(64) NOT NULL DEFAULT 'pending',
+    downloadedAt DATETIME (3) NULL,
+    lastSeenAt DATETIME (3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    retentionUntil DATETIME (3) NULL,
+    fileSizeBytes BIGINT NULL,
+    mimeType VARCHAR(191) NULL,
+    downloadError LONGTEXT NULL,
+    downloadAttempts INT NULL,
+    lastObservedContext VARCHAR(191) NULL,
+    priorityClass VARCHAR(32) NULL,
+    retryAfter DATETIME (3) NULL,
+    firstSeenAt DATETIME (3) NULL,
+    PRIMARY KEY (site, sourceFingerprint),
+    KEY `MediaSourceCache_lastSeenAt_idx` (lastSeenAt),
+    KEY `MediaSourceCache_retentionUntil_idx` (retentionUntil),
+    KEY `MediaSourceCache_priorityClass_idx` (priorityClass)
+  ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE
+  IF NOT EXISTS `CreatorSearchCache` (
+    site VARCHAR(32) NOT NULL,
+    service VARCHAR(191) NOT NULL,
+    creatorId VARCHAR(191) NOT NULL,
+    normalizedQuery VARCHAR(255) NOT NULL DEFAULT '',
+    media VARCHAR(32) NOT NULL DEFAULT 'all',
+    page INT NOT NULL,
+    perPage INT NOT NULL,
+    payloadJson LONGTEXT NOT NULL,
+    cachedAt DATETIME (3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    expiresAt DATETIME (3) NOT NULL,
+    PRIMARY KEY (site, service, creatorId, normalizedQuery, media, page, perPage),
+    KEY `CreatorSearchCache_expiresAt_idx` (expiresAt)
+  ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
+
+CREATE TABLE
+  IF NOT EXISTS PopularSnapshot (
     snapshotRunId VARCHAR(191) NOT NULL,
     rank INT NOT NULL,
     site VARCHAR(32) NOT NULL,

@@ -30,6 +30,14 @@ interface UseTurboVideoResult {
   playTurbo: () => Promise<void>;
 }
 
+function readInitialVisibilityState(): boolean {
+  if (typeof document === "undefined") {
+    return true;
+  }
+
+  return document.visibilityState !== "hidden";
+}
+
 export function useTurboVideo(
   originalUrl: string | undefined,
   videoRef: RefObject<HTMLVideoElement | null>,
@@ -38,8 +46,8 @@ export function useTurboVideo(
   const {
     initialChunkSize = 512 * 1024,
     maxChunkSize = 4 * 1024 * 1024,
-    concurrentRequests = 3,
-    maxBufferAhead = 50 * 1024 * 1024,
+    concurrentRequests = 2,
+    maxBufferAhead = 16 * 1024 * 1024,
     maxRetries = 5,
   } = config;
 
@@ -48,6 +56,7 @@ export function useTurboVideo(
   const [progress, setProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isFallback, setIsFallback] = useState(false);
+  const [isPageVisible, setIsPageVisible] = useState(readInitialVisibilityState);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const mediaSourceRef = useRef<MediaSource | null>(null);
@@ -84,12 +93,33 @@ export function useTurboVideo(
   }, [clearRetryTimeouts]);
 
   useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState !== "hidden";
+      setIsPageVisible(visible);
+
+      if (!visible) {
+        cleanupResources();
+        setSourceUrl(originalUrl || "");
+        setIsLoading(false);
+        setProgress(0);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [cleanupResources, originalUrl]);
+
+  useEffect(() => {
     cleanupResources();
     setSourceUrl(originalUrl || "");
     setIsLoading(false);
     setIsFallback(false);
 
-    if (!originalUrl) {
+    if (!originalUrl || !isPageVisible) {
       setIsPreloaded(false);
       setProgress(0);
       return cleanupResources;
@@ -109,7 +139,7 @@ export function useTurboVideo(
     }
 
     return cleanupResources;
-  }, [cleanupResources, originalUrl]);
+  }, [cleanupResources, isPageVisible, originalUrl]);
 
   const fallbackToNative = useCallback(() => {
     cleanupResources();
@@ -222,7 +252,7 @@ export function useTurboVideo(
 
   const startParallelWorkers = useCallback(() => {
     const totalSize = totalSizeRef.current;
-    if (!totalSize) {
+    if (!totalSize || !isPageVisible) {
       return;
     }
 
@@ -240,6 +270,10 @@ export function useTurboVideo(
     };
 
     const worker = async () => {
+      if (!isPageVisible) {
+        return;
+      }
+
       const videoElement = videoRef.current;
       if (videoElement && totalSizeRef.current) {
         const bytesPlayed =
@@ -283,7 +317,7 @@ export function useTurboVideo(
       } finally {
         activeRequests -= 1;
 
-        if (!hasFailed && nextByteOffsetRef.current < totalSize) {
+        if (!hasFailed && nextByteOffsetRef.current < totalSize && isPageVisible) {
           void worker();
         } else if (activeRequests === 0 && !hasFailed && mediaSourceRef.current?.readyState === "open") {
           mediaSourceRef.current.endOfStream();
@@ -295,10 +329,10 @@ export function useTurboVideo(
     for (let index = 0; index < concurrentRequests; index += 1) {
       void worker();
     }
-  }, [concurrentRequests, fallbackToNative, fetchChunk, initialChunkSize, maxBufferAhead, maxChunkSize, maxRetries, processQueue, videoRef]);
+  }, [concurrentRequests, fallbackToNative, fetchChunk, initialChunkSize, isPageVisible, maxBufferAhead, maxChunkSize, maxRetries, processQueue, videoRef]);
 
   const preloadFirstChunk = useCallback(async () => {
-    if (!originalUrl || isFallback || isPreloaded) {
+    if (!originalUrl || isFallback || isPreloaded || !isPageVisible) {
       return;
     }
 
@@ -336,10 +370,10 @@ export function useTurboVideo(
         fallbackToNative();
       }
     }
-  }, [fallbackToNative, initialChunkSize, isFallback, isPreloaded, originalUrl]);
+  }, [fallbackToNative, initialChunkSize, isFallback, isPageVisible, isPreloaded, originalUrl]);
 
   useEffect(() => {
-    if (!originalUrl || isFallback || isPreloaded || !videoRef.current) {
+    if (!originalUrl || isFallback || isPreloaded || !videoRef.current || !isPageVisible) {
       return;
     }
 
@@ -350,6 +384,10 @@ export function useTurboVideo(
 
     const observer = new IntersectionObserver(
       (entries) => {
+        if (!isPageVisible) {
+          return;
+        }
+
         if (entries.some((entry) => entry.isIntersecting)) {
           void preloadFirstChunk();
           observer.disconnect();
@@ -360,10 +398,10 @@ export function useTurboVideo(
 
     observer.observe(videoElement);
     return () => observer.disconnect();
-  }, [isFallback, isPreloaded, originalUrl, preloadFirstChunk, videoRef]);
+  }, [isFallback, isPageVisible, isPreloaded, originalUrl, preloadFirstChunk, videoRef]);
 
   const playTurbo = useCallback(async () => {
-    if (isFallback || isLoading || !originalUrl || !totalSizeRef.current || objectUrlRef.current) {
+    if (!isPageVisible || isFallback || isLoading || !originalUrl || !totalSizeRef.current || objectUrlRef.current) {
       return;
     }
 
@@ -400,7 +438,7 @@ export function useTurboVideo(
       console.error("MSE initialization failed", error);
       fallbackToNative();
     }
-  }, [appendToSourceBuffer, fallbackToNative, isFallback, isLoading, originalUrl, startParallelWorkers]);
+  }, [appendToSourceBuffer, fallbackToNative, isFallback, isLoading, isPageVisible, originalUrl, startParallelWorkers]);
 
   return {
     sourceUrl,

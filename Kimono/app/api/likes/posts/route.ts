@@ -1,8 +1,9 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 import { logAppError } from "@/lib/app-logger";
+import { getDataStore, type SupportedSite } from "@/lib/data-store";
 import { loadStoredKimonoSessionCookie } from "@/lib/remote-session";
-import type { SupportedSite } from "@/lib/data-store";
+import { getLikesPostsPayload } from "@/lib/likes-posts-route";
 
 export const dynamic = "force-dynamic";
 
@@ -10,39 +11,52 @@ function getBaseUrl(site: SupportedSite) {
   return site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
 }
 
+async function persistFavoriteChronology(input: {
+  kind: "post";
+  site: SupportedSite;
+  service: string;
+  creatorId: string;
+  postId: string;
+  action: "upsert" | "delete";
+}) {
+  const store = await getDataStore();
+
+  try {
+    if (input.action === "upsert") {
+      await store.upsertFavoriteChronology({
+        kind: input.kind,
+        site: input.site,
+        service: input.service,
+        creatorId: input.creatorId,
+        postId: input.postId,
+        favoritedAt: new Date(),
+      });
+      return;
+    }
+
+    await store.deleteFavoriteChronology({
+      kind: input.kind,
+      site: input.site,
+      service: input.service,
+      creatorId: input.creatorId,
+      postId: input.postId,
+    });
+  } finally {
+    await store.disconnect();
+  }
+}
+
 export async function GET(request: NextRequest) {
   const site = request.nextUrl.searchParams.get("site");
   if (site !== "kemono" && site !== "coomer") {
-    return NextResponse.json([]);
+    return NextResponse.json({ error: "Invalid site" }, { status: 400 });
   }
 
-  const cookie = await loadStoredKimonoSessionCookie(site);
-  if (!cookie) {
-    return NextResponse.json([]);
-  }
+  const payload = await getLikesPostsPayload({
+    site: site as SupportedSite,
+  });
 
-  try {
-    const { data } = await axios.get(
-      `${getBaseUrl(site)}/api/v1/account/favorites?type=post`,
-      {
-        headers: {
-          Cookie: cookie,
-          Accept: "text/css",
-        },
-        timeout: 15000,
-      }
-    );
-    return NextResponse.json(Array.isArray(data) ? data : []);
-  } catch (error) {
-    await logAppError("api", "likes/posts GET error", error, {
-      details: {
-        route: "/api/likes/posts",
-        method: "GET",
-        site,
-      },
-    });
-    return NextResponse.json([]);
-  }
+  return NextResponse.json(payload);
 }
 
 export async function POST(request: NextRequest) {
@@ -69,6 +83,29 @@ export async function POST(request: NextRequest) {
         timeout: 15000,
       }
     );
+
+    try {
+      await persistFavoriteChronology({
+        kind: "post",
+        site,
+        service,
+        creatorId,
+        postId,
+        action: "upsert",
+      });
+    } catch (chronologyError) {
+      await logAppError("db", "likes/posts chronology upsert failed", chronologyError, {
+        details: {
+          route: "/api/likes/posts",
+          method: "POST",
+          site,
+          service,
+          creatorId,
+          postId,
+        },
+      });
+    }
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     await logAppError("api", "likes/posts POST error", error, {
@@ -104,6 +141,29 @@ export async function DELETE(request: NextRequest) {
         timeout: 15000,
       }
     );
+
+    try {
+      await persistFavoriteChronology({
+        kind: "post",
+        site,
+        service,
+        creatorId,
+        postId,
+        action: "delete",
+      });
+    } catch (chronologyError) {
+      await logAppError("db", "likes/posts chronology delete failed", chronologyError, {
+        details: {
+          route: "/api/likes/posts",
+          method: "DELETE",
+          site,
+          service,
+          creatorId,
+          postId,
+        },
+      });
+    }
+
     return NextResponse.json({ ok: true });
   } catch (error) {
     await logAppError("api", "likes/posts DELETE error", error, {

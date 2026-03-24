@@ -206,6 +206,8 @@ function PopularPageContent() {
   const hasFullPage = Boolean(data?.posts && data.posts.length >= 50);
   const estimatedTotal = Math.max(apiCountTotal, pageNumber + (hasFullPage ? 1 : 0));
   const navigationDates = period !== "recent" ? data?.info?.navigation_dates?.[period] : null;
+  const showInitialSkeleton = loading && (!data?.posts || data.posts.length === 0);
+  const showRefreshingState = loading && Boolean(data?.posts?.length);
 
   return (
     <div className="space-y-6">
@@ -308,7 +310,7 @@ function PopularPageContent() {
         </div>
       )}
 
-      {loading ? (
+      {showInitialSkeleton ? (
         <SkeletonGrid />
       ) : !data?.posts || data.posts.length === 0 ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
@@ -316,6 +318,13 @@ function PopularPageContent() {
         </div>
       ) : (
         <>
+          {showRefreshingState && (
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#12121a] px-3 py-1 text-xs text-[#6b7280]">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[#7c3aed]" />
+              Refreshing popular posts...
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {data.posts.map((post, index) => {
               const media = resolveListingPostMedia(post);
@@ -334,6 +343,9 @@ function PopularPageContent() {
                   publishedAt={post.published}
                   priority={index < 4}
                   durationSeconds={media.durationSeconds}
+                  mediaWidth={media.width}
+                  mediaHeight={media.height}
+                  mediaMimeType={media.mimeType}
                   videoPreviewMode="hover"
                   videoCandidates={media.videoCandidates}
                 />
@@ -363,6 +375,7 @@ export default function PopularPage() {
     </Suspense>
   );
 }
+
 
 
 

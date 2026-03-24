@@ -84,13 +84,25 @@ export function writeBrowserCacheValue<T>(
     value,
   };
 
-  cache.storage.setItem(resolveStorageKey(cache, key), JSON.stringify(envelope));
+  try {
+    cache.storage.setItem(resolveStorageKey(cache, key), JSON.stringify(envelope));
+  } catch {
+    cache.storage.removeItem(resolveStorageKey(cache, key));
+  }
+}
+
+export function deleteBrowserCacheValue(cache: BrowserDataCache, key: string): void {
+  if (!cache.storage) {
+    return;
+  }
+
+  cache.storage.removeItem(resolveStorageKey(cache, key));
+  cache.inflight.delete(key);
 }
 
 export function getDefaultBrowserDataCache(): BrowserDataCache {
   if (!globalBrowserCache.__kimonoBrowserDataCache) {
-    const storage = typeof window === "undefined" ? null : window.localStorage;
-    globalBrowserCache.__kimonoBrowserDataCache = createBrowserDataCache(storage);
+    globalBrowserCache.__kimonoBrowserDataCache = createBrowserDataCache(null);
   }
 
   return globalBrowserCache.__kimonoBrowserDataCache;

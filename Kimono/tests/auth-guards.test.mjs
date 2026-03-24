@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 
 import {
   getProxyDecision,
@@ -100,4 +102,25 @@ test("local auth guards disable credential auth and TOTP setup", () => {
   assert.equal(shouldEnableCredentialAuth(false), true);
   assert.equal(getTotpSetupAvailability(true), "disabled");
   assert.equal(getTotpSetupAvailability(false), "enabled");
+});
+
+test("proxy matcher keeps public content APIs out of auth redirects", () => {
+  const proxySource = fs.readFileSync(path.join(process.cwd(), "proxy.ts"), "utf8");
+
+  for (const route of [
+    "/api/popular-posts",
+    "/api/search-creators",
+    "/api/recent-posts",
+    "/api/creator-posts",
+    "/api/creator-posts/search",
+    "/api/creator-profile",
+    "/api/media-source",
+    "/api/media-source/warm",
+  ]) {
+    assert.equal(
+      proxySource.includes(`"${route}"`),
+      false,
+      `${route} should stay public so listing pages can fetch JSON without a login redirect`
+    );
+  }
 });

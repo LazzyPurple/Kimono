@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { createHybridContentService } from "@/lib/hybrid-content";
 import { logAppError } from "@/lib/app-logger";
@@ -16,6 +16,8 @@ export async function GET(request: NextRequest) {
   const id = searchParams.get("id") ?? "";
   const offset = Number(searchParams.get("offset") ?? 0);
   const query = searchParams.get("q") || undefined;
+  const scope = searchParams.get("scope") === "snapshot" ? "snapshot" : "page";
+  const media = searchParams.get("media") || "tout";
 
   if (!site || !service || !id) {
     return NextResponse.json({ error: "Parametres manquants" }, { status: 400 });
@@ -23,6 +25,25 @@ export async function GET(request: NextRequest) {
 
   try {
     const cookie = await loadStoredKimonoSessionCookie(site);
+
+    if (scope === "snapshot") {
+      const result = await hybridContent.getCreatorPostsSnapshotScope({
+        site,
+        service,
+        creatorId: id,
+        query,
+        media: media === "images" || media === "videos" ? media : "tout",
+      });
+
+      return NextResponse.json(result, {
+        headers: {
+          "x-kimono-source": result.source,
+          "x-kimono-scope": result.scope,
+          "x-kimono-partial": result.partial ? "1" : "0",
+        },
+      });
+    }
+
     const result = await hybridContent.getCreatorPosts({
       site,
       service,
@@ -46,9 +67,10 @@ export async function GET(request: NextRequest) {
         creatorId: id,
         offset,
         query: query ?? null,
+        scope,
+        media,
       },
     });
-    return NextResponse.json([], { status: 200 });
+    return NextResponse.json({ error: "Unavailable" }, { status: 503 });
   }
 }
-

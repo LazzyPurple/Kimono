@@ -13,32 +13,83 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import CreatorCard from "@/components/CreatorCard";
+import MediaCard from "@/components/MediaCard";
 import Pagination from "@/components/Pagination";
 import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { buildAppPageTitle } from "@/lib/page-titles";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import type { UnifiedCreator, Site } from "@/lib/api/helpers";
-import type { Creator } from "@/lib/api/kemono";
+import { resolveListingPostMedia, type Site } from "@/lib/api/helpers";
+import {
+  filterFavoriteCreators,
+  filterFavoritePosts,
+  normalizeFavoritesPageParam,
+  sortFavoriteCreators,
+  sortFavoritePosts,
+  type FavoriteCreatorListItem,
+  type FavoritePostListItem,
+} from "@/lib/favorites-page-state";
+
+type FavoritesTab = "creators" | "posts";
+type CreatorSort = "date" | "favorites" | "az";
+type PostSort = "favorites" | "published";
+type FavoritesSort = CreatorSort | PostSort;
 
 interface SiteState {
   loggedIn: boolean;
   loading: boolean;
   username?: string;
-  favorites: (Creator & { site: Site })[];
+  favoriteCreators: FavoriteCreatorListItem[];
+  favoritePosts: FavoritePostListItem[];
   expired?: boolean;
+}
+
+interface CreatorFavoritesPayload {
+  loggedIn?: boolean;
+  expired?: boolean;
+  username?: string | null;
+  favorites?: FavoriteCreatorListItem[];
+}
+
+interface PostFavoritesPayload {
+  loggedIn?: boolean;
+  expired?: boolean;
+  username?: string | null;
+  items?: FavoritePostListItem[];
 }
 
 const defaultState: SiteState = {
   loggedIn: false,
   loading: true,
-  favorites: [],
+  favoriteCreators: [],
+  favoritePosts: [],
 };
 
 interface LoginModal {
   open: boolean;
   site: Site | null;
+}
+
+function normalizeTab(value: string | null): FavoritesTab {
+  return value === "posts" ? "posts" : "creators";
+}
+
+function getDefaultSort(tab: FavoritesTab): FavoritesSort {
+  return tab === "posts" ? "favorites" : "date";
+}
+
+function normalizeSort(tab: FavoritesTab, value: string | null): FavoritesSort {
+  if (tab === "posts") {
+    return value === "published" || value === "favorites" ? value : "favorites";
+  }
+
+  return value === "favorites" || value === "az" || value === "date" ? value : "date";
+}
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  return response.json() as Promise<T>;
 }
 
 function FavoritesPageContent() {
@@ -48,10 +99,11 @@ function FavoritesPageContent() {
 
   useDocumentTitle(buildAppPageTitle("Favorites"));
 
+  const tabParam = normalizeTab(searchParams.get("tab"));
   const qParam = searchParams.get("q") ?? "";
-  const sortParam = (searchParams.get("sort") as "date" | "favorites" | "az") ?? "date";
   const serviceParam = searchParams.get("service") ?? "Tous";
-  const pageParam = Number(searchParams.get("page") ?? "1");
+  const pageParam = normalizeFavoritesPageParam(searchParams.get("page"));
+  const sortParam = normalizeSort(tabParam, searchParams.get("sort"));
 
   const [kemono, setKemono] = useState<SiteState>(defaultState);
   const [coomer, setCoomer] = useState<SiteState>(defaultState);
@@ -64,22 +116,30 @@ function FavoritesPageContent() {
   const [coomerActive, setCoomerActive] = useState(true);
   const [searchQuery, setSearchQuery] = useState(qParam);
 
-  const { likedCreatorsOrder } = useLikes();
+  const { refreshLikes } = useLikes();
 
   const updateParams = useCallback(
     (updates: Record<string, string | null>) => {
       const params = new URLSearchParams(searchParams.toString());
+      const nextTab = normalizeTab(updates.tab ?? tabParam);
+      const nextDefaultSort = getDefaultSort(nextTab);
       let resettingPage = false;
 
       Object.entries(updates).forEach(([key, value]) => {
-        if (key !== "page" && key !== "q") resettingPage = true;
-        if (key === "q" && value !== qParam) resettingPage = true;
+        if (key !== "page" && key !== "q") {
+          resettingPage = true;
+        }
+        if (key === "q" && value !== qParam) {
+          resettingPage = true;
+        }
 
         if (value === null) {
           params.delete(key);
         } else if (key === "q" && value === "") {
           params.delete(key);
-        } else if (key === "sort" && value === "date") {
+        } else if (key === "tab" && value === "creators") {
+          params.delete(key);
+        } else if (key === "sort" && value === nextDefaultSort) {
           params.delete(key);
         } else if (key === "service" && value === "Tous") {
           params.delete(key);
@@ -97,8 +157,12 @@ function FavoritesPageContent() {
       const query = params.toString();
       router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     },
-    [pathname, qParam, router, searchParams]
+    [pathname, qParam, router, searchParams, tabParam]
   );
+
+  useEffect(() => {
+    setSearchQuery(qParam);
+  }, [qParam]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -114,23 +178,43 @@ function FavoritesPageContent() {
     const setter = site === "kemono" ? setKemono : setCoomer;
     setter((previous) => ({ ...previous, loading: true }));
 
-    try {
-      const response = await fetch(`/api/kimono-favorites?site=${site}`);
-      const data = await response.json();
+    const [creatorResult, postResult] = await Promise.allSettled([
+      fetchJson<CreatorFavoritesPayload>(`/api/kimono-favorites?site=${site}`),
+      fetchJson<PostFavoritesPayload>(`/api/likes/posts?site=${site}`),
+    ]);
 
+    if (creatorResult.status !== "fulfilled" && postResult.status !== "fulfilled") {
       setter({
-        loggedIn: data.loggedIn ?? false,
+        loggedIn: false,
         loading: false,
-        username: data.username,
-        favorites: (data.favorites ?? []).map((creator: Creator) => ({
-          ...creator,
-          site,
-        })) as (Creator & { site: Site })[],
-        expired: data.expired,
+        favoriteCreators: [],
+        favoritePosts: [],
+        expired: true,
       });
-    } catch {
-      setter({ loggedIn: false, loading: false, favorites: [] });
+      return;
     }
+
+    const creatorPayload = creatorResult.status === "fulfilled"
+      ? creatorResult.value
+      : { loggedIn: false, expired: true, favorites: [] };
+    const postPayload = postResult.status === "fulfilled"
+      ? postResult.value
+      : { loggedIn: false, expired: true, items: [] };
+
+    setter({
+      loggedIn: Boolean(creatorPayload.loggedIn || postPayload.loggedIn),
+      loading: false,
+      username: (creatorPayload.username ?? postPayload.username ?? undefined) || undefined,
+      favoriteCreators: (creatorPayload.favorites ?? []).map((creator) => ({
+        ...creator,
+        site: creator.site ?? site,
+      })),
+      favoritePosts: (postPayload.items ?? []).map((post) => ({
+        ...post,
+        site: post.site ?? site,
+      })),
+      expired: Boolean(creatorPayload.expired || postPayload.expired),
+    });
   }, []);
 
   useEffect(() => {
@@ -139,7 +223,13 @@ function FavoritesPageContent() {
   }, [fetchFavorites]);
 
   const isFullyLoaded = !kemono.loading && !coomer.loading;
-  useScrollRestoration(`favorites-${pageParam}`, isFullyLoaded);
+  const hasAnySession = kemono.loggedIn || coomer.loggedIn;
+  const isBlockingInitialLoad = kemono.loading && coomer.loading
+    && kemono.favoriteCreators.length === 0
+    && kemono.favoritePosts.length === 0
+    && coomer.favoriteCreators.length === 0
+    && coomer.favoritePosts.length === 0;
+  useScrollRestoration(`favorites-${tabParam}-${pageParam}`, isFullyLoaded);
 
   function openLoginModal(site: Site) {
     setLoginModal({ open: true, site });
@@ -153,7 +243,8 @@ function FavoritesPageContent() {
   }
 
   async function handleLogin() {
-    if (!loginModal.site) {
+    const site = loginModal.site;
+    if (!site) {
       return;
     }
 
@@ -165,7 +256,7 @@ function FavoritesPageContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          site: loginModal.site,
+          site,
           username: loginUsername,
           password: loginPassword,
         }),
@@ -179,7 +270,7 @@ function FavoritesPageContent() {
       }
 
       closeLoginModal();
-      void fetchFavorites(loginModal.site);
+      await Promise.all([fetchFavorites(site), refreshLikes()]);
     } catch {
       setLoginError("Network error.");
     } finally {
@@ -190,57 +281,59 @@ function FavoritesPageContent() {
   async function handleLogout(site: Site) {
     await fetch(`/api/kimono-favorites?site=${site}`, { method: "DELETE" });
     const setter = site === "kemono" ? setKemono : setCoomer;
-    setter({ loggedIn: false, loading: false, favorites: [] });
+    setter({
+      loggedIn: false,
+      loading: false,
+      favoriteCreators: [],
+      favoritePosts: [],
+      expired: false,
+    });
+    await refreshLikes();
   }
 
-  const allFavorites: UnifiedCreator[] = useMemo(
-    () => [...kemono.favorites, ...coomer.favorites],
-    [coomer.favorites, kemono.favorites]
-  );
+  const allCreators = useMemo(() => {
+    const items: FavoriteCreatorListItem[] = [];
+    if (kemonoActive) items.push(...kemono.favoriteCreators);
+    if (coomerActive) items.push(...coomer.favoriteCreators);
+    return items;
+  }, [coomer.favoriteCreators, coomerActive, kemono.favoriteCreators, kemonoActive]);
+
+  const allPosts = useMemo(() => {
+    const items: FavoritePostListItem[] = [];
+    if (kemonoActive) items.push(...kemono.favoritePosts);
+    if (coomerActive) items.push(...coomer.favoritePosts);
+    return items;
+  }, [coomer.favoritePosts, coomerActive, kemono.favoritePosts, kemonoActive]);
 
   const services = useMemo(() => {
-    const values = new Set(allFavorites.map((creator) => creator.service));
+    const source = tabParam === "posts" ? allPosts : allCreators;
+    const values = new Set(source.map((item) => item.service));
     return ["Tous", ...Array.from(values).sort()];
-  }, [allFavorites]);
+  }, [allCreators, allPosts, tabParam]);
 
-  const filteredFavorites = useMemo(() => {
-    let result: UnifiedCreator[] = [];
-    if (kemonoActive) result.push(...kemono.favorites);
-    if (coomerActive) result.push(...coomer.favorites);
-
-    if (qParam) {
-      const normalizedQuery = qParam.toLowerCase();
-      result = result.filter((creator) => creator.name.toLowerCase().includes(normalizedQuery));
-    }
-
-    if (serviceParam !== "Tous") {
-      result = result.filter((creator) => creator.service === serviceParam);
-    }
-
-    result.sort((left, right) => {
-      if (sortParam === "date") {
-        return new Date(right.updated || 0).getTime() - new Date(left.updated || 0).getTime();
-      }
-
-      if (sortParam === "favorites") {
-        const leftOrder = likedCreatorsOrder.get(`${left.site}-${left.service}-${left.id}`) ?? Infinity;
-        const rightOrder = likedCreatorsOrder.get(`${right.site}-${right.service}-${right.id}`) ?? Infinity;
-        if (leftOrder !== rightOrder) {
-          return leftOrder - rightOrder;
-        }
-
-        return (right.favorited || 0) - (left.favorited || 0);
-      }
-
-      return left.name.localeCompare(right.name);
+  const filteredCreators = useMemo(() => {
+    const filtered = filterFavoriteCreators(allCreators, {
+      query: qParam,
+      service: serviceParam,
     });
+    return sortFavoriteCreators(filtered, sortParam as CreatorSort);
+  }, [allCreators, qParam, serviceParam, sortParam]);
 
-    return result;
-  }, [coomer.favorites, coomerActive, kemono.favorites, kemonoActive, likedCreatorsOrder, qParam, serviceParam, sortParam]);
+  const filteredPosts = useMemo(() => {
+    const filtered = filterFavoritePosts(allPosts, {
+      query: qParam,
+      service: serviceParam,
+    });
+    return sortFavoritePosts(filtered, sortParam as PostSort);
+  }, [allPosts, qParam, serviceParam, sortParam]);
 
+  const currentItemCount = tabParam === "posts" ? allPosts.length : allCreators.length;
+  const filteredItemCount = tabParam === "posts" ? filteredPosts.length : filteredCreators.length;
   const ITEMS_PER_PAGE = 50;
-  const paginatedFavorites = filteredFavorites.slice((pageParam - 1) * ITEMS_PER_PAGE, pageParam * ITEMS_PER_PAGE);
-  const totalPages = Math.max(1, Math.ceil(filteredFavorites.length / ITEMS_PER_PAGE));
+  const totalPages = Math.max(1, Math.ceil(filteredItemCount / ITEMS_PER_PAGE));
+  const currentPage = Math.min(pageParam, totalPages);
+  const paginatedCreators = filteredCreators.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  const paginatedPosts = filteredPosts.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   return (
     <div className="space-y-6">
@@ -323,7 +416,9 @@ function FavoritesPageContent() {
 
               {state.loggedIn && (
                 <p className="text-xs text-[#6b7280]">
-                  {state.favorites.length} favorite creator{state.favorites.length !== 1 ? "s" : ""}
+                  {state.favoriteCreators.length} creator{state.favoriteCreators.length !== 1 ? "s" : ""}
+                  {" • "}
+                  {state.favoritePosts.length} post{state.favoritePosts.length !== 1 ? "s" : ""}
                 </p>
               )}
             </div>
@@ -331,13 +426,37 @@ function FavoritesPageContent() {
         })}
       </div>
 
-      {allFavorites.length > 0 && (
+      {(allCreators.length > 0 || allPosts.length > 0) && (
         <div className="space-y-4 rounded-xl border border-[#1e1e2e] bg-[#12121a] p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            {([
+              { key: "creators", label: "Creators" },
+              { key: "posts", label: "Posts" },
+            ] as Array<{ key: FavoritesTab; label: string }>).map((tab) => (
+              <Button
+                key={tab.key}
+                size="sm"
+                onClick={() => updateParams({
+                  tab: tab.key === "creators" ? null : tab.key,
+                  sort: getDefaultSort(tab.key),
+                  page: "1",
+                })}
+                className={`h-8 cursor-pointer text-xs transition-colors ${
+                  tabParam === tab.key
+                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                }`}
+              >
+                {tab.label}
+              </Button>
+            ))}
+          </div>
+
           <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
             <div className="relative w-full sm:max-w-xs">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6b7280]" />
               <Input
-                placeholder="Search creators..."
+                placeholder={tabParam === "posts" ? "Search posts..." : "Search creators..."}
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 className="h-9 border-[#1e1e2e] bg-[#0a0a0f] pl-9 text-sm text-[#f0f0f5]"
@@ -345,39 +464,68 @@ function FavoritesPageContent() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                onClick={() => updateParams({ sort: "date" })}
-                className={`h-8 cursor-pointer text-xs transition-colors ${
-                  sortParam === "date"
-                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-                }`}
-              >
-                Updated
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => updateParams({ sort: "favorites" })}
-                className={`h-8 cursor-pointer text-xs transition-colors ${
-                  sortParam === "favorites"
-                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-                }`}
-              >
-                Added first
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => updateParams({ sort: "az" })}
-                className={`h-8 cursor-pointer text-xs transition-colors ${
-                  sortParam === "az"
-                    ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
-                    : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
-                }`}
-              >
-                A-Z
-              </Button>
+              {tabParam === "creators" ? (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => updateParams({ sort: "date" })}
+                    className={`h-8 cursor-pointer text-xs transition-colors ${
+                      sortParam === "date"
+                        ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                        : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    }`}
+                  >
+                    Updated
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => updateParams({ sort: "favorites" })}
+                    className={`h-8 cursor-pointer text-xs transition-colors ${
+                      sortParam === "favorites"
+                        ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                        : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    }`}
+                  >
+                    Added first
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => updateParams({ sort: "az" })}
+                    className={`h-8 cursor-pointer text-xs transition-colors ${
+                      sortParam === "az"
+                        ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                        : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    }`}
+                  >
+                    A-Z
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="sm"
+                    onClick={() => updateParams({ sort: "favorites" })}
+                    className={`h-8 cursor-pointer text-xs transition-colors ${
+                      sortParam === "favorites"
+                        ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                        : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    }`}
+                  >
+                    Added first
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => updateParams({ sort: "published" })}
+                    className={`h-8 cursor-pointer text-xs transition-colors ${
+                      sortParam === "published"
+                        ? "bg-[#7c3aed] text-white hover:bg-[#6d28d9]"
+                        : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
+                    }`}
+                  >
+                    Published
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -400,39 +548,80 @@ function FavoritesPageContent() {
         </div>
       )}
 
-      {!isFullyLoaded ? (
+      {isBlockingInitialLoad ? (
         <div className="flex items-center justify-center py-20">
           <Loader2 className="h-8 w-8 animate-spin text-[#7c3aed]" />
         </div>
-      ) : allFavorites.length === 0 ? (
+      ) : !hasAnySession ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center text-[#6b7280]">
           Sign in to view your favorites, or start adding some.
         </div>
-      ) : filteredFavorites.length === 0 ? (
+      ) : currentItemCount === 0 ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center text-[#6b7280]">
-          No creators match the current filters.
+          {tabParam === "posts" ? "No favorite posts yet." : "No favorite creators yet."}
+        </div>
+      ) : filteredItemCount === 0 ? (
+        <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center text-[#6b7280]">
+          {tabParam === "posts" ? "No posts match the current filters." : "No creators match the current filters."}
         </div>
       ) : (
         <div className="space-y-6">
           <p className="text-sm text-[#6b7280]">
-            {filteredFavorites.length} creator{filteredFavorites.length !== 1 ? "s" : ""} shown
+            {filteredItemCount} {tabParam === "posts" ? `post${filteredItemCount !== 1 ? "s" : ""}` : `creator${filteredItemCount !== 1 ? "s" : ""}`} shown
           </p>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {paginatedFavorites.map((creator) => (
-              <CreatorCard
-                key={`${creator.site}-${creator.service}-${creator.id}`}
-                id={creator.id}
-                name={creator.name}
-                service={creator.service}
-                site={creator.site}
-                favorited={creator.favorited}
-                updated={creator.updated}
-              />
-            ))}
-          </div>
+          {tabParam === "creators" ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+              {paginatedCreators.map((creator) => (
+                <CreatorCard
+                  key={`${creator.site}-${creator.service}-${creator.id}`}
+                  id={creator.id}
+                  name={creator.name}
+                  service={creator.service}
+                  site={creator.site}
+                  favorited={creator.favorited}
+                  updated={creator.updated}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {paginatedPosts.map((post, index) => {
+                const media = resolveListingPostMedia(post);
+                return (
+                  <div key={`${post.site}-${post.service}-${post.id}`} className="space-y-2">
+                    <MediaCard
+                      title={post.title || post.creatorName || "Untitled"}
+                      previewImageUrl={media.previewImageUrl}
+                      videoUrl={media.videoUrl}
+                      videoCandidates={media.videoCandidates}
+                      type={media.type}
+                      site={post.site}
+                      service={post.service}
+                      postId={post.id}
+                      user={post.user}
+                      publishedAt={post.published}
+                      durationSeconds={media.durationSeconds}
+                  mediaWidth={media.width}
+                  mediaHeight={media.height}
+                  mediaMimeType={media.mimeType}
+                      priority={currentPage === 1 && index < 4}
+                    />
+                    <div className="space-y-1 px-1">
+                      <p className="truncate text-xs font-medium text-[#f0f0f5]">
+                        {post.creatorName || `${post.service} / ${post.user}`}
+                      </p>
+                      <p className="line-clamp-2 text-xs text-[#6b7280]">
+                        {post.content || "No preview text available."}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
-          <Pagination current={pageParam} total={totalPages} onChange={(page) => updateParams({ page: String(page) })} />
+          <Pagination current={currentPage} total={totalPages} onChange={(page) => updateParams({ page: String(page) })} />
         </div>
       )}
 

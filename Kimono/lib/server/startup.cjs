@@ -90,6 +90,131 @@ function buildServerConfig({ entryDir, env = process.env } = {}) {
   };
 }
 
+function parseDatabaseDriver(databaseUrl) {
+  const normalized = String(databaseUrl || "").toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  if (normalized.startsWith("mysql://")) {
+    return "mysql";
+  }
+  if (normalized.startsWith("postgres://") || normalized.startsWith("postgresql://")) {
+    return "postgres";
+  }
+  if (normalized.startsWith("file:") || normalized.startsWith("sqlite:")) {
+    return "sqlite";
+  }
+  return "unknown";
+}
+
+function fileExistsSafe(targetPath) {
+  try {
+    return Boolean(targetPath) && fs.existsSync(targetPath);
+  } catch {
+    return false;
+  }
+}
+
+function listBinaryCandidates(binaryName, env = process.env) {
+  const pathValue = env.PATH || "";
+  const directories = pathValue.split(path.delimiter).filter(Boolean);
+  const ext = path.extname(binaryName);
+  const pathExts = process.platform === "win32"
+    ? (env.PATHEXT || ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)
+    : [""];
+
+  return directories.flatMap((directory) => {
+    if (ext) {
+      return [path.join(directory, binaryName)];
+    }
+
+    return pathExts.map((suffix) => path.join(directory, `${binaryName}${suffix.toLowerCase()}`));
+  });
+}
+
+function findBinaryOnPath(binaryName, env = process.env) {
+  for (const candidate of listBinaryCandidates(binaryName, env)) {
+    if (fileExistsSafe(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function deriveSiblingBinary(binaryPath, binaryName) {
+  if (!binaryPath || (!binaryPath.includes("/") && !binaryPath.includes("\\"))) {
+    return null;
+  }
+
+  const ext = path.extname(binaryPath);
+  return path.join(path.dirname(binaryPath), `${binaryName}${ext}`);
+}
+
+function diagnoseBinary({ env, configuredPath, binaryName, siblingFrom = null }) {
+  const configured = typeof configuredPath === "string" ? configuredPath.trim() : "";
+  if (configured) {
+    return {
+      status: fileExistsSafe(configured) ? "configured" : "missing",
+      resolvedPath: configured,
+      source: "env",
+    };
+  }
+
+  const siblingCandidate = deriveSiblingBinary(siblingFrom, binaryName);
+  if (fileExistsSafe(siblingCandidate)) {
+    return {
+      status: "configured",
+      resolvedPath: siblingCandidate,
+      source: "derived",
+    };
+  }
+
+  const discovered = findBinaryOnPath(binaryName, env);
+  if (discovered) {
+    return {
+      status: "path",
+      resolvedPath: discovered,
+      source: "path",
+    };
+  }
+
+  return {
+    status: "missing",
+    resolvedPath: configured || siblingCandidate || null,
+    source: configured ? "env" : siblingCandidate ? "derived" : "path",
+  };
+}
+
+function collectRuntimeDiagnostics(env = process.env) {
+  const databaseDriver = parseDatabaseDriver(env.DATABASE_URL);
+  const ffmpeg = diagnoseBinary({
+    env,
+    configuredPath: env.FFMPEG_PATH,
+    binaryName: "ffmpeg",
+  });
+  const ffprobe = diagnoseBinary({
+    env,
+    configuredPath: env.FFPROBE_PATH,
+    binaryName: "ffprobe",
+    siblingFrom: ffmpeg.status !== "missing" ? ffmpeg.resolvedPath : null,
+  });
+
+  return {
+    database: {
+      configured: Boolean(env.DATABASE_URL),
+      driver: databaseDriver,
+    },
+    sessionStore: {
+      configured: Boolean(env.DATABASE_URL),
+      mode: env.DATABASE_URL ? "database" : "none",
+    },
+    previewTools: {
+      ffmpeg,
+      ffprobe,
+    },
+  };
+}
+
 function collectStartupDiagnostics({ appDir, cwd = process.cwd(), env = process.env } = {}) {
   const resolvedAppDir = appDir || process.cwd();
 
@@ -110,12 +235,24 @@ function collectStartupDiagnostics({ appDir, cwd = process.cwd(), env = process.
     environment: Object.fromEntries(
       REQUIRED_ENV_KEYS.map((key) => [key, Boolean(env[key])])
     ),
+    runtime: collectRuntimeDiagnostics(env),
   };
 }
 
 function formatKeyValueBlock(title, values, truthy = "yes", falsy = "no") {
   const lines = Object.entries(values).map(([key, value]) => `  - ${key}=${value ? truthy : falsy}`);
   return [`[BOOT] ${title}:`, ...lines].join("\n");
+}
+
+function formatRuntimeBlock(runtime = collectRuntimeDiagnostics()) {
+  return [
+    "[BOOT] runtime:",
+    `  - database.configured=${runtime.database.configured ? "yes" : "no"}`,
+    `  - database.driver=${runtime.database.driver ?? "unknown"}`,
+    `  - sessionStore.mode=${runtime.sessionStore.mode}`,
+    `  - ffmpeg.status=${runtime.previewTools.ffmpeg.status}`,
+    `  - ffprobe.status=${runtime.previewTools.ffprobe.status}`,
+  ].join("\n");
 }
 
 function formatStartupDiagnostics(diagnostics) {
@@ -126,6 +263,7 @@ function formatStartupDiagnostics(diagnostics) {
     `[BOOT] port=${diagnostics.port}`,
     formatKeyValueBlock("paths", diagnostics.paths),
     formatKeyValueBlock("environment", diagnostics.environment, "present", "missing"),
+    formatRuntimeBlock(diagnostics.runtime),
   ].join("\n");
 }
 
@@ -147,4 +285,3 @@ module.exports = {
   formatStartupDiagnostics,
   loadRuntimeEnv,
 };
-

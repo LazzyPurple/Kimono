@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   createBrowserDataCache,
   fetchJsonWithBrowserCache,
+  getDefaultBrowserDataCache,
   readBrowserCacheValue,
   writeBrowserCacheValue,
 } from "../lib/browser-data-cache.ts";
@@ -91,4 +92,10 @@ test("browser cache can skip storing degraded responses", async () => {
   assert.equal(first.source, "stale-cache");
   assert.equal(second.source, "live-refresh");
   assert.equal(calls, 2);
+});
+
+
+test("default browser cache does not persist data in localStorage anymore", () => {
+  const cache = getDefaultBrowserDataCache();
+  assert.equal(cache.storage, null);
 });

@@ -1,7 +1,7 @@
-import * as kemono from "./kemono";
-import * as coomer from "./coomer";
-import { deduplicatePosts, deduplicateCreators } from "./helpers";
-import type { Site, UnifiedPost, UnifiedCreator } from "./helpers";
+import * as kemono from "./kemono.ts";
+import * as coomer from "./coomer.ts";
+import { deduplicatePosts, deduplicateCreators } from "./helpers.ts";
+import type { Site, UnifiedPost, UnifiedCreator } from "./helpers.ts";
 
 export type { Site, UnifiedPost, UnifiedCreator };
 
@@ -122,6 +122,6 @@ export async function fetchRecentPosts(
   return deduplicatePosts(posts);
 }
 
-export * from "./helpers";
+export * from "./helpers.ts";
 
 

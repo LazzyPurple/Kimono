@@ -177,6 +177,19 @@ export async function initializeDatabase() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    await execute(`
+      CREATE TABLE IF NOT EXISTS \`FavoriteChronology\` (
+        kind VARCHAR(32) NOT NULL,
+        site VARCHAR(32) NOT NULL,
+        service VARCHAR(191) NOT NULL,
+        creatorId VARCHAR(191) NOT NULL,
+        postId VARCHAR(191) NOT NULL DEFAULT '',
+        favoritedAt DATETIME(3) NOT NULL,
+        PRIMARY KEY (kind, site, service, creatorId, postId),
+        KEY \`FavoriteChronology_kind_favoritedAt_idx\` (kind, favoritedAt)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     console.log("[DB] Initialization complete.");
   } catch (error) {
     console.error("[DB] Initialization failed:", error);

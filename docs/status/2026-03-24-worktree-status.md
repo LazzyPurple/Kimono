@@ -1,0 +1,432 @@
+# Kimono - Handoff complet pour reprise de contexte
+
+Date : 2026-03-24
+Public vise : Claude ou tout autre assistant reprenant le chantier sans historique de conversation
+
+## 1. Situation Git exacte
+
+- repo app : `C:/Users/lilsm/Workspace/Kimono/Kimono`
+- branche courante : `main`
+- upstream : `origin/main`
+- dernier commit pousse : `6a144ba` - `Update project documentation for popular preview pipeline`
+- commits locaux en avance : `0`
+- commits distants en retard : `0`
+
+Conclusion :
+
+- rien de ce qui suit n'est encore pousse sur GitHub
+- tout le contexte depuis le dernier push vit uniquement dans le worktree local
+
+## 2. Taille de l'ecart actuel
+
+Etat releve au moment de l'ecriture de ce document :
+
+- fichiers suivis modifies : `48`
+- nouveaux fichiers non suivis : `42`
+- diff cumule : `6588` insertions / `1143` suppressions
+
+## 3. Ce qu'est Kimono aujourd'hui
+
+Kimono n'est plus seulement un frontend Next.js avec quelques caches locaux.
+
+Le projet evolue vers :
+
+- un frontend unifie `Kemono` / `Coomer`
+- une couche serveur qui observe, hydrate, met en cache et sert les medias
+- une logique hybride `live + cache + stale fallback`
+- une infra de resilience autour des favoris, du login upstream, des rate limits et de la sante runtime
+
+## 4. Contraintes structurantes a garder en tete
+
+### 4.1 Split local vs production
+
+Le projet garde un split volontaire :
+
+- local : Prisma + SQLite
+- production : MySQL + SQL runtime / bootstrap deploy
+
+Points sensibles :
+
+- toute nouvelle table de perf/cache doit etre ajoutee a la fois dans le bootstrap runtime et dans `deploy/o2switch-init.sql`
+- les changements schema doivent rester compatibles avec les deux modes
+
+Fichiers clefs :
+
+- `Kimono/lib/perf-repository.ts`
+- `Kimono/deploy/o2switch-init.sql`
+- `Kimono/lib/db-init.ts`
+
+### 4.2 Routes publiques a ne pas remettre derriere l'auth
+
+Certaines APIs de contenu doivent rester publiques, sinon les pages recoivent une redirection HTML vers `/login` au lieu du JSON attendu.
+
+Fichier clef :
+
+- `Kimono/proxy.ts`
+
+Tests de garde-fou :
+
+- `Kimono/tests/auth-guards.test.mjs`
+
+### 4.3 Donnees a purger vs donnees a conserver
+
+Au boot, les tables reconstructibles sont purgees automatiquement.
+
+A conserver :
+
+- auth / passkeys / sessions
+- `KimonoSession`
+- `FavoriteChronology`
+- `FavoriteSnapshot`
+
+A purger :
+
+- caches / snapshots / index media / resultats de recherche caches
+
+Fichiers clefs :
+
+- `Kimono/lib/server/startup-db-maintenance.cjs`
+- `Kimono/server.js`
+
+Decision produit explicite deja validee par l'utilisateur :
+
+- la purge des donnees reconstructibles doit etre automatique a chaque redemarrage
+- plus tard, un admin panel devra ajouter un bouton `Clean DB`
+
+## 5. Decisions produit / technique deja tranchees dans les conversations recentes
+
+### 5.1 Video playback local
+
+Decision retenue :
+
+- v1 seulement pour `Coomer`
+- warm lazy au premier `play`
+- `useTurboVideo` reste en fallback, il n'est pas supprime
+- la source locale Kimono doit etre preferee si elle est prete
+
+### 5.2 Recherche createur
+
+Decision retenue :
+
+- la recherche `q` et les filtres `images/videos` ne doivent plus dependre du `local snapshot`
+- pagination fidele requise
+- scan upstream borne a `10` pages max par requete
+- cache dedie des resultats de recherche pendant `3 jours`
+
+### 5.3 Purge DB au demarrage
+
+Decision retenue :
+
+- purge globale des donnees reconstructibles a chaque boot
+- conservation des donnees auth/session et des favoris locaux utiles
+
+## 6. Chantiers majeurs ajoutes depuis le dernier push
+
+### 6.1 Media Platform transverse
+
+Etat : tres avance
+
+Objectif :
+
+- sortir d'une logique media limitee a `Popular`
+- mutualiser metadonnees, thumbnails, clips et etat de source entre toutes les surfaces
+
+Pieces principales :
+
+- `Kimono/lib/media-platform.ts`
+- `Kimono/lib/post-preview-hydration.ts`
+- `Kimono/lib/popular-preview-assets.ts`
+- `Kimono/lib/perf-repository.ts`
+- `Kimono/lib/api/helpers.ts`
+
+Ce qui existe maintenant :
+
+- fingerprint canonique par source media
+- `PreviewAssetCache` enrichi
+- `MediaSourceCache` pour les sources video locales
+- statuts media/probe/artefacts
+- priorites `popular`, `liked`, `playback`
+- fenetre chaude media et retention disque
+- hydratation reutilisable sur plusieurs listings
+
+Surfaces deja touchees :
+
+- `Popular`
+- `Home`
+- `Favorites`
+- `Discover`
+- `Recent`
+- `Post`
+- `Creator` indirectement via la nouvelle recherche et les medias listes
+
+### 6.2 Lecture video locale Coomer
+
+Etat : implemente
+
+Probleme vise :
+
+- le cold storage / la lenteur upstream Coomer rendait certaines videos trop lentes ou quasi impossibles a lancer
+- plusieurs onglets avec `useTurboVideo` pouvaient saturer le navigateur alors que le serveur restait sous-utilise
+
+Pieces principales :
+
+- `Kimono/app/api/media-source/[site]/[sourceFingerprint]/route.ts`
+- `Kimono/app/api/media-source/warm/route.ts`
+- `Kimono/lib/post-video-sources.ts`
+- `Kimono/components/VideoPlayer.tsx`
+- `Kimono/hooks/useTurboVideo.ts`
+
+Ce qui existe maintenant :
+
+- route publique de streaming local avec `Range`, `206`, `Accept-Ranges`
+- warmup serveur cible d'une source video a partir d'un post et d'un path valide
+- mapping `videoSources` par video dans le payload post
+- preference player pour la source locale si `source-ready`
+- fallback upstream si la source locale n'arrive pas assez vite
+- budgets de buffering reduits et comportement plus prudent en onglet cache
+
+### 6.3 Recherche createur fidele cote serveur
+
+Etat : implemente
+
+Probleme corrige :
+
+- la page createur filtrait localement une portion incomplete de posts, souvent vide
+- le message `0 post found in local snapshot` etait trompeur
+
+Pieces principales :
+
+- `Kimono/app/api/creator-posts/search/route.ts`
+- `Kimono/lib/hybrid-content.ts`
+- `Kimono/lib/perf-repository.ts`
+- `Kimono/app/(protected)/creator/[site]/[service]/[id]/page.tsx`
+- `Kimono/lib/perf-cache.ts`
+
+Ce qui existe maintenant :
+
+- recherche cote serveur pour `q`, `images`, `videos`, `q + media`
+- pagination fidele
+- scan upstream borne a `10` pages
+- cache dedie `CreatorSearchCache` sur `3 jours`
+- signaux UI `cached`, `stale-cache`, `truncated`
+- la page createur n'affiche plus une verite issue du seul local snapshot
+
+### 6.4 Favoris et likes plus fiables
+
+Etat : bien avance
+
+Problemes vises :
+
+- ordre `Added first` peu fiable quand l'upstream ne donne pas assez d'information
+- comportement mauvais quand la session upstream expire ou tombe
+
+Pieces principales :
+
+- `Kimono/lib/favorites-page-state.ts`
+- `Kimono/lib/kimono-favorites-route.ts`
+- `Kimono/lib/likes-posts-route.ts`
+- `Kimono/lib/likes-context-utils.ts`
+- `Kimono/contexts/LikesContext.tsx`
+- `Kimono/app/(protected)/favorites/page.tsx`
+
+Ce qui existe maintenant :
+
+- chronologie locale des favoris createurs et posts
+- metadata de fiabilite : `favoriteDateKnown`, `favoriteOrderSource`, `snapshotUpdatedAt`, `stale`
+- snapshots de secours pour createurs et posts favoris
+- enrichissement des noms de createurs et des medias sur les posts likes
+
+### 6.5 Resilience upstream / login / rate limits
+
+Etat : implemente
+
+Pieces principales :
+
+- `Kimono/lib/api/upstream-rate-guard.ts`
+- `Kimono/lib/session-upstream-cache.ts`
+- `Kimono/lib/kimono-login-route.ts`
+- `Kimono/lib/api/coomer.ts`
+- `Kimono/lib/api/kemono.ts`
+
+Ce qui existe maintenant :
+
+- guard central contre les `429`
+- cooldown par bucket upstream
+- persistence de l'etat de cooldown
+- support de `Retry-After`
+- reponses `429` explicites sur le login et les routes qui dependent de l'upstream
+- cache memoire fraiche/stale pour eviter de retaper l'upstream inutilement
+
+### 6.6 Observabilite et sante serveur
+
+Etat : implemente
+
+Pieces principales :
+
+- `Kimono/lib/server-health.ts`
+- `Kimono/app/api/health/route.ts`
+- `Kimono/app/health/page.tsx`
+- `Kimono/lib/server/startup.cjs`
+
+Ce qui existe maintenant :
+
+- vue agregée runtime/env/paths
+- cooldowns upstream actifs
+- etat snapshots favoris
+- etat cache discovery
+- stats `MediaSourceCache` / `PreviewAssetCache`
+- meilleurs diagnostics de demarrage
+
+### 6.7 Purge automatique des caches reconstructibles au demarrage
+
+Etat : implemente
+
+Pieces principales :
+
+- `Kimono/lib/server/startup-db-maintenance.cjs`
+- `Kimono/server.js`
+- `Kimono/deploy/o2switch-init.sql`
+
+Ce qui existe maintenant :
+
+- purge DB des tables reconstructibles a chaque boot
+- reset des repertoires de cache media locaux
+- conservation des tables auth/session/favoris utiles
+- design pret a etre reutilise plus tard par un futur bouton admin `Clean DB`
+
+### 6.8 Durcissements UI / perf listings
+
+Etat : bien avance
+
+Surfaces touchees :
+
+- `Kimono/app/(protected)/home/page.tsx`
+- `Kimono/app/(protected)/popular/[site]/[[...page]]/page.tsx`
+- `Kimono/app/(protected)/discover/page.tsx`
+- `Kimono/app/(protected)/favorites/page.tsx`
+- `Kimono/app/(protected)/creator/[site]/[service]/[id]/page.tsx`
+- `Kimono/components/MediaCard.tsx`
+
+Ce qui a change :
+
+- distinction plus propre entre squelette initial et refresh de fond
+- cartes media plus prudentes sur le preload
+- priorisation plus propre des premiers items
+- UI moins trompeuse pendant les rafraichissements
+
+## 7. Fichiers nouveaux les plus importants a lire en premier
+
+### Reprise globale du projet
+
+1. `C:/Users/lilsm/Workspace/Kimono/Roadmap.md`
+2. `C:/Users/lilsm/Workspace/Kimono/docs/status/2026-03-24-worktree-status.md`
+3. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/hybrid-content.ts`
+4. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/perf-repository.ts`
+
+### Si l'objectif est media / video
+
+1. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/media-platform.ts`
+2. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/popular-preview-assets.ts`
+3. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/post-preview-hydration.ts`
+4. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/post-video-sources.ts`
+5. `C:/Users/lilsm/Workspace/Kimono/Kimono/components/VideoPlayer.tsx`
+6. `C:/Users/lilsm/Workspace/Kimono/Kimono/hooks/useTurboVideo.ts`
+
+### Si l'objectif est favoris / likes
+
+1. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/favorites-page-state.ts`
+2. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/kimono-favorites-route.ts`
+3. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/likes-posts-route.ts`
+4. `C:/Users/lilsm/Workspace/Kimono/Kimono/app/(protected)/favorites/page.tsx`
+
+### Si l'objectif est createur / recherche
+
+1. `C:/Users/lilsm/Workspace/Kimono/Kimono/app/api/creator-posts/search/route.ts`
+2. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/hybrid-content.ts`
+3. `C:/Users/lilsm/Workspace/Kimono/Kimono/app/(protected)/creator/[site]/[service]/[id]/page.tsx`
+
+### Si l'objectif est bootstrap / prod / diagnostic
+
+1. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/server/startup.cjs`
+2. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/server/startup-db-maintenance.cjs`
+3. `C:/Users/lilsm/Workspace/Kimono/Kimono/lib/server-health.ts`
+4. `C:/Users/lilsm/Workspace/Kimono/Kimono/deploy/o2switch-init.sql`
+
+## 8. Nouveaux endpoints importants
+
+- `GET /api/creator-posts/search`
+- `GET /api/health`
+- `GET /api/media-source/[site]/[sourceFingerprint]`
+- `POST /api/media-source/warm`
+
+## 9. Tables / structures nouvelles ou fortement enrichies
+
+### Caches / perf
+
+- `MediaSourceCache`
+- `CreatorSearchCache`
+- enrichissements de `PreviewAssetCache`
+- enrichissements de `PostCache`
+
+### Data store local
+
+- chronologie des favoris
+- snapshots de favoris createurs / posts
+
+## 10. Etat d'avancement reel par chantier
+
+- `Media Platform V1` : tres avance, deja exploitable
+- lecture video locale Coomer : implementee et testee
+- recherche createur fidele + cache dedie : implementee et testee
+- favoris / likes plus fiables : bien avances et deja branches
+- resilience upstream / login : implementee
+- health page et diagnostics : implementes
+- purge startup reconstructible : implementee
+- admin panel `Clean DB` : pas commence
+- vrai `Client Media Coordinator` global : pas encore formalise en provider transverse
+- design system global : encore a faire
+- theme system : non commence
+
+## 11. Etat de validation local
+
+Derniere verification connue :
+
+- `npm test` : `227/227` OK
+- `npm run build` : OK
+
+## 12. Risques / points d'attention avant push
+
+- rien n'est encore committe ni pousse
+- le worktree contient beaucoup de changements transverses ; un decoupage en commits sera utile
+- `Roadmap.md` a ete enrichie mais son bloc `Etat de reference` n'est plus completement synchrone avec la realite actuelle
+- un artefact de test existe : `Kimono/tests/tmp/upstream-rate-guard-state.json`
+- il faudra verifier avant commit s'il doit etre garde, ignore ou supprime
+
+## 13. Tests importants ajoutes
+
+Les nouveaux tests donnent de bons indices sur le comportement attendu.
+
+Lire en priorite :
+
+- `Kimono/tests/media-platform.test.mjs`
+- `Kimono/tests/media-source-routes.test.mjs`
+- `Kimono/tests/video-streaming-hardening.test.mjs`
+- `Kimono/tests/creator-filtered-search.test.mjs`
+- `Kimono/tests/creator-search-cache.test.mjs`
+- `Kimono/tests/creator-search-route-ui.test.mjs`
+- `Kimono/tests/snapshot-reliability.test.mjs`
+- `Kimono/tests/startup-db-maintenance.test.mjs`
+- `Kimono/tests/server-health.test.mjs`
+- `Kimono/tests/rate-limit-hardening.test.mjs`
+
+## 14. Resume executif en une minute
+
+Si tu es Claude et que tu reprends ce projet sans historique :
+
+- le coeur du chantier recent est la transformation de Kimono en plateforme media serveur partagee
+- les videos Coomer peuvent maintenant etre servies localement par Kimono au lieu de dependre uniquement de l'upstream
+- la page createur n'utilise plus un snapshot local incomplet pour la recherche / les filtres media
+- les favoris et likes sont devenus plus fiables grace a une chronologie locale et des snapshots stale
+- l'upstream est mieux protege contre les `429` et mieux instrumente
+- le serveur expose maintenant des diagnostics de sante et purge ses caches reconstructibles au demarrage
+- tout cela est vert en tests/build mais n'est pas encore pousse sur GitHub

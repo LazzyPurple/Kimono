@@ -1,7 +1,9 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { createHybridContentService } from "@/lib/hybrid-content";
 import { logAppError } from "@/lib/app-logger";
+import { getPerformanceRepository } from "@/lib/perf-repository";
+import { hydratePostVideoSources } from "@/lib/post-video-sources";
 import { loadStoredKimonoSessionCookie } from "@/lib/remote-session";
 
 export const dynamic = "force-dynamic";
@@ -28,8 +30,13 @@ export async function GET(request: NextRequest) {
       postId: id,
       cookie: cookie ?? undefined,
     });
+    const repository = await getPerformanceRepository();
+    const post = {
+      ...result.post,
+      videoSources: await hydratePostVideoSources(result.post, repository),
+    };
 
-    return NextResponse.json(result.post, {
+    return NextResponse.json(post, {
       headers: {
         "x-kimono-source": result.source,
       },
@@ -47,4 +54,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Erreur serveur" }, { status: 500 });
   }
 }
-

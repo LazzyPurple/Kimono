@@ -6,6 +6,8 @@ import MediaCard from "@/components/MediaCard";
 import { Button } from "@/components/ui/button";
 import type { UnifiedPost } from "@/lib/api/helpers";
 import { resolveListingPostMedia } from "@/lib/api/helpers";
+import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
+import { BROWSER_POST_CACHE_TTL_MS } from "@/lib/perf-cache";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { buildAppPageTitle } from "@/lib/page-titles";
 
@@ -43,8 +45,17 @@ export default function HomePage() {
     }
 
     try {
-      const response = await fetch(`/api/recent-posts?offset=${currentOffset}`);
-      const data: UnifiedPost[] = await response.json();
+      const data = await fetchJsonWithBrowserCache<UnifiedPost[]>({
+        key: `recent-posts:${currentOffset}`,
+        ttlMs: BROWSER_POST_CACHE_TTL_MS,
+        loader: async () => {
+          const response = await fetch(`/api/recent-posts?offset=${currentOffset}`);
+          if (!response.ok) {
+            throw new Error("Failed to load recent posts.");
+          }
+          return response.json() as Promise<UnifiedPost[]>;
+        },
+      });
 
       if (currentOffset === 0) {
         setPosts(data);
@@ -66,6 +77,9 @@ export default function HomePage() {
     void fetchPosts(0);
   }, [fetchPosts]);
 
+  const showInitialSkeleton = loading && posts.length === 0;
+  const showRefreshingState = loading && posts.length > 0;
+
   return (
     <div className="space-y-6">
       <div className="space-y-1">
@@ -73,7 +87,7 @@ export default function HomePage() {
         <p className="text-sm text-[#6b7280]">The latest posts published on Kemono and Coomer.</p>
       </div>
 
-      {loading ? (
+      {showInitialSkeleton ? (
         <SkeletonGrid />
       ) : posts.length === 0 ? (
         <div className="rounded-xl border border-[#1e1e2e] bg-[#12121a] p-12 text-center">
@@ -81,6 +95,13 @@ export default function HomePage() {
         </div>
       ) : (
         <>
+          {showRefreshingState && (
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#12121a] px-3 py-1 text-xs text-[#6b7280]">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[#7c3aed]" />
+              Refreshing recent posts...
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
             {posts.map((post, index) => {
               const media = resolveListingPostMedia(post);
@@ -99,6 +120,9 @@ export default function HomePage() {
                   publishedAt={post.published}
                   priority={index < 4}
                   durationSeconds={media.durationSeconds}
+                  mediaWidth={media.width}
+                  mediaHeight={media.height}
+                  mediaMimeType={media.mimeType}
                   videoPreviewMode="hover"
                   videoCandidates={media.videoCandidates}
                 />
@@ -129,6 +153,4 @@ export default function HomePage() {
     </div>
   );
 }
-
-
 

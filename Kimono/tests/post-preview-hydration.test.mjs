@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   applyCachedPreviewFields,
   hydratePostsWithCachedPreviewAssets,
+  hydratePostsWithMediaPlatform,
 } from "../lib/post-preview-hydration.ts";
 
 function makePost(overrides = {}) {
@@ -121,4 +122,67 @@ test("hydratePostsWithCachedPreviewAssets enriches each post with matching cache
     "/api/preview-assets/popular/kemono/fingerprint-1/thumb.webp"
   );
   assert.equal(hydrated[1]?.previewThumbnailUrl, undefined);
+});
+
+test("hydratePostsWithMediaPlatform observes unseen media sources and schedules shared preview generation", async () => {
+  const previewWrites = [];
+  const scheduled = [];
+
+  const hydrated = await hydratePostsWithMediaPlatform(
+    [makePost()],
+    {
+      context: "recent-posts",
+      repository: {
+        getPostCache: async () => null,
+        getPreviewAssetCache: async () => null,
+        upsertPreviewAssetCache: async (input) => {
+          previewWrites.push(input);
+        },
+        touchPreviewAssetCache: async () => {},
+      },
+      schedulePreviewGeneration: async (input) => {
+        scheduled.push(input);
+      },
+      probeMediaSource: async () => null,
+    }
+  );
+
+  assert.equal(previewWrites.length, 1);
+  assert.equal(previewWrites[0]?.probeStatus, "pending");
+  assert.equal(previewWrites[0]?.artifactStatus, "pending");
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0]?.context, "recent-posts");
+  assert.equal(scheduled[0]?.post.id, "post-1");
+  assert.equal(hydrated[0]?.previewSourceFingerprint?.length, 24);
+  assert.equal(hydrated[0]?.mediaArtifactStatus, "pending");
+  assert.equal(hydrated[0]?.isMediaHot, true);
+});
+
+test("hydratePostsWithMediaPlatform can propagate a premium priority class to the shared preview scheduler", async () => {
+  const scheduled = [];
+
+  await hydratePostsWithMediaPlatform(
+    [makePost({
+      site: "coomer",
+      service: "fansly",
+      file: { name: "video.mp4", path: "/coomer/video.mp4" },
+    })],
+    {
+      context: "favorites-posts",
+      repository: {
+        getPostCache: async () => null,
+        getPreviewAssetCache: async () => null,
+        upsertPreviewAssetCache: async () => undefined,
+        touchPreviewAssetCache: async () => undefined,
+      },
+      schedulePreviewGeneration: async (input) => {
+        scheduled.push(input);
+      },
+      probeMediaSource: async () => null,
+      resolvePriorityClass: () => "liked",
+    }
+  );
+
+  assert.equal(scheduled.length, 1);
+  assert.equal(scheduled[0]?.priorityClass, "liked");
 });

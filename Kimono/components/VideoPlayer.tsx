@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
@@ -29,15 +30,40 @@ import {
   getVideoAreaAction,
 } from "@/lib/video-player-utils";
 
+interface VideoPlayerSource {
+  site: "kemono" | "coomer";
+  service: string;
+  creatorId: string;
+  postId: string;
+  path: string;
+  sourceFingerprint: string;
+  upstreamUrl: string;
+  localStreamUrl: string | null;
+  localSourceAvailable: boolean;
+  sourceCacheStatus: string | null;
+}
+
 interface VideoPlayerProps {
-  src: string;
+  source: VideoPlayerSource;
   poster?: string;
   filename?: string;
   className?: string;
 }
 
+interface WarmResponse {
+  path: string;
+  sourceFingerprint: string;
+  upstreamUrl: string;
+  localSourceAvailable: boolean;
+  sourceCacheStatus: string | null;
+  localStreamUrl: string | null;
+}
+
+const LOCAL_WARM_POLL_INTERVAL_MS = 1000;
+const LOCAL_WARM_TIMEOUT_MS = 12000;
+
 export default function VideoPlayer({
-  src,
+  source,
   poster,
   filename,
   className = "",
@@ -49,14 +75,38 @@ export default function VideoPlayer({
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wasPlayingRef = useRef(false);
+  const pendingResumeTimeRef = useRef<number | null>(null);
+  const pendingPlayAfterSwitchRef = useRef(false);
+  const warmPromiseRef = useRef<Promise<string> | null>(null);
+  const activeSourceUrlRef = useRef(source.localStreamUrl ?? source.upstreamUrl);
 
+  const [activeSourceUrl, setActiveSourceUrl] = useState(source.localStreamUrl ?? source.upstreamUrl);
+  const [localStreamUrl, setLocalStreamUrl] = useState(source.localStreamUrl);
+  const [localSourceAvailable, setLocalSourceAvailable] = useState(source.localSourceAvailable);
+  const [sourceCacheStatus, setSourceCacheStatus] = useState(source.sourceCacheStatus);
+  const [isWarmingLocal, setIsWarmingLocal] = useState(false);
+
+  useEffect(() => {
+    const nextSourceUrl = source.localStreamUrl ?? source.upstreamUrl;
+    activeSourceUrlRef.current = nextSourceUrl;
+    setActiveSourceUrl(nextSourceUrl);
+    setLocalStreamUrl(source.localStreamUrl);
+    setLocalSourceAvailable(source.localSourceAvailable);
+    setSourceCacheStatus(source.sourceCacheStatus);
+    setIsWarmingLocal(false);
+    warmPromiseRef.current = null;
+  }, [source.localSourceAvailable, source.localStreamUrl, source.sourceCacheStatus, source.upstreamUrl, source.sourceFingerprint]);
+
+  const turboInputUrl = activeSourceUrl === source.upstreamUrl ? source.upstreamUrl : undefined;
   const {
-    sourceUrl,
+    sourceUrl: turboSourceUrl,
     progress,
     isLoading: isTurboLoading,
     isFallback: isTurboFallback,
     playTurbo,
-  } = useTurboVideo(src, videoRef);
+  } = useTurboVideo(turboInputUrl, videoRef);
+
+  const renderedSourceUrl = turboInputUrl ? turboSourceUrl : activeSourceUrl;
 
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
@@ -74,6 +124,11 @@ export default function VideoPlayer({
   const [hoverX, setHoverX] = useState(0);
   const [videoDims, setVideoDims] = useState({ w: 16, h: 9 });
 
+  const canAttemptLocalWarm = useMemo(
+    () => source.site === "coomer" && Boolean(source.sourceFingerprint) && Boolean(source.path),
+    [source.path, source.site, source.sourceFingerprint]
+  );
+
   const resetHide = useCallback(() => {
     setShowControls(true);
     if (hideTimerRef.current) {
@@ -81,6 +136,111 @@ export default function VideoPlayer({
     }
     hideTimerRef.current = setTimeout(() => setShowControls(false), 3000);
   }, []);
+
+  const switchPlaybackSource = useCallback((nextUrl: string, resumePlayback: boolean) => {
+    const videoElement = videoRef.current;
+    pendingResumeTimeRef.current = videoElement && Number.isFinite(videoElement.currentTime)
+      ? videoElement.currentTime
+      : null;
+    pendingPlayAfterSwitchRef.current = resumePlayback;
+    activeSourceUrlRef.current = nextUrl;
+    setActiveSourceUrl(nextUrl);
+  }, []);
+
+  const applyWarmState = useCallback((payload: WarmResponse) => {
+    setLocalSourceAvailable(payload.localSourceAvailable);
+    setSourceCacheStatus(payload.sourceCacheStatus);
+    setLocalStreamUrl(payload.localStreamUrl);
+  }, []);
+
+  const requestWarmState = useCallback(async (): Promise<WarmResponse | null> => {
+    if (!canAttemptLocalWarm) {
+      return null;
+    }
+
+    const response = await fetch("/api/media-source/warm", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        site: source.site,
+        service: source.service,
+        creatorId: source.creatorId,
+        postId: source.postId,
+        path: source.path,
+        sourceFingerprint: source.sourceFingerprint,
+      }),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = await response.json() as WarmResponse;
+    applyWarmState(payload);
+    return payload;
+  }, [applyWarmState, canAttemptLocalWarm, source.creatorId, source.path, source.postId, source.service, source.site, source.sourceFingerprint]);
+
+  const ensurePlaybackSource = useCallback(async (resumePlayback: boolean): Promise<string> => {
+    if (localSourceAvailable && localStreamUrl) {
+      if (activeSourceUrlRef.current !== localStreamUrl) {
+        switchPlaybackSource(localStreamUrl, resumePlayback);
+      }
+      return localStreamUrl;
+    }
+
+    if (!canAttemptLocalWarm) {
+      activeSourceUrlRef.current = source.upstreamUrl;
+      setActiveSourceUrl(source.upstreamUrl);
+      return source.upstreamUrl;
+    }
+
+    if (warmPromiseRef.current) {
+      return warmPromiseRef.current;
+    }
+
+    const warmPromise = (async () => {
+      setIsWarmingLocal(true);
+      const immediate = await requestWarmState();
+      if (immediate?.localSourceAvailable && immediate.localStreamUrl) {
+        switchPlaybackSource(immediate.localStreamUrl, resumePlayback);
+        return immediate.localStreamUrl;
+      }
+
+      const startedAt = Date.now();
+      return await new Promise<string>((resolve) => {
+        const intervalId = setInterval(async () => {
+          if (Date.now() - startedAt >= LOCAL_WARM_TIMEOUT_MS) {
+            clearInterval(intervalId);
+            activeSourceUrlRef.current = source.upstreamUrl;
+            setActiveSourceUrl(source.upstreamUrl);
+            resolve(source.upstreamUrl);
+            return;
+          }
+
+          const nextState = await requestWarmState();
+          if (nextState?.localSourceAvailable && nextState.localStreamUrl) {
+            clearInterval(intervalId);
+            switchPlaybackSource(nextState.localStreamUrl, resumePlayback);
+            resolve(nextState.localStreamUrl);
+          }
+        }, LOCAL_WARM_POLL_INTERVAL_MS);
+      });
+    })()
+      .catch(() => {
+        activeSourceUrlRef.current = source.upstreamUrl;
+        setActiveSourceUrl(source.upstreamUrl);
+        return source.upstreamUrl;
+      })
+      .finally(() => {
+        setIsWarmingLocal(false);
+        warmPromiseRef.current = null;
+      });
+
+    warmPromiseRef.current = warmPromise;
+    return warmPromise;
+  }, [canAttemptLocalWarm, localSourceAvailable, localStreamUrl, requestWarmState, source.upstreamUrl, switchPlaybackSource]);
 
   useEffect(() => {
     return () => {
@@ -104,6 +264,15 @@ export default function VideoPlayer({
       syncDuration();
       if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
         setVideoDims({ w: videoElement.videoWidth, h: videoElement.videoHeight });
+      }
+      if (pendingResumeTimeRef.current != null) {
+        videoElement.currentTime = Math.min(pendingResumeTimeRef.current, getEffectiveDuration(videoElement));
+        pendingResumeTimeRef.current = null;
+      }
+      if (pendingPlayAfterSwitchRef.current) {
+        pendingPlayAfterSwitchRef.current = false;
+        const playPromise = videoElement.play();
+        playPromise?.catch(() => {});
       }
     };
 
@@ -139,26 +308,29 @@ export default function VideoPlayer({
       videoElement.removeEventListener("loadedmetadata", syncMetadata);
       videoElement.removeEventListener("volumechange", handleVolumeChange);
     };
-  }, [sourceUrl]);
+  }, [renderedSourceUrl]);
 
-  const togglePlay = useCallback(() => {
+  const togglePlay = useCallback(async () => {
     const videoElement = videoRef.current;
     if (!videoElement) {
       return;
     }
 
     if (videoElement.paused) {
-      if (!isTurboLoading && !isTurboFallback && sourceUrl === src) {
+      const nextUrl = await ensurePlaybackSource(true);
+      if (nextUrl === source.upstreamUrl && !isTurboLoading && !isTurboFallback && turboSourceUrl === source.upstreamUrl) {
         void playTurbo();
       }
-      const playPromise = videoElement.play();
-      playPromise?.catch(() => {});
+      if (activeSourceUrlRef.current === nextUrl) {
+        const playPromise = videoElement.play();
+        playPromise?.catch(() => {});
+      }
     } else {
       videoElement.pause();
     }
 
     resetHide();
-  }, [isTurboFallback, isTurboLoading, playTurbo, resetHide, sourceUrl, src]);
+  }, [ensurePlaybackSource, isTurboFallback, isTurboLoading, playTurbo, resetHide, source.upstreamUrl, turboSourceUrl]);
 
   const seekToPointer = useCallback((clientX: number) => {
     const videoElement = videoRef.current;
@@ -252,7 +424,7 @@ export default function VideoPlayer({
     switch (event.key.toLowerCase()) {
       case " ":
         event.preventDefault();
-        togglePlay();
+        void togglePlay();
         break;
       case "m":
         event.preventDefault();
@@ -310,14 +482,15 @@ export default function VideoPlayer({
 
   const handleDownload = useCallback(() => {
     const anchor = document.createElement("a");
-    anchor.href = src;
-    anchor.download = filename || src.split("/").pop() || "video";
+    const preferredUrl = localStreamUrl && localSourceAvailable ? localStreamUrl : activeSourceUrlRef.current;
+    anchor.href = preferredUrl || source.upstreamUrl;
+    anchor.download = filename || source.path.split("/").pop() || "video";
     anchor.target = "_blank";
     anchor.rel = "noopener";
     document.body.appendChild(anchor);
     anchor.click();
     setTimeout(() => anchor.remove(), 0);
-  }, [filename, src]);
+  }, [filename, localSourceAvailable, localStreamUrl, source.path, source.upstreamUrl]);
 
   const handleVideoAreaClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -351,7 +524,7 @@ export default function VideoPlayer({
 
       clickTimerRef.current = setTimeout(() => {
         clickTimerRef.current = null;
-        togglePlay();
+        void togglePlay();
       }, 220);
     },
     [togglePlay]
@@ -363,9 +536,9 @@ export default function VideoPlayer({
     effectiveVolume === 0 ? VolumeX : effectiveVolume < 0.5 ? Volume1 : Volume2;
 
   const fitLabel =
-    fit === "contain" ? "Zoom pour remplir" : "Adapter \u00e0 l'\u00e9cran";
+    fit === "contain" ? "Zoom to fill" : "Fit to screen";
   const fullscreenLabel =
-    vpFullscreen ? "Quitter le plein \u00e9cran" : "Plein \u00e9cran";
+    vpFullscreen ? "Exit fullscreen" : "Fullscreen";
 
   return (
     <>
@@ -380,7 +553,7 @@ export default function VideoPlayer({
           }}
         >
           <span className="select-none text-sm text-[#6b7280]">
-            {"Lecture en plein \u00e9cran..."}
+            {"Fullscreen playback..."}
           </span>
         </div>
       )}
@@ -410,7 +583,7 @@ export default function VideoPlayer({
         <div className="relative flex h-full w-full items-center justify-center bg-black">
           <video
             ref={videoRef}
-            src={sourceUrl}
+            src={renderedSourceUrl}
             poster={poster}
             playsInline
             className="absolute inset-0 h-full w-full"
@@ -422,7 +595,7 @@ export default function VideoPlayer({
             }}
           />
 
-          {(buffering || isTurboLoading) && (
+          {(buffering || isTurboLoading || isWarmingLocal) && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
               <Loader2 className="h-10 w-10 animate-spin text-white opacity-70" />
             </div>
@@ -499,13 +672,13 @@ export default function VideoPlayer({
 
               <div className="flex items-center gap-1">
                 <button
-                  aria-label={playing ? "Pause" : "Lecture"}
+                  aria-label={playing ? "Pause" : "Play"}
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
                   onClick={(event) => {
                     event.stopPropagation();
-                    togglePlay();
+                    void togglePlay();
                   }}
-                  title={playing ? "Pause" : "Lecture"}
+                  title={playing ? "Pause" : "Play"}
                 >
                   {playing ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                 </button>
@@ -514,11 +687,17 @@ export default function VideoPlayer({
                   {formatPlayerTime(currentTime)} / {formatPlayerTime(duration)}
                 </span>
 
+                {sourceCacheStatus && (
+                  <span className="rounded-full border border-white/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.14em] text-white/60">
+                    {sourceCacheStatus}
+                  </span>
+                )}
+
                 <div className="flex-1" />
 
                 <div className="group/vol flex items-center gap-1">
                   <button
-                    aria-label={effectiveVolume === 0 ? "Activer le son" : "Couper le son"}
+                    aria-label={effectiveVolume === 0 ? "Unmute" : "Mute"}
                     className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
                     onClick={(event) => {
                       event.stopPropagation();
@@ -529,7 +708,7 @@ export default function VideoPlayer({
                       videoElement.muted = !videoElement.muted;
                       setMuted(videoElement.muted);
                     }}
-                    title={effectiveVolume === 0 ? "Activer le son" : "Couper le son"}
+                    title={effectiveVolume === 0 ? "Unmute" : "Mute"}
                   >
                     <VolumeIcon className="h-4 w-4" />
                   </button>
@@ -556,9 +735,9 @@ export default function VideoPlayer({
                 </div>
 
                 <button
-                  aria-label="T\u00e9l\u00e9charger"
+                  aria-label="Download"
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
-                  title="T\u00e9l\u00e9charger"
+                  title="Download"
                   onClick={(event) => {
                     event.stopPropagation();
                     handleDownload();
@@ -584,9 +763,9 @@ export default function VideoPlayer({
                 </button>
 
                 <button
-                  aria-label="Pivoter"
+                  aria-label="Rotate"
                   className="rounded p-1.5 text-white transition-colors hover:text-[#a78bfa]"
-                  title="Pivoter"
+                  title="Rotate"
                   onClick={(event) => {
                     event.stopPropagation();
                     setRotation((currentRotation) => (currentRotation + 90) % 360);

@@ -9,6 +9,19 @@ import {
   type ReactNode,
 } from "react";
 import type { Site } from "@/lib/api/helpers";
+import {
+  deleteBrowserCacheValue,
+  fetchJsonWithBrowserCache,
+  getDefaultBrowserDataCache,
+} from "@/lib/browser-data-cache";
+import {
+  extractCreatorLikeItems,
+  extractPostLikeItems,
+  makeCreatorLikeKey,
+  makePostLikeKey,
+  type LikesCreatorsPayloadLike,
+  type LikesPostsPayloadLike,
+} from "@/lib/likes-context-utils";
 
 interface LikesContextType {
   likedCreators: Set<string>;
@@ -17,15 +30,26 @@ interface LikesContextType {
   toggleCreatorLike: (site: Site, service: string, id: string) => Promise<void>;
   togglePostLike: (site: Site, service: string, creatorId: string, id: string) => Promise<void>;
   isCreatorLiked: (site: Site, service: string, id: string) => boolean;
-  isPostLiked: (site: Site, service: string, id: string) => boolean;
+  isPostLiked: (site: Site, service: string, creatorId: string, id: string) => boolean;
   refreshLikes: () => Promise<void>;
   loading: boolean;
 }
 
 const LikesContext = createContext<LikesContextType | null>(null);
+const LIKES_CACHE_TTL_MS = 30_000;
 
-function makeKey(site: string, service: string, id: string) {
-  return `${site}-${service}-${id}`;
+function getCreatorLikesCacheKey(site: Site): string {
+  return `likes:creators:${site}`;
+}
+
+function getPostLikesCacheKey(site: Site): string {
+  return `likes:posts:${site}`;
+}
+
+function clearLikesCacheForSite(site: Site) {
+  const cache = getDefaultBrowserDataCache();
+  deleteBrowserCacheValue(cache, getCreatorLikesCacheKey(site));
+  deleteBrowserCacheValue(cache, getPostLikesCacheKey(site));
 }
 
 export function LikesProvider({ children }: { children: ReactNode }) {
@@ -38,10 +62,38 @@ export function LikesProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const [kCreators, cCreators, kPosts, cPosts] = await Promise.allSettled([
-        fetch("/api/likes/creators?site=kemono").then((r) => r.json()),
-        fetch("/api/likes/creators?site=coomer").then((r) => r.json()),
-        fetch("/api/likes/posts?site=kemono").then((r) => r.json()),
-        fetch("/api/likes/posts?site=coomer").then((r) => r.json()),
+        fetchJsonWithBrowserCache<LikesCreatorsPayloadLike>({
+          key: getCreatorLikesCacheKey("kemono"),
+          ttlMs: LIKES_CACHE_TTL_MS,
+          loader: async () => {
+            const response = await fetch("/api/kimono-favorites?site=kemono");
+            return response.json() as Promise<LikesCreatorsPayloadLike>;
+          },
+        }),
+        fetchJsonWithBrowserCache<LikesCreatorsPayloadLike>({
+          key: getCreatorLikesCacheKey("coomer"),
+          ttlMs: LIKES_CACHE_TTL_MS,
+          loader: async () => {
+            const response = await fetch("/api/kimono-favorites?site=coomer");
+            return response.json() as Promise<LikesCreatorsPayloadLike>;
+          },
+        }),
+        fetchJsonWithBrowserCache<LikesPostsPayloadLike>({
+          key: getPostLikesCacheKey("kemono"),
+          ttlMs: LIKES_CACHE_TTL_MS,
+          loader: async () => {
+            const response = await fetch("/api/likes/posts?site=kemono");
+            return response.json() as Promise<LikesPostsPayloadLike>;
+          },
+        }),
+        fetchJsonWithBrowserCache<LikesPostsPayloadLike>({
+          key: getPostLikesCacheKey("coomer"),
+          ttlMs: LIKES_CACHE_TTL_MS,
+          loader: async () => {
+            const response = await fetch("/api/likes/posts?site=coomer");
+            return response.json() as Promise<LikesPostsPayloadLike>;
+          },
+        }),
       ]);
 
       const creators = new Set<string>();
@@ -52,13 +104,24 @@ export function LikesProvider({ children }: { children: ReactNode }) {
         [kCreators, "kemono"],
         [cCreators, "coomer"],
       ] as const) {
-        if (result.status === "fulfilled" && Array.isArray(result.value)) {
-          let index = 0;
-          for (const c of result.value) {
-            const key = makeKey(site, c.service, c.id);
-            creators.add(key);
-            creatorsOrder.set(key, index++);
+        if (result.status !== "fulfilled") {
+          continue;
+        }
+
+        const payload = result.value;
+        const items = extractCreatorLikeItems(payload);
+        if (payload?.expired && items.length === 0) {
+          continue;
+        }
+
+        for (const creator of items) {
+          if (!creator?.id || !creator?.service) {
+            continue;
           }
+
+          const key = makeCreatorLikeKey(site, String(creator.service), String(creator.id));
+          creators.add(key);
+          creatorsOrder.set(key, creator.favoriteSourceIndex ?? creatorsOrder.size);
         }
       }
 
@@ -66,10 +129,23 @@ export function LikesProvider({ children }: { children: ReactNode }) {
         [kPosts, "kemono"],
         [cPosts, "coomer"],
       ] as const) {
-        if (result.status === "fulfilled" && Array.isArray(result.value)) {
-          for (const p of result.value) {
-            posts.add(makeKey(site, p.service, p.id));
+        if (result.status !== "fulfilled") {
+          continue;
+        }
+
+        const payload = result.value;
+        const items = extractPostLikeItems(payload);
+        if (payload?.expired && items.length === 0) {
+          continue;
+        }
+
+        for (const post of items) {
+          if (!post?.id || !post?.service) {
+            continue;
           }
+
+          const creatorId = String(post.user ?? post.creatorId ?? "");
+          posts.add(makePostLikeKey(site, String(post.service), creatorId, String(post.id)));
         }
       }
 
@@ -84,15 +160,15 @@ export function LikesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    fetchLikes();
+    void fetchLikes();
   }, [fetchLikes]);
 
   const toggleCreatorLike = useCallback(
     async (site: Site, service: string, id: string) => {
-      const key = makeKey(site, service, id);
+      const key = makeCreatorLikeKey(site, service, id);
       const wasLiked = likedCreators.has(key);
+      const previousOrder = likedCreatorsOrder.get(key);
 
-      // Optimistic update
       setLikedCreators((prev) => {
         const next = new Set(prev);
         if (wasLiked) next.delete(key);
@@ -102,7 +178,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
       setLikedCreatorsOrder((prev) => {
         const next = new Map(prev);
         if (wasLiked) next.delete(key);
-        else next.set(key, -1); // -1 makes it the absolute newest favorite
+        else next.set(key, -1);
         return next;
       });
 
@@ -114,8 +190,8 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ site, service, creatorId: id }),
         });
         if (!res.ok) throw new Error("API error");
+        clearLikesCacheForSite(site);
       } catch {
-        // Rollback
         setLikedCreators((prev) => {
           const next = new Set(prev);
           if (wasLiked) next.add(key);
@@ -123,23 +199,28 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           return next;
         });
         setLikedCreatorsOrder((prev) => {
-           // We can't perfectly restore its original index if it was deleted, but reloading will fix it.
-           const next = new Map(prev);
-           if (wasLiked) next.set(key, 0);
-           else next.delete(key);
-           return next;
+          const next = new Map(prev);
+          if (wasLiked) {
+            if (previousOrder != null) {
+              next.set(key, previousOrder);
+            } else {
+              next.delete(key);
+            }
+          } else {
+            next.delete(key);
+          }
+          return next;
         });
       }
     },
-    [likedCreators]
+    [likedCreators, likedCreatorsOrder]
   );
 
   const togglePostLike = useCallback(
     async (site: Site, service: string, creatorId: string, id: string) => {
-      const key = makeKey(site, service, id);
+      const key = makePostLikeKey(site, service, creatorId, id);
       const wasLiked = likedPosts.has(key);
 
-      // Optimistic update
       setLikedPosts((prev) => {
         const next = new Set(prev);
         if (wasLiked) next.delete(key);
@@ -155,8 +236,8 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ site, service, creatorId, postId: id }),
         });
         if (!res.ok) throw new Error("API error");
+        clearLikesCacheForSite(site);
       } catch {
-        // Rollback
         setLikedPosts((prev) => {
           const next = new Set(prev);
           if (wasLiked) next.add(key);
@@ -170,13 +251,13 @@ export function LikesProvider({ children }: { children: ReactNode }) {
 
   const isCreatorLiked = useCallback(
     (site: Site, service: string, id: string) =>
-      likedCreators.has(makeKey(site, service, id)),
+      likedCreators.has(makeCreatorLikeKey(site, service, id)),
     [likedCreators]
   );
 
   const isPostLiked = useCallback(
-    (site: Site, service: string, id: string) =>
-      likedPosts.has(makeKey(site, service, id)),
+    (site: Site, service: string, creatorId: string, id: string) =>
+      likedPosts.has(makePostLikeKey(site, service, creatorId, id)),
     [likedPosts]
   );
 

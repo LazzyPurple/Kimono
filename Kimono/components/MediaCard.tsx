@@ -30,12 +30,58 @@ interface MediaCardProps {
   durationSeconds?: number | null;
   videoPreviewMode?: "hover" | "viewport";
   priority?: boolean;
+  mediaWidth?: number | null;
+  mediaHeight?: number | null;
+  mediaMimeType?: string | null;
 }
 
 const videoDurationCache = new Map<string, number | null>();
+const DURATION_PROBE_LIMIT = 2;
+const durationProbeQueue: Array<() => void> = [];
+let durationProbeActiveCount = 0;
+
+function isDocumentVisible(): boolean {
+  if (typeof document === "undefined") {
+    return true;
+  }
+
+  return document.visibilityState !== "hidden";
+}
+
+function runDurationProbeQueue(): void {
+  while (durationProbeActiveCount < DURATION_PROBE_LIMIT && durationProbeQueue.length > 0) {
+    const next = durationProbeQueue.shift();
+    if (!next) {
+      return;
+    }
+
+    durationProbeActiveCount += 1;
+    next();
+  }
+}
+
+function withDurationProbeSlot<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    durationProbeQueue.push(() => {
+      void task()
+        .then(resolve, reject)
+        .finally(() => {
+          durationProbeActiveCount = Math.max(0, durationProbeActiveCount - 1);
+          runDurationProbeQueue();
+        });
+    });
+
+    runDurationProbeQueue();
+  });
+}
 
 function readVideoDuration(url: string): Promise<number | null> {
-  return new Promise((resolve) => {
+  return withDurationProbeSlot(() => new Promise((resolve) => {
+    if (!isDocumentVisible()) {
+      resolve(null);
+      return;
+    }
+
     const video = document.createElement("video");
     let settled = false;
 
@@ -64,7 +110,7 @@ function readVideoDuration(url: string): Promise<number | null> {
       finalize(null);
     };
     video.src = url;
-  });
+  }));
 }
 
 function formatPublishedDate(publishedAt?: string | number): string | null {
@@ -94,6 +140,9 @@ export default function MediaCard({
   durationSeconds = null,
   videoPreviewMode = "hover",
   priority = false,
+  mediaWidth = null,
+  mediaHeight = null,
+  mediaMimeType = null,
 }: MediaCardProps) {
   const [hovered, setHovered] = useState(false);
   const [hasHovered, setHasHovered] = useState(false);
@@ -109,12 +158,22 @@ export default function MediaCard({
   const previewCacheRef = useRef(getDefaultVideoPreviewCache());
 
   const { isPostLiked, togglePostLike } = useLikes();
-  const liked = isPostLiked(site, service, postId);
+  const liked = isPostLiked(site, service, user, postId);
   const showImage = Boolean(previewImageUrl) && !imgError;
   const publishedLabel = formatPublishedDate(publishedAt);
   const resolvedVideoCandidates = Array.from(
     new Set((videoCandidates?.length ? videoCandidates : videoUrl ? [videoUrl] : []).filter(Boolean))
   ) as string[];
+  const resolutionLabel = mediaWidth != null && mediaHeight != null
+    ? `${mediaWidth}x${mediaHeight}`
+    : null;
+  const skeletonToneClass = resolutionLabel
+    ? mediaHeight != null && mediaWidth != null && mediaHeight > mediaWidth
+      ? "from-pink-500/20 via-[#24142b] to-[#0a0a0f]"
+      : mediaHeight != null && mediaWidth != null && mediaWidth > mediaHeight
+        ? "from-sky-500/20 via-[#101827] to-[#0a0a0f]"
+        : "from-violet-500/20 via-[#1a1630] to-[#0a0a0f]"
+    : "from-white/10 via-[#1e1e2e]/90 to-[#0a0a0f]";
 
   useEffect(() => {
     if (type !== "video" || resolvedVideoCandidates.length === 0) {
@@ -123,10 +182,9 @@ export default function MediaCard({
       return;
     }
 
-    // P4: If server already provides duration, skip all client-side discovery
     if (durationSeconds != null) {
       setDurationLabel(formatVideoDurationLabel(durationSeconds));
-      const canWarmInBackground = videoPreviewMode === "viewport" || !showImage;
+      const canWarmInBackground = (videoPreviewMode === "viewport" || !showImage) && isDocumentVisible();
       if (canWarmInBackground) {
         setShouldWarmVideo(true);
       }
@@ -157,7 +215,7 @@ export default function MediaCard({
 
     setDurationLabel(formatVideoDurationLabel(pickLongestVideoDuration(cachedDurations)));
 
-    const canWarmInBackground = videoPreviewMode === "viewport" || !showImage;
+    const canWarmInBackground = (videoPreviewMode === "viewport" || !showImage) && isDocumentVisible();
 
     if (hasCachedWarmPreview && canWarmInBackground) {
       setShouldWarmVideo(true);
@@ -170,7 +228,7 @@ export default function MediaCard({
     }
 
     const warmSoon = () => {
-      if (!cancelled) {
+      if (!cancelled && isDocumentVisible()) {
         setShouldWarmVideo(true);
       }
     };
@@ -201,6 +259,10 @@ export default function MediaCard({
 
     const observer = new IntersectionObserver(
       (entries) => {
+        if (!isDocumentVisible()) {
+          return;
+        }
+
         if (entries.some((entry) => entry.isIntersecting)) {
           setShouldWarmVideo(true);
           observer.disconnect();
@@ -279,7 +341,6 @@ export default function MediaCard({
       return;
     }
 
-    // P4: If server already provides duration, just display it - no client-side probing
     if (durationSeconds != null) {
       setDurationLabel(formatVideoDurationLabel(durationSeconds));
       return;
@@ -290,7 +351,7 @@ export default function MediaCard({
     );
     setDurationLabel(formatVideoDurationLabel(longestKnownDuration));
 
-    if (resolvedVideoCandidates.length === 0 || !(shouldWarmVideo || shouldMountVideo || hovered)) {
+    if (!isDocumentVisible() || resolvedVideoCandidates.length === 0 || !(shouldWarmVideo || shouldMountVideo || hovered)) {
       return;
     }
 
@@ -350,9 +411,10 @@ export default function MediaCard({
   }, [durationSeconds, videoUrl]);
 
   const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
-  // P5: Server clips are small (~3s, 640px) - always preload them fully for instant hover
+  const showVideoSkeleton = type === "video" && !showImage && !shouldMountVideo;
   const hasServerClip = Boolean(videoCandidates?.some((url) => url.startsWith("/api/preview-assets/")));
-  const videoPreload = hasServerClip ? "auto" : shouldWarmVideo ? ((videoPreviewMode === "viewport" || !showImage) ? "auto" : "metadata") : (videoPreviewMode === "viewport" || !showImage ? "metadata" : "none");
+  const wantsMetadata = shouldWarmVideo || videoPreviewMode === "viewport" || !showImage || hasServerClip;
+  const videoPreload = shouldShowVideo ? "auto" : wantsMetadata ? "metadata" : "none";
 
   return (
     <a
@@ -382,6 +444,18 @@ export default function MediaCard({
                   hovered ? "scale-105 opacity-0" : "opacity-100 group-hover:scale-105"
                 }`}
               />
+            ) : showVideoSkeleton ? (
+              <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br ${skeletonToneClass} animate-pulse`} aria-hidden="true">
+                <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/10 to-transparent" />
+                <div className="absolute left-4 top-4 inline-flex min-h-6 items-center rounded-full border border-white/10 bg-black/25 px-2 text-[10px] font-medium uppercase tracking-[0.18em] text-white/70 backdrop-blur-sm">
+                  VIDEO
+                </div>
+                <div className="absolute right-4 top-4 inline-flex min-h-6 items-center rounded-full border border-white/10 bg-black/25 px-2 text-[10px] font-medium text-white/70 backdrop-blur-sm">
+                  {resolutionLabel ?? "Preparing"}
+                </div>
+                <div className="absolute left-4 bottom-10 h-3 w-28 rounded-full bg-white/10" />
+                <div className="absolute left-4 bottom-4 h-3 w-20 rounded-full bg-white/10" />
+              </div>
             ) : !shouldMountVideo ? (
               <Film className="absolute z-0 h-12 w-12 text-[#6b7280]" />
             ) : null}
@@ -477,20 +551,8 @@ export default function MediaCard({
             {service}
           </Badge>
           {publishedLabel && <span className="rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1">{publishedLabel}</span>}
-          {type === "video" && resolvedVideoCandidates.length > 1 && (
-            <span className="rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1">
-              {resolvedVideoCandidates.length} videos
-            </span>
-          )}
         </div>
       </div>
     </a>
   );
 }
-
-
-
-
-
-
-

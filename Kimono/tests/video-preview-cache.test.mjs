@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   VIDEO_PREVIEW_CACHE_TTL_MS,
   createVideoPreviewCache,
+  getDefaultVideoPreviewCache,
   hasWarmVideoPreview,
   readVideoPreviewState,
   writeVideoPreviewState,
@@ -59,4 +60,10 @@ test("video preview cache expires stale warm entries", () => {
   const expiredAt = new Date(now.getTime() + 5000);
   assert.equal(readVideoPreviewState(cache, "https://cdn.example/video.mp4", expiredAt), null);
   assert.equal(hasWarmVideoPreview(cache, "https://cdn.example/video.mp4", expiredAt), false);
+});
+
+
+test("default video preview cache stays client-ephemeral and avoids localStorage", () => {
+  const cache = getDefaultVideoPreviewCache();
+  assert.equal(cache.storage, null);
 });

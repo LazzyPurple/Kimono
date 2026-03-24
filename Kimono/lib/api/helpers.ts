@@ -1,6 +1,15 @@
-import type { Creator, Post } from "./kemono";
+import type { Creator, Post } from "./kemono.ts";
 
 export type Site = "kemono" | "coomer";
+
+export interface PostVideoSource {
+  path: string;
+  sourceFingerprint: string;
+  upstreamUrl: string;
+  localSourceAvailable: boolean;
+  sourceCacheStatus: string | null;
+  localStreamUrl: string | null;
+}
 
 export interface UnifiedPost extends Post {
   site: Site;
@@ -12,12 +21,26 @@ export interface UnifiedPost extends Post {
   previewGeneratedAt?: string | null;
   previewError?: string | null;
   previewSourceFingerprint?: string | null;
+  mediaKind?: "image" | "video" | "unknown" | null;
+  mediaProbeStatus?: string | null;
+  mediaArtifactStatus?: string | null;
+  nativeThumbnailUrl?: string | null;
+  mediaMimeType?: string | null;
+  mediaWidth?: number | null;
+  mediaHeight?: number | null;
+  isMediaHot?: boolean | null;
+  localSourceAvailable?: boolean | null;
+  sourceCacheStatus?: string | null;
+  sourceRetentionUntil?: string | null;
+  priorityClass?: "regular" | "popular" | "liked" | "playback" | null;
+  videoSources?: PostVideoSource[];
 }
 
-export interface UnifiedCreator extends Omit<Creator, "indexed" | "updated"> {
+export interface UnifiedCreator extends Omit<Creator, "indexed" | "updated" | "favorited"> {
   site: Site;
   indexed?: string;
   updated?: string;
+  favorited?: number | null;
 }
 
 const SITE_BASE_URLS = {
@@ -44,6 +67,9 @@ export interface ResolvedListingPostMedia extends ResolvedPostMedia {
   durationSeconds: number | null;
   previewStatus: string | null;
   usesServerPreview: boolean;
+  mimeType: string | null;
+  width: number | null;
+  height: number | null;
 }
 
 function toDataUrl(site: Site, path?: string): string | undefined {
@@ -119,15 +145,19 @@ export function getPostVideoUrl(post: UnifiedPost): string | undefined {
   return resolvePostMedia(post).videoUrl;
 }
 
-export function getPostVideoUrls(post: UnifiedPost): string[] {
+export function getPostVideoEntries(post: UnifiedPost): Array<{ path: string; url: string }> {
   const paths = [
     post.file?.path,
     ...(post.attachments?.map((attachment) => attachment.path) ?? []),
   ].filter((path): path is string => Boolean(path) && isVideo(path));
 
   return paths
-    .map((path) => toDataUrl(post.site, path))
-    .filter((path): path is string => Boolean(path));
+    .map((path) => ({ path, url: toDataUrl(post.site, path) }))
+    .filter((entry): entry is { path: string; url: string } => Boolean(entry.url));
+}
+
+export function getPostVideoUrls(post: UnifiedPost): string[] {
+  return getPostVideoEntries(post).map((entry) => entry.url);
 }
 
 export function resolveListingPostMedia(post: UnifiedPost): ResolvedListingPostMedia {
@@ -135,16 +165,27 @@ export function resolveListingPostMedia(post: UnifiedPost): ResolvedListingPostM
   const usesServerPreview = Boolean(
     post.previewThumbnailUrl || post.previewClipUrl || post.longestVideoDurationSeconds != null
   );
-  const videoUrl = post.previewClipUrl ?? media.videoUrl;
+  const isThumbnailOnlyServerPreview = post.previewStatus === "thumbnail-ready"
+    && Boolean(post.previewThumbnailUrl)
+    && !post.previewClipUrl;
+  const videoUrl = isThumbnailOnlyServerPreview ? undefined : post.previewClipUrl ?? media.videoUrl;
+  const videoCandidates = post.previewClipUrl
+    ? [post.previewClipUrl]
+    : isThumbnailOnlyServerPreview
+      ? []
+      : getPostVideoUrls(post);
 
   return {
-    type: videoUrl ? "video" : media.type,
-    previewImageUrl: post.previewThumbnailUrl ?? media.previewImageUrl,
+    type: media.type === "video" || videoUrl ? "video" : media.type,
+    previewImageUrl: post.previewThumbnailUrl ?? post.nativeThumbnailUrl ?? media.previewImageUrl,
     videoUrl,
-    videoCandidates: post.previewClipUrl ? [post.previewClipUrl] : getPostVideoUrls(post),
+    videoCandidates,
     durationSeconds: post.longestVideoDurationSeconds ?? null,
     previewStatus: post.previewStatus ?? null,
     usesServerPreview,
+    mimeType: post.mediaMimeType ?? null,
+    width: post.mediaWidth ?? null,
+    height: post.mediaHeight ?? null,
   };
 }
 
@@ -175,4 +216,3 @@ export function deduplicateCreators(creators: UnifiedCreator[]): UnifiedCreator[
     return true;
   });
 }
-

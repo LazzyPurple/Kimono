@@ -13,6 +13,8 @@ import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { buildAppPageTitle } from "@/lib/page-titles";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Site } from "@/lib/api/helpers";
+import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
+import { BROWSER_POST_CACHE_TTL_MS } from "@/lib/perf-cache";
 
 interface DiscoveryCreator {
   id: string;
@@ -33,7 +35,8 @@ function DiscoverPageContent() {
   const qParam = searchParams.get("q") ?? "";
   const sortParam = (searchParams.get("sort") as "score" | "az") ?? "score";
   const serviceParam = searchParams.get("service") ?? "Tous";
-  const pageParam = Number(searchParams.get("page") ?? "1");
+  const rawPageParam = Number(searchParams.get("page") ?? "1");
+  const pageParam = Number.isFinite(rawPageParam) && rawPageParam > 0 ? Math.trunc(rawPageParam) : 1;
 
   const [creators, setCreators] = useState<DiscoveryCreator[]>([]);
   const [loading, setLoading] = useState(true);
@@ -115,11 +118,20 @@ function DiscoverPageContent() {
   async function fetchResults() {
     try {
       setLoading(true);
-      const response = await fetch("/api/discover/results");
-      const data = await response.json();
+      const data = await fetchJsonWithBrowserCache<{ creators?: DiscoveryCreator[]; updatedAt?: string | null }>({
+        key: "discover-results",
+        ttlMs: BROWSER_POST_CACHE_TTL_MS,
+        loader: async () => {
+          const response = await fetch("/api/discover/results");
+          if (!response.ok) {
+            throw new Error("Failed to load discover results.");
+          }
+          return response.json() as Promise<{ creators?: DiscoveryCreator[]; updatedAt?: string | null }>;
+        },
+      });
       if (data.creators) {
         setCreators(data.creators);
-        setUpdatedAt(data.updatedAt);
+        setUpdatedAt(data.updatedAt ?? null);
       }
     } catch (error) {
       console.error("Error fetching discover results:", error);
@@ -202,6 +214,9 @@ function DiscoverPageContent() {
     return filteredAndSorted.slice(startIndex, startIndex + 50);
   }, [filteredAndSorted, pageParam]);
 
+  const showInitialSkeleton = loading && creators.length === 0;
+  const showRefreshingState = loading && creators.length > 0;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -231,7 +246,7 @@ function DiscoverPageContent() {
         </Button>
       </div>
 
-      {loading ? (
+      {showInitialSkeleton ? (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {Array.from({ length: 12 }).map((_, index) => (
             <div key={index} className="aspect-[4/5] animate-pulse rounded-xl bg-[#1e1e2e]" />
@@ -249,6 +264,12 @@ function DiscoverPageContent() {
         </div>
       ) : (
         <div className="space-y-6">
+          {showRefreshingState && (
+            <div className="inline-flex items-center gap-2 rounded-full border border-[#1e1e2e] bg-[#12121a] px-3 py-1 text-xs text-[#6b7280]">
+              <Loader2 className="h-3.5 w-3.5 animate-spin text-[#7c3aed]" />
+              Refreshing recommendations...
+            </div>
+          )}
           <div className="flex flex-col gap-4 lg:flex-row">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#6b7280]" />
@@ -356,3 +377,4 @@ export default function DiscoverPage() {
     </Suspense>
   );
 }
+

@@ -9,7 +9,7 @@ import VideoPlayer from "@/components/VideoPlayer";
 import Lightbox from "@/components/Lightbox";
 import { useLikes } from "@/contexts/LikesContext";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { proxyCdnUrl, resolvePostMedia, type Site, type UnifiedPost } from "@/lib/api/helpers";
+import { proxyCdnUrl, resolvePostMedia, type PostVideoSource, type Site, type UnifiedPost } from "@/lib/api/helpers";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
 import { BROWSER_POST_CACHE_TTL_MS, buildCreatorProfileCacheKey, buildPostCacheKey } from "@/lib/perf-cache";
 import { buildPostPageTitle } from "@/lib/page-titles";
@@ -130,7 +130,7 @@ export default function PostPage() {
     );
   }
 
-  const liked = isPostLiked(site, service, id);
+  const liked = isPostLiked(site, service, user, id);
   const postMedia = resolvePostMedia(post);
 
   const allMedia = [...(post.file?.path ? [post.file] : []), ...(post.attachments || [])].filter(Boolean);
@@ -149,6 +149,7 @@ export default function PostPage() {
   });
 
   const imageUrls = images.map((media) => ({ src: makeUrl(media.path), alt: media.name || media.path }));
+  const videoSourceByPath = new Map<string, PostVideoSource>((post.videoSources ?? []).map((entry) => [entry.path, entry]));
 
   function renderDescription(content: string) {
     const hasHtml = /<[a-z]/i.test(content);
@@ -230,15 +231,31 @@ export default function PostPage() {
 
       {videos.length > 0 && (
         <div className="flex flex-col gap-4">
-          {videos.map((media, index) => (
-            <VideoPlayer
-              key={`vid-${index}`}
-              src={makeUrl(media.path)}
-              poster={postMedia?.previewImageUrl}
-              filename={media.name || media.path}
-              className="w-full"
-            />
-          ))}
+          {videos.map((media, index) => {
+            const mappedSource = videoSourceByPath.get(media.path);
+            const fallbackUpstreamUrl = makeUrl(media.path);
+
+            return (
+              <VideoPlayer
+                key={`vid-${index}`}
+                source={{
+                  site,
+                  service,
+                  creatorId: user,
+                  postId: id,
+                  path: media.path,
+                  sourceFingerprint: mappedSource?.sourceFingerprint ?? "",
+                  upstreamUrl: mappedSource?.upstreamUrl ?? fallbackUpstreamUrl,
+                  localStreamUrl: mappedSource?.localStreamUrl ?? null,
+                  localSourceAvailable: mappedSource?.localSourceAvailable ?? false,
+                  sourceCacheStatus: mappedSource?.sourceCacheStatus ?? null,
+                }}
+                poster={postMedia?.previewImageUrl}
+                filename={media.name || media.path}
+                className="w-full"
+              />
+            );
+          })}
         </div>
       )}
 
@@ -298,4 +315,3 @@ export default function PostPage() {
     </div>
   );
 }
-

@@ -1,6 +1,6 @@
 ﻿import axios from "axios";
 
-import type { Creator, Post } from "./kemono";
+import type { Creator, Post } from "./kemono.ts";
 import type { PopularPeriod } from "../perf-cache.ts";
 
 export const SITE_BASE_URLS = {
