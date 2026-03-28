@@ -1,7 +1,8 @@
-import axios, { AxiosError, type AxiosInstance } from "axios";
+﻿import axios, { AxiosError, type AxiosInstance } from "axios";
 import type { Creator, Post } from "./kemono.ts";
 
-import { getCachedCreators, setCachedCreators } from "@/lib/api/creators-cache";
+import { getCachedCreators, setCachedCreators } from "@/lib/api/creator-catalog-cache";
+import { createUpstreamBrowserHeaders } from "@/lib/api/upstream-browser-headers";
 import {
   createRateLimitError,
   getGlobalUpstreamRateGuard,
@@ -10,9 +11,7 @@ import {
 
 const client: AxiosInstance = axios.create({
   baseURL: "https://coomer.st/api",
-  headers: {
-    Accept: "text/css",
-  },
+  headers: createUpstreamBrowserHeaders("coomer"),
   timeout: 15000,
 });
 
@@ -70,7 +69,7 @@ export async function fetchCreatorPosts(
 
   const { data } = await client.get<Post[]>(`/v1/${service}/user/${creatorId}/posts`, {
     params,
-    ...(cookie ? { headers: { Cookie: cookie } } : {}),
+    ...(cookie ? { headers: createUpstreamBrowserHeaders("coomer", cookie) } : {}),
   });
   return data;
 }
@@ -127,7 +126,7 @@ export async function fetchRecentPosts(offset: number = 0): Promise<Post[]> {
 
 export async function fetchFavorites(cookie: string): Promise<Creator[]> {
   const { data } = await client.get<Creator[]>("/v1/account/favorites", {
-    headers: { Accept: "text/css", Cookie: cookie },
+    headers: createUpstreamBrowserHeaders("coomer", cookie),
     params: { type: "artist" },
   });
   return data;
@@ -135,7 +134,7 @@ export async function fetchFavorites(cookie: string): Promise<Creator[]> {
 
 export async function fetchFavoritePosts(cookie: string): Promise<Post[]> {
   const { data } = await client.get<Post[]>("/v1/account/favorites", {
-    headers: { Accept: "text/css", Cookie: cookie },
+    headers: createUpstreamBrowserHeaders("coomer", cookie),
     params: { type: "post" },
   });
   return data;

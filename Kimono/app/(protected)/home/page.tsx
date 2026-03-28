@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import type { UnifiedPost } from "@/lib/api/helpers";
 import { resolveListingPostMedia } from "@/lib/api/helpers";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
-import { BROWSER_POST_CACHE_TTL_MS } from "@/lib/perf-cache";
+import { BROWSER_POST_CACHE_TTL_MS } from "@/lib/db/performance-cache";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { buildAppPageTitle } from "@/lib/page-titles";
 
@@ -49,7 +49,7 @@ export default function HomePage() {
         key: `recent-posts:${currentOffset}`,
         ttlMs: BROWSER_POST_CACHE_TTL_MS,
         loader: async () => {
-          const response = await fetch(`/api/recent-posts?offset=${currentOffset}`);
+          const response = await fetch(`/api/posts/recent?offset=${currentOffset}`);
           if (!response.ok) {
             throw new Error("Failed to load recent posts.");
           }
@@ -123,7 +123,7 @@ export default function HomePage() {
                   mediaWidth={media.width}
                   mediaHeight={media.height}
                   mediaMimeType={media.mimeType}
-                  videoPreviewMode="hover"
+                  videoPreviewMode="viewport"
                   videoCandidates={media.videoCandidates}
                 />
               );
@@ -153,4 +153,6 @@ export default function HomePage() {
     </div>
   );
 }
+
+
 

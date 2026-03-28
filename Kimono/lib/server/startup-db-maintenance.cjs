@@ -5,8 +5,6 @@ const DEFAULT_PREVIEW_ASSET_DIR = path.join("tmp", "preview-assets");
 const DEFAULT_MEDIA_SOURCE_CACHE_DIR = path.join("tmp", "media-source-cache");
 
 const REBUILDABLE_DB_TABLES = [
-  "CreatorsCache",
-  "CreatorIndex",
   "CreatorSnapshot",
   "DiscoveryCache",
   "DiscoveryBlock",
@@ -24,6 +22,8 @@ const PRESERVED_DB_TABLES = [
   "KimonoSession",
   "FavoriteChronology",
   "FavoriteSnapshot",
+  "CreatorsCache",
+  "CreatorIndex",
 ];
 
 function parseDatabaseDriver(databaseUrl) {

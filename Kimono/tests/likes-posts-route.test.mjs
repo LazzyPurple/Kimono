@@ -75,7 +75,7 @@ test("likes posts payload returns enriched favorite posts with chronology and cr
     fetchFavoritePosts: async () => [makeFavoritePost()],
     hydratePosts: async (posts) => posts.map((post) => ({
       ...post,
-      previewThumbnailUrl: "/api/preview-assets/popular/kemono/fingerprint/thumb.webp",
+      previewThumbnailUrl: "/api/media/preview/popular/kemono/fingerprint/thumb.webp",
     })),
     listFavoriteChronology: async () => [{
       kind: "post",
@@ -97,5 +97,5 @@ test("likes posts payload returns enriched favorite posts with chronology and cr
   assert.equal(payload.items[0].creatorName, "Maple");
   assert.equal(payload.items[0].favoriteAddedAt, "2026-03-19T11:00:00.000Z");
   assert.equal(payload.items[0].favoriteSourceIndex, 0);
-  assert.equal(payload.items[0].previewThumbnailUrl, "/api/preview-assets/popular/kemono/fingerprint/thumb.webp");
+  assert.equal(payload.items[0].previewThumbnailUrl, "/api/media/preview/popular/kemono/fingerprint/thumb.webp");
 });

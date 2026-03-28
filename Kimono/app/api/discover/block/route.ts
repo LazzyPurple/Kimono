@@ -1,5 +1,5 @@
 import { NextResponse, NextRequest } from "next/server";
-import { getDataStore, type SupportedSite } from "@/lib/data-store";
+import { getDataStore, type SupportedSite } from "@/lib/db/index";
 
 export const dynamic = "force-dynamic";
 
@@ -42,3 +42,4 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Erreur lors de l'annulation du blocage" }, { status: 500 });
   }
 }
+

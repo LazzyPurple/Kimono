@@ -83,8 +83,8 @@ test("resolvePostMedia keeps text posts without preview urls", () => {
 test("resolveListingPostMedia prefers server preview assets when available", () => {
   const media = resolveListingPostMedia(
     makePost({
-      previewThumbnailUrl: "/api/preview-assets/popular/kemono/fingerprint-1/thumb.webp",
-      previewClipUrl: "/api/preview-assets/popular/kemono/fingerprint-1/clip.mp4",
+      previewThumbnailUrl: "/api/media/preview/popular/kemono/fingerprint-1/thumb.webp",
+      previewClipUrl: "/api/media/preview/popular/kemono/fingerprint-1/clip.mp4",
       longestVideoDurationSeconds: 95,
       file: { name: "video.mp4", path: "/abc/video.mp4" },
       attachments: [{ name: "alt-video.mp4", path: "/abc/alt-video.mp4" }],
@@ -93,9 +93,9 @@ test("resolveListingPostMedia prefers server preview assets when available", () 
 
   assert.deepEqual(media, {
     type: "video",
-    previewImageUrl: "/api/preview-assets/popular/kemono/fingerprint-1/thumb.webp",
-    videoUrl: "/api/preview-assets/popular/kemono/fingerprint-1/clip.mp4",
-    videoCandidates: ["/api/preview-assets/popular/kemono/fingerprint-1/clip.mp4"],
+    previewImageUrl: "/api/media/preview/popular/kemono/fingerprint-1/thumb.webp",
+    videoUrl: "/api/media/preview/popular/kemono/fingerprint-1/clip.mp4",
+    videoCandidates: ["/api/media/preview/popular/kemono/fingerprint-1/clip.mp4"],
     durationSeconds: 95,
     previewStatus: null,
     usesServerPreview: true,
@@ -131,7 +131,7 @@ test("resolveListingPostMedia keeps a server thumbnail without falling back to t
     makePost({
       site: "coomer",
       service: "onlyfans",
-      previewThumbnailUrl: "/api/preview-assets/popular/coomer/fingerprint-1/thumb.webp",
+      previewThumbnailUrl: "/api/media/preview/popular/coomer/fingerprint-1/thumb.webp",
       previewClipUrl: null,
       previewStatus: "thumbnail-ready",
       longestVideoDurationSeconds: 41,
@@ -141,7 +141,7 @@ test("resolveListingPostMedia keeps a server thumbnail without falling back to t
 
   assert.deepEqual(media, {
     type: "video",
-    previewImageUrl: "/api/preview-assets/popular/coomer/fingerprint-1/thumb.webp",
+    previewImageUrl: "/api/media/preview/popular/coomer/fingerprint-1/thumb.webp",
     videoUrl: undefined,
     videoCandidates: [],
     durationSeconds: 41,

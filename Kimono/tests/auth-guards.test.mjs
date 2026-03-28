@@ -108,14 +108,12 @@ test("proxy matcher keeps public content APIs out of auth redirects", () => {
   const proxySource = fs.readFileSync(path.join(process.cwd(), "proxy.ts"), "utf8");
 
   for (const route of [
-    "/api/popular-posts",
-    "/api/search-creators",
-    "/api/recent-posts",
-    "/api/creator-posts",
-    "/api/creator-posts/search",
-    "/api/creator-profile",
-    "/api/media-source",
-    "/api/media-source/warm",
+    "/api/posts/popular",
+    "/api/creators/search",
+    "/api/posts/recent",
+    "/api/media/",
+    "/api/media/warm",
+    "/api/media/download",
   ]) {
     assert.equal(
       proxySource.includes(`"${route}"`),

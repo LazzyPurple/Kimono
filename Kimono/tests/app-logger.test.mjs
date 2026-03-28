@@ -61,7 +61,7 @@ test("app logger filters logs by source, level, and text query", async () => {
       level: "warn",
       message: "search served stale cache",
       details: {
-        route: "/api/search-creators",
+        route: "/api/creators/search",
         source: "stale-cache",
       },
     },

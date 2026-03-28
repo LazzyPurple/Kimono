@@ -66,7 +66,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           key: getCreatorLikesCacheKey("kemono"),
           ttlMs: LIKES_CACHE_TTL_MS,
           loader: async () => {
-            const response = await fetch("/api/kimono-favorites?site=kemono");
+            const response = await fetch("/api/favorites?site=kemono");
             return response.json() as Promise<LikesCreatorsPayloadLike>;
           },
         }),
@@ -74,7 +74,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           key: getCreatorLikesCacheKey("coomer"),
           ttlMs: LIKES_CACHE_TTL_MS,
           loader: async () => {
-            const response = await fetch("/api/kimono-favorites?site=coomer");
+            const response = await fetch("/api/favorites?site=coomer");
             return response.json() as Promise<LikesCreatorsPayloadLike>;
           },
         }),
@@ -82,7 +82,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           key: getPostLikesCacheKey("kemono"),
           ttlMs: LIKES_CACHE_TTL_MS,
           loader: async () => {
-            const response = await fetch("/api/likes/posts?site=kemono");
+            const response = await fetch("/api/favorites?site=kemono");
             return response.json() as Promise<LikesPostsPayloadLike>;
           },
         }),
@@ -90,7 +90,7 @@ export function LikesProvider({ children }: { children: ReactNode }) {
           key: getPostLikesCacheKey("coomer"),
           ttlMs: LIKES_CACHE_TTL_MS,
           loader: async () => {
-            const response = await fetch("/api/likes/posts?site=coomer");
+            const response = await fetch("/api/favorites?site=coomer");
             return response.json() as Promise<LikesPostsPayloadLike>;
           },
         }),
@@ -184,10 +184,8 @@ export function LikesProvider({ children }: { children: ReactNode }) {
 
       try {
         const method = wasLiked ? "DELETE" : "POST";
-        const res = await fetch("/api/likes/creators", {
+        const res = await fetch(`/api/favorites/creators/${site}/${service}/${id}`, {
           method,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ site, service, creatorId: id }),
         });
         if (!res.ok) throw new Error("API error");
         clearLikesCacheForSite(site);
@@ -230,10 +228,8 @@ export function LikesProvider({ children }: { children: ReactNode }) {
 
       try {
         const method = wasLiked ? "DELETE" : "POST";
-        const res = await fetch("/api/likes/posts", {
+        const res = await fetch(`/api/favorites/posts/${site}/${service}/${creatorId}/${id}`, {
           method,
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ site, service, creatorId, postId: id }),
         });
         if (!res.ok) throw new Error("API error");
         clearLikesCacheForSite(site);

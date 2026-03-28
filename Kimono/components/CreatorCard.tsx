@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState } from "react";
 import { Heart, User } from "lucide-react";
@@ -28,6 +28,36 @@ function formatCreatorDate(updated?: string | number): string | null {
   return date.toLocaleDateString("en-GB");
 }
 
+function formatServiceLabel(service: string): string {
+  const normalized = String(service || "").trim();
+  if (!normalized) {
+    return "Unknown";
+  }
+
+  return normalized
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function getServiceBadgeClass(service: string): string {
+  switch (service.toLowerCase()) {
+    case "fansly":
+      return "border-cyan-400/30 bg-cyan-500/10 text-cyan-100";
+    case "onlyfans":
+      return "border-sky-400/30 bg-sky-500/10 text-sky-100";
+    case "patreon":
+      return "border-orange-400/30 bg-orange-500/10 text-orange-100";
+    case "fanbox":
+      return "border-amber-400/30 bg-amber-500/10 text-amber-100";
+    case "gumroad":
+      return "border-fuchsia-400/30 bg-fuchsia-500/10 text-fuchsia-100";
+    default:
+      return "border-white/10 bg-white/5 text-[#d7dae5]";
+  }
+}
+
 export default function CreatorCard({
   id,
   name,
@@ -44,6 +74,7 @@ export default function CreatorCard({
   const avatarUrl = proxyCdnUrl(site, `/icons/${service}/${id}`);
   const bannerUrl = proxyCdnUrl(site, `/banners/${service}/${id}`);
   const displayDate = formatCreatorDate(updated);
+  const serviceBadgeClass = getServiceBadgeClass(service);
 
   const isGumroad = service.toLowerCase() === "gumroad";
   const displayBannerUrl = isGumroad ? avatarUrl : bannerUrl;
@@ -146,19 +177,19 @@ export default function CreatorCard({
               <div className="flex flex-wrap gap-2">
                 <Badge
                   variant="outline"
-                  className="border-[#1e1e2e] bg-[#0a0a0f] text-xs text-[#6b7280]"
+                  className={`whitespace-nowrap border text-xs ${serviceBadgeClass}`}
                 >
-                  {service}
+                  {formatServiceLabel(service)}
                 </Badge>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 text-xs text-[#6b7280]">
+          <div className="flex flex-wrap gap-2 text-xs text-[#8b93a7]">
             {favorited != null && (
-              <span className="inline-flex items-center gap-1 rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2.5 py-1">
-                <Heart className="h-3.5 w-3.5" />
-                <span>{favorited.toLocaleString()}</span>
+              <span className="inline-flex items-center gap-1 rounded-full border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-pink-50">
+                <Heart className="h-3.5 w-3.5 fill-pink-400 text-pink-400" />
+                <span>{favorited.toLocaleString()} likes</span>
               </span>
             )}
             {displayDate && (

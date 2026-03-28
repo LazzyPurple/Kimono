@@ -7,7 +7,7 @@ const root = path.resolve(import.meta.dirname, "..");
 
 test("preview asset route rejects invalid byte ranges with 416", () => {
   const source = fs.readFileSync(
-    path.join(root, "app/api/preview-assets/[...assetPath]/route.ts"),
+    path.join(root, "app/api/media/preview/[...path]/route.ts"),
     "utf8"
   );
 

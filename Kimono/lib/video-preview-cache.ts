@@ -77,6 +77,25 @@ function readStoredValue(
   }
 }
 
+function resolveBrowserPreviewStorage(): MinimalStorage | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  try {
+    const storage = window.localStorage ?? globalThis.localStorage ?? null;
+    if (!storage) {
+      return null;
+    }
+
+    const probeKey = `${VIDEO_PREVIEW_CACHE_PREFIX}__probe__`;
+    storage.getItem(probeKey);
+    return storage;
+  } catch {
+    return null;
+  }
+}
+
 export function createVideoPreviewCache(
   storage: MinimalStorage | null,
   prefix = VIDEO_PREVIEW_CACHE_PREFIX
@@ -86,9 +105,13 @@ export function createVideoPreviewCache(
 
 let defaultVideoPreviewCache: VideoPreviewCache | null = null;
 
+export function resetDefaultVideoPreviewCacheForTests(): void {
+  defaultVideoPreviewCache = null;
+}
+
 export function getDefaultVideoPreviewCache(): VideoPreviewCache {
   if (!defaultVideoPreviewCache) {
-    defaultVideoPreviewCache = createVideoPreviewCache(null);
+    defaultVideoPreviewCache = createVideoPreviewCache(resolveBrowserPreviewStorage());
   }
 
   return defaultVideoPreviewCache;

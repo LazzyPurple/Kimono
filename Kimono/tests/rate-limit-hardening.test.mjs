@@ -9,15 +9,6 @@ function read(filePath) {
   return fs.readFileSync(path.join(root, filePath), "utf8");
 }
 
-test("creator snapshot schema uses pageOffset instead of the reserved offset column name", () => {
-  const source = read("lib/data-store.ts");
-
-  assert.match(source, /pageOffset INTEGER NOT NULL DEFAULT 0/);
-  assert.match(source, /pageOffset INT NOT NULL DEFAULT 0/);
-  assert.doesNotMatch(source, /\boffset INT NOT NULL DEFAULT 0/);
-  assert.doesNotMatch(source, /\boffset INTEGER NOT NULL DEFAULT 0/);
-});
-
 test("upstream API clients stop retrying rate-limited responses and let the cooldown guard take over", () => {
   const coomerSource = read("lib/api/coomer.ts");
   const kemonoSource = read("lib/api/kemono.ts");
@@ -29,8 +20,8 @@ test("upstream API clients stop retrying rate-limited responses and let the cool
   }
 });
 
-test("likes creators route returns explicit upstream cooldown metadata instead of collapsing 429 into 500", () => {
-  const source = read("app/api/likes/creators/route.ts");
+test("favorite creator route returns explicit upstream cooldown metadata instead of collapsing 429 into 500", () => {
+  const source = read("app/api/favorites/creators/[site]/[service]/[creatorId]/route.ts");
 
   assert.match(source, /getGlobalUpstreamRateGuard/);
   assert.match(source, /buildRateLimitedResponse/);

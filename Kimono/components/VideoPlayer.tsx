@@ -48,6 +48,7 @@ interface VideoPlayerProps {
   poster?: string;
   filename?: string;
   className?: string;
+  turboEnabled?: boolean;
 }
 
 interface WarmResponse {
@@ -59,14 +60,35 @@ interface WarmResponse {
   localStreamUrl: string | null;
 }
 
-const LOCAL_WARM_POLL_INTERVAL_MS = 1000;
-const LOCAL_WARM_TIMEOUT_MS = 12000;
+function isDocumentVisible(): boolean {
+  if (typeof document === "undefined") {
+    return true;
+  }
+
+  return document.visibilityState !== "hidden";
+}
+
+function describeVideoError(code?: number): string {
+  switch (code) {
+    case MediaError.MEDIA_ERR_ABORTED:
+      return "Playback was interrupted.";
+    case MediaError.MEDIA_ERR_NETWORK:
+      return "Network error while loading the video.";
+    case MediaError.MEDIA_ERR_DECODE:
+      return "This video could not be decoded by the browser.";
+    case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+      return "This video source is not supported.";
+    default:
+      return "Video playback failed.";
+  }
+}
 
 export default function VideoPlayer({
   source,
   poster,
   filename,
   className = "",
+  turboEnabled = true,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -77,37 +99,19 @@ export default function VideoPlayer({
   const wasPlayingRef = useRef(false);
   const pendingResumeTimeRef = useRef<number | null>(null);
   const pendingPlayAfterSwitchRef = useRef(false);
-  const warmPromiseRef = useRef<Promise<string> | null>(null);
+  const warmPromiseRef = useRef<Promise<string | null> | null>(null);
+  const warmAbortControllerRef = useRef<AbortController | null>(null);
+  const warmChannelRef = useRef<BroadcastChannel | null>(null);
   const activeSourceUrlRef = useRef(source.localStreamUrl ?? source.upstreamUrl);
+  const isTogglingRef = useRef(false);
 
   const [activeSourceUrl, setActiveSourceUrl] = useState(source.localStreamUrl ?? source.upstreamUrl);
   const [localStreamUrl, setLocalStreamUrl] = useState(source.localStreamUrl);
   const [localSourceAvailable, setLocalSourceAvailable] = useState(source.localSourceAvailable);
   const [sourceCacheStatus, setSourceCacheStatus] = useState(source.sourceCacheStatus);
   const [isWarmingLocal, setIsWarmingLocal] = useState(false);
-
-  useEffect(() => {
-    const nextSourceUrl = source.localStreamUrl ?? source.upstreamUrl;
-    activeSourceUrlRef.current = nextSourceUrl;
-    setActiveSourceUrl(nextSourceUrl);
-    setLocalStreamUrl(source.localStreamUrl);
-    setLocalSourceAvailable(source.localSourceAvailable);
-    setSourceCacheStatus(source.sourceCacheStatus);
-    setIsWarmingLocal(false);
-    warmPromiseRef.current = null;
-  }, [source.localSourceAvailable, source.localStreamUrl, source.sourceCacheStatus, source.upstreamUrl, source.sourceFingerprint]);
-
-  const turboInputUrl = activeSourceUrl === source.upstreamUrl ? source.upstreamUrl : undefined;
-  const {
-    sourceUrl: turboSourceUrl,
-    progress,
-    isLoading: isTurboLoading,
-    isFallback: isTurboFallback,
-    playTurbo,
-  } = useTurboVideo(turboInputUrl, videoRef);
-
-  const renderedSourceUrl = turboInputUrl ? turboSourceUrl : activeSourceUrl;
-
+  const [isPageVisible, setIsPageVisible] = useState(isDocumentVisible);
+  const [playerError, setPlayerError] = useState<string | null>(null);
   const [playing, setPlaying] = useState(false);
   const [buffering, setBuffering] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -129,6 +133,53 @@ export default function VideoPlayer({
     [source.path, source.site, source.sourceFingerprint]
   );
 
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      const visible = isDocumentVisible();
+      setIsPageVisible(visible);
+
+      if (!visible) {
+        warmAbortControllerRef.current?.abort();
+        warmAbortControllerRef.current = null;
+        warmPromiseRef.current = null;
+        setIsWarmingLocal(false);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, []);
+
+  useEffect(() => {
+    warmAbortControllerRef.current?.abort();
+    warmAbortControllerRef.current = null;
+    warmPromiseRef.current = null;
+
+    const nextSourceUrl = source.localStreamUrl ?? source.upstreamUrl;
+    activeSourceUrlRef.current = nextSourceUrl;
+    setActiveSourceUrl(nextSourceUrl);
+    setLocalStreamUrl(source.localStreamUrl);
+    setLocalSourceAvailable(source.localSourceAvailable);
+    setSourceCacheStatus(source.sourceCacheStatus);
+    setIsWarmingLocal(false);
+    setPlayerError(null);
+  }, [source.localSourceAvailable, source.localStreamUrl, source.sourceCacheStatus, source.upstreamUrl, source.sourceFingerprint]);
+
+  const turboInputUrl = turboEnabled && activeSourceUrl === source.upstreamUrl ? source.upstreamUrl : undefined;
+  const {
+    sourceUrl: turboSourceUrl,
+    progress,
+    isLoading: isTurboLoading,
+    isFallback: isTurboFallback,
+    playTurbo,
+  } = useTurboVideo(turboInputUrl, videoRef);
+
+  const renderedSourceUrl = turboInputUrl ? turboSourceUrl : activeSourceUrl;
+
   const resetHide = useCallback(() => {
     setShowControls(true);
     if (hideTimerRef.current) {
@@ -144,6 +195,8 @@ export default function VideoPlayer({
       : null;
     pendingPlayAfterSwitchRef.current = resumePlayback;
     activeSourceUrlRef.current = nextUrl;
+    setPlayerError(null);
+    setBuffering(true);
     setActiveSourceUrl(nextUrl);
   }, []);
 
@@ -153,16 +206,54 @@ export default function VideoPlayer({
     setLocalStreamUrl(payload.localStreamUrl);
   }, []);
 
-  const requestWarmState = useCallback(async (): Promise<WarmResponse | null> => {
-    if (!canAttemptLocalWarm) {
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined" || !canAttemptLocalWarm) {
+      return;
+    }
+
+    const channel = new BroadcastChannel("kimono-media-source-warm");
+    warmChannelRef.current = channel;
+    channel.onmessage = (event) => {
+      const message = event.data as { type?: string; sourceFingerprint?: string; payload?: WarmResponse } | null;
+      if (!message || message.sourceFingerprint !== source.sourceFingerprint) {
+        return;
+      }
+
+      if (message.type === "started") {
+        setSourceCacheStatus((currentStatus) => currentStatus ?? "source-downloading");
+        return;
+      }
+
+      if (message.type === "ready" && message.payload) {
+        applyWarmState(message.payload);
+        if (message.payload.localSourceAvailable && message.payload.localStreamUrl) {
+          const videoElement = videoRef.current;
+          if ((!videoElement || videoElement.paused) && activeSourceUrlRef.current !== message.payload.localStreamUrl) {
+            switchPlaybackSource(message.payload.localStreamUrl, false);
+          }
+        }
+      }
+    };
+
+    return () => {
+      if (warmChannelRef.current === channel) {
+        warmChannelRef.current = null;
+      }
+      channel.close();
+    };
+  }, [applyWarmState, canAttemptLocalWarm, source.sourceFingerprint, switchPlaybackSource]);
+
+  const requestWarmState = useCallback(async (signal?: AbortSignal): Promise<WarmResponse | null> => {
+    if (!canAttemptLocalWarm || !isPageVisible) {
       return null;
     }
 
-    const response = await fetch("/api/media-source/warm", {
+    const response = await fetch("/api/media/warm", {
       method: "POST",
       headers: {
         "content-type": "application/json",
       },
+      signal,
       body: JSON.stringify({
         site: source.site,
         service: source.service,
@@ -180,70 +271,96 @@ export default function VideoPlayer({
     const payload = await response.json() as WarmResponse;
     applyWarmState(payload);
     return payload;
-  }, [applyWarmState, canAttemptLocalWarm, source.creatorId, source.path, source.postId, source.service, source.site, source.sourceFingerprint]);
+  }, [applyWarmState, canAttemptLocalWarm, isPageVisible, source.creatorId, source.path, source.postId, source.service, source.site, source.sourceFingerprint]);
 
-  const ensurePlaybackSource = useCallback(async (resumePlayback: boolean): Promise<string> => {
-    if (localSourceAvailable && localStreamUrl) {
-      if (activeSourceUrlRef.current !== localStreamUrl) {
-        switchPlaybackSource(localStreamUrl, resumePlayback);
-      }
-      return localStreamUrl;
+  const warmLocalSourceInBackground = useCallback(async (): Promise<string | null> => {
+    if (!canAttemptLocalWarm || !isPageVisible) {
+      return null;
     }
 
-    if (!canAttemptLocalWarm) {
-      activeSourceUrlRef.current = source.upstreamUrl;
-      setActiveSourceUrl(source.upstreamUrl);
-      return source.upstreamUrl;
+    if (localSourceAvailable && localStreamUrl) {
+      return localStreamUrl;
     }
 
     if (warmPromiseRef.current) {
       return warmPromiseRef.current;
     }
 
-    const warmPromise = (async () => {
-      setIsWarmingLocal(true);
-      const immediate = await requestWarmState();
-      if (immediate?.localSourceAvailable && immediate.localStreamUrl) {
-        switchPlaybackSource(immediate.localStreamUrl, resumePlayback);
-        return immediate.localStreamUrl;
+    const controller = new AbortController();
+    warmAbortControllerRef.current?.abort();
+    warmAbortControllerRef.current = controller;
+    setIsWarmingLocal(true);
+
+    const runWarmRequest = async () => {
+      warmChannelRef.current?.postMessage({
+        type: "started",
+        sourceFingerprint: source.sourceFingerprint,
+      });
+
+      const payload = await requestWarmState(controller.signal);
+      if (payload?.localSourceAvailable && payload.localStreamUrl) {
+        warmChannelRef.current?.postMessage({
+          type: "ready",
+          sourceFingerprint: source.sourceFingerprint,
+          payload,
+        });
+
+        const videoElement = videoRef.current;
+        if ((!videoElement || videoElement.paused) && activeSourceUrlRef.current !== payload.localStreamUrl) {
+          switchPlaybackSource(payload.localStreamUrl, false);
+        }
+        return payload.localStreamUrl;
       }
 
-      const startedAt = Date.now();
-      return await new Promise<string>((resolve) => {
-        const intervalId = setInterval(async () => {
-          if (Date.now() - startedAt >= LOCAL_WARM_TIMEOUT_MS) {
-            clearInterval(intervalId);
-            activeSourceUrlRef.current = source.upstreamUrl;
-            setActiveSourceUrl(source.upstreamUrl);
-            resolve(source.upstreamUrl);
-            return;
+      return null;
+    };
+
+    const locksApi = typeof navigator !== "undefined"
+      ? (navigator as Navigator & {
+          locks?: {
+            request?: <T>(
+              name: string,
+              options: { ifAvailable: boolean },
+              callback: (lock: Lock | null) => Promise<T>
+            ) => Promise<T>;
+          };
+        }).locks
+      : undefined;
+
+    const warmPromise = (locksApi?.request
+      ? locksApi.request<string | null>(`kimono-media-warm:${source.sourceFingerprint}`, { ifAvailable: true }, async (lock) => {
+          if (!lock) {
+            setSourceCacheStatus((currentStatus) => currentStatus ?? "source-downloading");
+            return null;
           }
 
-          const nextState = await requestWarmState();
-          if (nextState?.localSourceAvailable && nextState.localStreamUrl) {
-            clearInterval(intervalId);
-            switchPlaybackSource(nextState.localStreamUrl, resumePlayback);
-            resolve(nextState.localStreamUrl);
-          }
-        }, LOCAL_WARM_POLL_INTERVAL_MS);
-      });
-    })()
-      .catch(() => {
-        activeSourceUrlRef.current = source.upstreamUrl;
-        setActiveSourceUrl(source.upstreamUrl);
-        return source.upstreamUrl;
+          return await runWarmRequest();
+        })
+      : runWarmRequest())
+      .catch((error) => {
+        if (!(error instanceof Error) || error.name !== "AbortError") {
+          setSourceCacheStatus((currentStatus) => currentStatus ?? "warm-failed");
+        }
+        return null;
       })
       .finally(() => {
-        setIsWarmingLocal(false);
+        if (warmAbortControllerRef.current === controller) {
+          warmAbortControllerRef.current = null;
+        }
         warmPromiseRef.current = null;
+        setIsWarmingLocal(false);
       });
 
     warmPromiseRef.current = warmPromise;
     return warmPromise;
-  }, [canAttemptLocalWarm, localSourceAvailable, localStreamUrl, requestWarmState, source.upstreamUrl, switchPlaybackSource]);
+  }, [canAttemptLocalWarm, isPageVisible, localSourceAvailable, localStreamUrl, requestWarmState, source.sourceFingerprint, switchPlaybackSource]);
+  const startWarmLocalSource = useCallback(() => {
+    void warmLocalSourceInBackground();
+  }, [warmLocalSourceInBackground]);
 
   useEffect(() => {
     return () => {
+      warmAbortControllerRef.current?.abort();
       if (hideTimerRef.current) {
         clearTimeout(hideTimerRef.current);
       }
@@ -262,6 +379,7 @@ export default function VideoPlayer({
     const syncDuration = () => setDuration(getEffectiveDuration(videoElement));
     const syncMetadata = () => {
       syncDuration();
+      setPlayerError(null);
       if (videoElement.videoWidth > 0 && videoElement.videoHeight > 0) {
         setVideoDims({ w: videoElement.videoWidth, h: videoElement.videoHeight });
       }
@@ -272,18 +390,39 @@ export default function VideoPlayer({
       if (pendingPlayAfterSwitchRef.current) {
         pendingPlayAfterSwitchRef.current = false;
         const playPromise = videoElement.play();
-        playPromise?.catch(() => {});
+        playPromise?.catch(() => {
+          setPlayerError("Playback could not resume automatically.");
+        });
       }
     };
 
-    const handlePlay = () => setPlaying(true);
+    const handlePlay = () => {
+      setPlaying(true);
+      setPlayerError(null);
+    };
     const handlePause = () => setPlaying(false);
     const handleWaiting = () => setBuffering(true);
-    const handlePlaying = () => setBuffering(false);
+    const handlePlaying = () => {
+      setBuffering(false);
+      setPlayerError(null);
+    };
     const handleTimeUpdate = () => setCurrentTime(videoElement.currentTime);
     const handleVolumeChange = () => {
       setVolume(videoElement.volume);
       setMuted(videoElement.muted);
+    };
+    const handleError = () => {
+      setBuffering(false);
+      const currentUrl = activeSourceUrlRef.current;
+      const isUsingLocalStream = Boolean(localStreamUrl && currentUrl === localStreamUrl);
+
+      if (isUsingLocalStream && currentUrl !== source.upstreamUrl) {
+        setPlayerError("Local stream failed. Retrying upstream playback.");
+        switchPlaybackSource(source.upstreamUrl, true);
+        return;
+      }
+
+      setPlayerError(describeVideoError(videoElement.error?.code));
     };
 
     videoElement.addEventListener("play", handlePlay);
@@ -294,6 +433,7 @@ export default function VideoPlayer({
     videoElement.addEventListener("durationchange", syncDuration);
     videoElement.addEventListener("loadedmetadata", syncMetadata);
     videoElement.addEventListener("volumechange", handleVolumeChange);
+    videoElement.addEventListener("error", handleError);
 
     syncMetadata();
     handleVolumeChange();
@@ -307,31 +447,53 @@ export default function VideoPlayer({
       videoElement.removeEventListener("durationchange", syncDuration);
       videoElement.removeEventListener("loadedmetadata", syncMetadata);
       videoElement.removeEventListener("volumechange", handleVolumeChange);
+      videoElement.removeEventListener("error", handleError);
     };
-  }, [renderedSourceUrl]);
+  }, [localStreamUrl, renderedSourceUrl, source.upstreamUrl, switchPlaybackSource]);
 
   const togglePlay = useCallback(async () => {
+    if (isTogglingRef.current) {
+      return;
+    }
+
     const videoElement = videoRef.current;
     if (!videoElement) {
       return;
     }
 
-    if (videoElement.paused) {
-      const nextUrl = await ensurePlaybackSource(true);
-      if (nextUrl === source.upstreamUrl && !isTurboLoading && !isTurboFallback && turboSourceUrl === source.upstreamUrl) {
-        void playTurbo();
+    isTogglingRef.current = true;
+    try {
+      if (videoElement.paused) {
+        setPlayerError(null);
+
+        if (localSourceAvailable && localStreamUrl && activeSourceUrlRef.current !== localStreamUrl) {
+          switchPlaybackSource(localStreamUrl, true);
+          resetHide();
+          return;
+        }
+
+        if (!localSourceAvailable) {
+          void startWarmLocalSource();
+        }
+
+        if (activeSourceUrlRef.current === source.upstreamUrl && !isTurboLoading && !isTurboFallback && turboSourceUrl === source.upstreamUrl) {
+          void playTurbo();
+        }
+
+        try {
+          await videoElement.play();
+        } catch {
+          setPlayerError("Playback could not start.");
+        }
+      } else {
+        videoElement.pause();
       }
-      if (activeSourceUrlRef.current === nextUrl) {
-        const playPromise = videoElement.play();
-        playPromise?.catch(() => {});
-      }
-    } else {
-      videoElement.pause();
+
+      resetHide();
+    } finally {
+      isTogglingRef.current = false;
     }
-
-    resetHide();
-  }, [ensurePlaybackSource, isTurboFallback, isTurboLoading, playTurbo, resetHide, source.upstreamUrl, turboSourceUrl]);
-
+  }, [isTurboFallback, isTurboLoading, localSourceAvailable, localStreamUrl, playTurbo, resetHide, source.upstreamUrl, startWarmLocalSource, switchPlaybackSource, turboSourceUrl]);
   const seekToPointer = useCallback((clientX: number) => {
     const videoElement = videoRef.current;
     const barElement = barRef.current;
@@ -481,17 +643,28 @@ export default function VideoPlayer({
   }, []);
 
   const handleDownload = useCallback(() => {
+    if (canAttemptLocalWarm && !localSourceAvailable) {
+      void startWarmLocalSource();
+    }
+
+    const params = new URLSearchParams({
+      site: source.site,
+      service: source.service,
+      creatorId: source.creatorId,
+      postId: source.postId,
+      path: source.path,
+      sourceFingerprint: source.sourceFingerprint,
+      filename: filename || source.path.split("/").pop() || "video",
+    });
+
     const anchor = document.createElement("a");
-    const preferredUrl = localStreamUrl && localSourceAvailable ? localStreamUrl : activeSourceUrlRef.current;
-    anchor.href = preferredUrl || source.upstreamUrl;
+    anchor.href = `/api/media/download?${params.toString()}`;
     anchor.download = filename || source.path.split("/").pop() || "video";
-    anchor.target = "_blank";
     anchor.rel = "noopener";
     document.body.appendChild(anchor);
     anchor.click();
     setTimeout(() => anchor.remove(), 0);
-  }, [filename, localSourceAvailable, localStreamUrl, source.path, source.upstreamUrl]);
-
+  }, [canAttemptLocalWarm, filename, localSourceAvailable, source.creatorId, source.path, source.postId, source.service, source.site, source.sourceFingerprint, startWarmLocalSource]);
   const handleVideoAreaClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
       if (clickTimerRef.current) {
@@ -598,6 +771,24 @@ export default function VideoPlayer({
           {(buffering || isTurboLoading || isWarmingLocal) && (
             <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
               <Loader2 className="h-10 w-10 animate-spin text-white opacity-70" />
+            </div>
+          )}
+
+          {playerError && (
+            <div className="absolute inset-x-4 top-4 z-20 rounded-xl border border-red-500/30 bg-black/70 px-3 py-2 text-sm text-red-100 backdrop-blur-sm">
+              <div className="flex items-center gap-3">
+                <span className="flex-1">{playerError}</span>
+                <button
+                  className="rounded-md border border-white/10 px-2 py-1 text-xs font-medium text-white transition-colors hover:bg-white/10"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPlayerError(null);
+                    void togglePlay();
+                  }}
+                >
+                  Retry
+                </button>
+              </div>
             </div>
           )}
 
@@ -793,3 +984,5 @@ export default function VideoPlayer({
     </>
   );
 }
+
+

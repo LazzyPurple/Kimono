@@ -1,13 +1,15 @@
-import type { SupportedSite, StoredKimonoSession } from "./data-store.ts";
-import { getDataStore } from "./data-store.ts";
-import { loadStoredKimonoSessionRecord } from "./remote-session.ts";
+﻿import type { SupportedSite, StoredKimonoSession } from "./db/index.ts";
+import { db, withDbConnection } from "./db/index.ts";
 import type { FavoriteChronologyRecord, FavoriteCreatorListItem } from "./favorites-page-state.ts";
 import { buildFavoriteChronologyMap, createFavoriteChronologyKey } from "./favorites-page-state.ts";
 import type { UnifiedCreator } from "./api/helpers.ts";
+import { loadStoredKimonoSessionRecord } from "./remote-session.ts";
 import { readSessionUpstreamCache } from "./session-upstream-cache.ts";
 
-const FAVORITES_FRESH_TTL_MS = 45_000;
-const FAVORITES_STALE_TTL_MS = 10 * 60 * 1000;
+import { TTL } from "./config/ttl.ts";
+
+const FAVORITES_FRESH_TTL_MS = TTL.favorites.fresh;
+const FAVORITES_STALE_TTL_MS = TTL.favorites.stale;
 
 export interface KimonoFavoritesPayload {
   loggedIn: boolean;
@@ -57,10 +59,13 @@ function mapFavoriteCreators(
     const retainedDate = typeof (creator as { favoriteAddedAt?: string | null }).favoriteAddedAt === "string"
       ? (creator as { favoriteAddedAt?: string | null }).favoriteAddedAt ?? null
       : null;
+    const retainedSeq = typeof (creator as { faved_seq?: number | null }).faved_seq === "number"
+      ? (creator as { faved_seq?: number | null }).faved_seq ?? null
+      : null;
     const favoriteAddedAt = chronology?.favoritedAt.toISOString() ?? retainedDate;
     const favoriteOrderSource = chronology
       ? "exact"
-      : retainedDate
+      : retainedDate || retainedSeq != null
         ? "retained"
         : "fallback";
 
@@ -74,41 +79,55 @@ function mapFavoriteCreators(
         : index,
       snapshotUpdatedAt: snapshotUpdatedAt?.toISOString() ?? null,
       stale,
+      favedSeq: chronology?.favedSeq ?? retainedSeq ?? null,
     } satisfies FavoriteCreatorListItem;
   });
 }
 
 async function readFavoriteSnapshot(site: SupportedSite): Promise<{ favorites: UnifiedCreator[]; updatedAt: Date | null }> {
-  const store = await getDataStore();
+  const snapshot = await withDbConnection((conn) => db.getFavoriteCache(conn as never, "creator", site));
+  if (!snapshot?.payloadJson) {
+    return { favorites: [], updatedAt: null };
+  }
+
   try {
-    const snapshot = await store.getFavoriteSnapshot({ kind: "creator", site });
-    if (!snapshot?.data) {
-      return { favorites: [], updatedAt: null };
-    }
-    const parsed = JSON.parse(snapshot.data);
+    const parsed = JSON.parse(snapshot.payloadJson);
     return {
       favorites: Array.isArray(parsed) ? parsed : [],
       updatedAt: snapshot.updatedAt ?? null,
     };
   } catch {
-    return { favorites: [], updatedAt: null };
-  } finally {
-    await store.disconnect();
+    return { favorites: [], updatedAt: snapshot.updatedAt ?? null };
   }
 }
 
 async function writeFavoriteSnapshot(site: SupportedSite, favorites: UnifiedCreator[]): Promise<void> {
-  const store = await getDataStore();
-  try {
-    await store.setFavoriteSnapshot({
-      kind: "creator",
-      site,
-      data: favorites,
-      updatedAt: new Date(),
-    });
-  } finally {
-    await store.disconnect();
-  }
+  await withDbConnection((conn) => db.upsertFavoriteCache(conn as never, {
+    kind: "creator",
+    site,
+    payloadJson: JSON.stringify(favorites),
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + TTL.favorites.cache),
+  }));
+}
+
+async function persistFavoriteChronology(site: SupportedSite, favorites: UnifiedCreator[]): Promise<void> {
+  await withDbConnection(async (conn) => {
+    for (const creator of favorites) {
+      await db.upsertFavoriteChronologyEntry(conn as never, {
+        kind: "creator",
+        site,
+        service: creator.service,
+        creatorId: creator.id,
+        postId: "",
+        favoritedAt: new Date(),
+        lastConfirmedAt: new Date(),
+        favedSeq: typeof (creator as { faved_seq?: number | null }).faved_seq === "number"
+          ? (creator as { faved_seq?: number | null }).faved_seq ?? null
+          : null,
+      });
+    }
+  });
 }
 
 async function defaultFetchFavorites(input: { site: SupportedSite; cookie: string }): Promise<UnifiedCreator[]> {
@@ -130,12 +149,7 @@ async function defaultFetchFavorites(input: { site: SupportedSite; cookie: strin
 }
 
 async function defaultListFavoriteChronology(input: { kind: "creator"; site: SupportedSite }): Promise<FavoriteChronologyRecord[]> {
-  const store = await getDataStore();
-  try {
-    return await store.listFavoriteChronology(input);
-  } finally {
-    await store.disconnect();
-  }
+  return withDbConnection((conn) => db.getFavoriteChronology(conn as never, input.kind, input.site));
 }
 
 export async function getKimonoFavoritesPayload(
@@ -159,12 +173,11 @@ export async function getKimonoFavoritesPayload(
   const writeSnapshot = dependencies.writeSnapshot ?? writeFavoriteSnapshot;
 
   try {
-    const [favorites, chronologyEntries] = await Promise.all([
-      fetchFavorites({ site: dependencies.site, cookie: session.cookie }),
-      listFavoriteChronology({ kind: "creator", site: dependencies.site }),
-    ]);
+    const favorites = await fetchFavorites({ site: dependencies.site, cookie: session.cookie });
+    await persistFavoriteChronology(dependencies.site, favorites).catch(() => undefined);
+    const chronologyEntries = await listFavoriteChronology({ kind: "creator", site: dependencies.site });
     const items = mapFavoriteCreators(favorites, chronologyEntries, new Date(), false);
-    void writeSnapshot(dependencies.site, favorites).catch(() => undefined);
+    await writeSnapshot(dependencies.site, favorites).catch(() => undefined);
 
     return {
       loggedIn: true,
@@ -196,3 +209,5 @@ export async function getKimonoFavoritesPayload(
     };
   }
 }
+
+

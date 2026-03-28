@@ -13,7 +13,7 @@ import {
 } from "./popular-preview-assets.ts";
 import { fetchAllCreatorsFromSite, fetchPopularPostsFromSite, fetchPostDetailFromSite, type PopularResponse } from "./api/upstream.ts";
 import { appendAppLog } from "./app-logger.ts";
-import { getDataStore } from "./data-store.ts";
+import { getDataStore } from "./db/index.ts";
 import {
   POPULAR_FULL_DETAIL_LIMIT,
   POPULAR_SNAPSHOT_TTL_MS,
@@ -21,7 +21,7 @@ import {
   getRelevantSearchSites,
   isSnapshotFresh,
   type SearchCreatorsPageParams,
-} from "./perf-cache.ts";
+} from "./db/index.ts";
 import {
   getPerformanceRepository,
   type CreatorSearchCacheMedia,
@@ -32,7 +32,7 @@ import {
   type PostCacheInput,
   type PostCacheRecord,
   type Site,
-} from "./perf-repository.ts";
+} from "./db/index.ts";
 
 export interface HybridSearchResult {
   items: Array<UnifiedCreator>;
@@ -319,10 +319,10 @@ function createPostCacheInputFromUnifiedPost(
     longestVideoDurationSeconds: preview?.longestVideoDurationSeconds ?? post.longestVideoDurationSeconds ?? null,
     previewThumbnailAssetPath:
       preview?.previewThumbnailAssetPath
-      ?? (post.previewThumbnailUrl ? post.previewThumbnailUrl.replace(/^\/api\/preview-assets\//, "") : null),
+      ?? (post.previewThumbnailUrl ? post.previewThumbnailUrl.replace(/^\/api\/media\/preview\//, "") : null),
     previewClipAssetPath:
       preview?.previewClipAssetPath
-      ?? (post.previewClipUrl ? post.previewClipUrl.replace(/^\/api\/preview-assets\//, "") : null),
+      ?? (post.previewClipUrl ? post.previewClipUrl.replace(/^\/api\/media\/preview\//, "") : null),
     previewStatus: preview?.previewStatus ?? post.previewStatus ?? null,
     previewGeneratedAt: preview?.previewGeneratedAt ?? (post.previewGeneratedAt ? new Date(post.previewGeneratedAt) : null),
     previewError: preview?.previewError ?? post.previewError ?? null,
@@ -1526,6 +1526,7 @@ export function createHybridContentService(dependencies: HybridDependencies = {}
     },
   };
 }
+
 
 
 

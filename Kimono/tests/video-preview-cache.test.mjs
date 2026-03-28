@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -7,6 +7,7 @@ import {
   getDefaultVideoPreviewCache,
   hasWarmVideoPreview,
   readVideoPreviewState,
+  resetDefaultVideoPreviewCacheForTests,
   writeVideoPreviewState,
 } from "../lib/video-preview-cache.ts";
 
@@ -62,8 +63,49 @@ test("video preview cache expires stale warm entries", () => {
   assert.equal(hasWarmVideoPreview(cache, "https://cdn.example/video.mp4", expiredAt), false);
 });
 
-
-test("default video preview cache stays client-ephemeral and avoids localStorage", () => {
+test("default video preview cache falls back cleanly without browser storage on the server", () => {
+  resetDefaultVideoPreviewCacheForTests();
   const cache = getDefaultVideoPreviewCache();
   assert.equal(cache.storage, null);
+});
+
+test("default video preview cache uses browser localStorage when available", () => {
+  const storage = createMemoryStorage();
+  const originalWindow = globalThis.window;
+  const originalLocalStorage = globalThis.localStorage;
+
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { localStorage: storage },
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+
+  try {
+    resetDefaultVideoPreviewCacheForTests();
+    const cache = getDefaultVideoPreviewCache();
+    assert.equal(cache.storage, storage);
+  } finally {
+    resetDefaultVideoPreviewCacheForTests();
+
+    if (originalWindow === undefined) {
+      delete globalThis.window;
+    } else {
+      Object.defineProperty(globalThis, "window", {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+
+    if (originalLocalStorage === undefined) {
+      delete globalThis.localStorage;
+    } else {
+      Object.defineProperty(globalThis, "localStorage", {
+        configurable: true,
+        value: originalLocalStorage,
+      });
+    }
+  }
 });

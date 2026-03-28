@@ -1,6 +1,6 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import { getDataStore } from "@/lib/data-store";
+import { getDataStore } from "@/lib/db/index";
 import { isLocalDevMode } from "@/lib/local-dev-mode";
 import { shouldEnableCredentialAuth } from "@/lib/auth-guards";
 import { appendAuthDebugLog, toAuthDebugErrorDetails } from "@/lib/auth-debug";

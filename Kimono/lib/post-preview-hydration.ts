@@ -4,8 +4,8 @@ import type {
   PerformanceRepository,
   PostCacheRecord,
   Site,
-} from "./perf-repository.ts";
-import { getPerformanceRepository } from "./perf-repository.ts";
+} from "./db/index.ts";
+import { getPerformanceRepository } from "./db/index.ts";
 import {
   analyzeVideoSourceLightweight,
   buildPreviewAssetPublicUrl,
@@ -276,3 +276,4 @@ export async function hydratePostWithMediaPlatform(
   const [hydrated] = await hydratePostsWithMediaPlatform([post], options);
   return hydrated ?? post;
 }
+

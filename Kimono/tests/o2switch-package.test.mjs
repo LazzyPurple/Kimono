@@ -104,15 +104,15 @@ test("main source tree exposes the production bootstrap expected by o2switch", (
   assert.equal(fs.existsSync(serverPath), true, "server.js should exist at the app root");
 });
 
-test("perf-repository keeps Prisma imports lazy for production runtime packaging", () => {
-  const source = fs.readFileSync(path.join(process.cwd(), "lib", "perf-repository.ts"), "utf8");
+test("db performance compat layer keeps Prisma imports lazy for production runtime packaging", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "lib", "db", "performance.ts"), "utf8");
 
-  assert.equal(source.includes('from "./prisma.ts"'), false);
-  assert.ok(source.includes('await import("./prisma.ts")'));
+  assert.equal(source.includes('from "../prisma.ts"'), false);
+  assert.ok(source.includes('await import("../prisma.ts")'));
 });
 test("local-only Prisma files avoid static @prisma/client imports in the production build path", () => {
-  const dataStoreSource = fs.readFileSync(path.join(root, "lib", "data-store.ts"), "utf8");
-  const perfRepositorySource = fs.readFileSync(path.join(root, "lib", "perf-repository.ts"), "utf8");
+  const dataStoreSource = fs.readFileSync(path.join(root, "lib", "db", "app-store.ts"), "utf8");
+  const perfRepositorySource = fs.readFileSync(path.join(root, "lib", "db", "performance.ts"), "utf8");
   const prismaSource = fs.readFileSync(path.join(root, "lib", "prisma.ts"), "utf8");
 
   assert.ok(!dataStoreSource.includes('from "@prisma/client"'));

@@ -15,7 +15,7 @@ import type {
   PreviewAssetCacheInput,
   PreviewAssetCacheRecord,
   Site,
-} from "./perf-repository.ts";
+} from "./db/index.ts";
 
 const MEDIA_HOT_WINDOW_MS = 72 * 60 * 60 * 1000;
 
@@ -317,3 +317,4 @@ export function createMediaPlatform(dependencies: MediaPlatformDependencies) {
     },
   };
 }
+

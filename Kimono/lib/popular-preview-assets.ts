@@ -1,4 +1,4 @@
-import path from "node:path";
+﻿import path from "node:path";
 import { createHash } from "node:crypto";
 import { createWriteStream, promises as fs } from "node:fs";
 import { Readable } from "node:stream";
@@ -15,7 +15,7 @@ import type {
   PreviewAssetCacheInput,
   PreviewAssetCacheRecord,
   Site,
-} from "./perf-repository.ts";
+} from "./db/index.ts";
 import { getDefaultFfmpegSemaphore, type FfmpegSemaphore } from "./ffmpeg-semaphore.ts";
 
 const DEFAULT_PREVIEW_ASSET_DIR = path.join(process.cwd(), "tmp", "preview-assets");
@@ -301,7 +301,7 @@ async function defaultDownloadMediaSource(input: DownloadMediaSourceInput): Prom
     headers: {
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       referer: input.site === "coomer" ? "https://coomer.st/" : "https://kemono.cr/",
-      accept: "video/*,*/*;q=0.8",
+      accept: "text/css",
     },
   });
 
@@ -371,7 +371,7 @@ export function buildPreviewAssetPublicUrl(relativePath: string | null | undefin
     return null;
   }
 
-  return `/api/preview-assets/${relativePath
+  return `/api/media/preview/${relativePath
     .split("/")
     .filter(Boolean)
     .map((segment) => encodeURIComponent(segment))
@@ -379,7 +379,7 @@ export function buildPreviewAssetPublicUrl(relativePath: string | null | undefin
 }
 
 export function buildMediaSourcePublicUrl(site: Site, sourceFingerprint: string): string {
-  return `/api/media-source/${encodeURIComponent(site)}/${encodeURIComponent(sourceFingerprint)}`;
+  return `/api/media/${encodeURIComponent(site)}/${encodeURIComponent(sourceFingerprint)}`;
 }
 
 async function canAccessBinary(binaryPath: string | null | undefined): Promise<boolean> {
@@ -478,7 +478,7 @@ function resolveFfprobePath(ffmpegPath: string): string {
 
 function logPreviewToolIssueOnce(tool: "ffmpeg" | "ffprobe", details: Record<string, unknown>) {
   previewRuntimeState.__kimonoPreviewToolWarnings ??= new Set<string>();
-  const key = `${tool}:${JSON.stringify(details)}`;
+  const key = tool;
   if (previewRuntimeState.__kimonoPreviewToolWarnings.has(key)) {
     return;
   }
@@ -486,8 +486,8 @@ function logPreviewToolIssueOnce(tool: "ffmpeg" | "ffprobe", details: Record<str
   previewRuntimeState.__kimonoPreviewToolWarnings.add(key);
   void appendAppLog({
     source: "preview",
-    level: "warn",
-    message: "preview tool missing",
+    level: "info",
+    message: "preview generation disabled: tool missing",
     details: {
       tool,
       ...details,
@@ -831,7 +831,7 @@ export function createPopularPreviewAssetService(dependencies: PopularPreviewAss
   };
 
   function isPremiumPriority(priorityClass: MediaSourcePriorityClass | null | undefined): boolean {
-    return priorityClass === 'popular' || priorityClass === 'liked' || priorityClass === 'playback';
+    return priorityClass === 'liked' || priorityClass === 'playback';
   }
 
   async function ensureLocalSourceForCandidate(input: {
@@ -1540,4 +1540,9 @@ export function createPopularPreviewAssetService(dependencies: PopularPreviewAss
     },
   };
 }
+
+
+
+
+
 

@@ -45,7 +45,7 @@ test("root layout preconnects the upstream image and data origins", () => {
 });
 
 test("preview asset route advertises immutable long-lived cache headers", () => {
-  const source = read("app/api/preview-assets/[...assetPath]/route.ts");
+  const source = read("app/api/media/preview/[...path]/route.ts");
 
   assert.match(source, /public, max-age=86400, stale-while-revalidate=604800, immutable/);
 });

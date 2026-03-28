@@ -1,7 +1,7 @@
-﻿import { collectAuthDebugSnapshot, collectPublicRuntimeEnvProbe } from "./auth-debug-route.ts";
+import { collectAuthDebugSnapshot, collectPublicRuntimeEnvProbe } from "./auth-debug-route.ts";
 import { getLogsRoutePayload } from "./logs-route.ts";
 
-import type { DataStore } from "./data-store.ts";
+import type { DataStore } from "./db/index.ts";
 
 type AuthDebugStore = Pick<DataStore, "getOrCreateAdminUser" | "disconnect">;
 
@@ -23,3 +23,4 @@ export async function getLogsDashboardData(options: {
     },
   };
 }
+

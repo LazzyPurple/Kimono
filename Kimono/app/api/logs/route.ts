@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { getLogsRoutePayload, ingestLogsRoutePayload } from "@/lib/logs-route";
 import { getCurrentDiagnosticAccessDecision } from "@/lib/diagnostic-access";
 
@@ -23,7 +23,21 @@ export async function GET(request: Request) {
     return notFoundResponse();
   }
 
-  return NextResponse.json(await getLogsRoutePayload(request.url));
+  const payload = await getLogsRoutePayload(request.url);
+  const format = new URL(request.url).searchParams.get("format");
+
+  if (format === "json") {
+    const timestamp = new Date().toISOString().replace(/[.:]/g, "-");
+    return new NextResponse(JSON.stringify(payload, null, 2), {
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+        "Content-Disposition": `attachment; filename="kimono-logs-${timestamp}.json"`,
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
+  return NextResponse.json(payload);
 }
 
 export async function POST(request: Request) {

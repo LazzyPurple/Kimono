@@ -14,7 +14,7 @@ import { buildAppPageTitle } from "@/lib/page-titles";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import type { Site } from "@/lib/api/helpers";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
-import { BROWSER_POST_CACHE_TTL_MS } from "@/lib/perf-cache";
+import { BROWSER_POST_CACHE_TTL_MS } from "@/lib/db/performance-cache";
 
 interface DiscoveryCreator {
   id: string;
@@ -377,4 +377,5 @@ export default function DiscoverPage() {
     </Suspense>
   );
 }
+
 

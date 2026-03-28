@@ -12,7 +12,7 @@ import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
 import { resolveListingPostMedia, type UnifiedPost } from "@/lib/api/helpers";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
-import { buildPopularCacheKey, type PopularPeriod } from "@/lib/perf-cache";
+import { buildPopularCacheKey, type PopularPeriod } from "@/lib/db/performance-cache";
 import { buildAppPageTitle } from "@/lib/page-titles";
 
 interface PopularInfo {
@@ -100,7 +100,7 @@ function PopularPageContent() {
               params.set("offset", String(offset));
             }
 
-            const response = await fetch(`/api/popular-posts?${params.toString()}`);
+            const response = await fetch(`/api/posts/popular?${params.toString()}`);
             if (!response.ok) {
               throw new Error("API responded with an error");
             }
@@ -150,7 +150,7 @@ function PopularPageContent() {
             params.set("date", date);
           }
           params.set("offset", String(nextOffset));
-          const response = await fetch(`/api/popular-posts?${params.toString()}`);
+          const response = await fetch(`/api/posts/popular?${params.toString()}`);
           if (!response.ok) {
             throw new Error("Prefetch failed");
           }
@@ -346,7 +346,8 @@ function PopularPageContent() {
                   mediaWidth={media.width}
                   mediaHeight={media.height}
                   mediaMimeType={media.mimeType}
-                  videoPreviewMode="hover"
+                  videoPreviewMode="viewport"
+                  detailSource="popular"
                   videoCandidates={media.videoCandidates}
                 />
               );
@@ -375,6 +376,10 @@ export default function PopularPage() {
     </Suspense>
   );
 }
+
+
+
+
 
 
 

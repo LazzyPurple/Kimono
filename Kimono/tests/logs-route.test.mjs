@@ -45,7 +45,7 @@ test("logs route payload returns filtered recent logs", async () => {
           level: "error",
           message: "search-creators failed",
           details: {
-            route: "/api/search-creators",
+            route: "/api/creators/search",
           },
         },
         {

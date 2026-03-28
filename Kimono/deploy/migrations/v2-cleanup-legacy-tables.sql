@@ -1,0 +1,12 @@
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS `CreatorIndex`;
+DROP TABLE IF EXISTS `CreatorsCache`;
+DROP TABLE IF EXISTS `CreatorSearchCache`;
+DROP TABLE IF EXISTS `CreatorSnapshot`;
+DROP TABLE IF EXISTS `PopularSnapshot`;
+DROP TABLE IF EXISTS `PreviewAssetCache`;
+DROP TABLE IF EXISTS `MediaSourceCache`;
+DROP TABLE IF EXISTS `FavoriteSnapshot`;
+SET FOREIGN_KEY_CHECKS = 1;
+SELECT 'Cleanup complete.' AS status;
+SHOW TABLES;

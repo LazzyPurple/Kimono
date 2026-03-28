@@ -1,5 +1,6 @@
-import axios from "axios";
-import { getDataStore, type SupportedSite } from "./data-store.ts";
+﻿import axios from "axios";
+import { createUpstreamBrowserHeaders } from "./api/upstream-browser-headers.ts";
+import { getDataStore, type SupportedSite } from "./db/index.ts";
 import { createUpstreamRateGuard, getGlobalUpstreamRateGuard } from "./api/upstream-rate-guard.ts";
 
 export interface KimonoLoginResult {
@@ -46,7 +47,7 @@ async function defaultLoginRequest(input: {
     { username: input.username, password: input.password },
     {
       headers: {
-        Accept: "text/css",
+        ...createUpstreamBrowserHeaders(input.site),
         "Content-Type": "application/json",
       },
       validateStatus: () => true,

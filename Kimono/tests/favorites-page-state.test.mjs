@@ -19,6 +19,7 @@ function makeCreator(overrides = {}) {
     favorited: 10,
     favoriteSourceIndex: 0,
     favoriteAddedAt: null,
+    favedSeq: null,
     ...overrides,
   };
 }
@@ -40,6 +41,7 @@ function makePost(overrides = {}) {
     creatorName: "Maple",
     favoriteSourceIndex: 0,
     favoriteAddedAt: null,
+    favedSeq: null,
     ...overrides,
   };
 }
@@ -67,26 +69,28 @@ test("sortFavoriteCreators keeps deterministic site fallback for legacy mixed-si
   );
 });
 
-test("sortFavoriteCreators prioritizes local favorite chronology over legacy upstream order", () => {
+test("sortFavoriteCreators prioritizes descending favedSeq over legacy upstream order", () => {
   const creators = [
     makeCreator({
-      id: "legacy",
+      id: "older-seq",
       site: "kemono",
       favoriteSourceIndex: 0,
       favoriteAddedAt: null,
+      favedSeq: 10,
     }),
     makeCreator({
-      id: "recent",
+      id: "newer-seq",
       site: "coomer",
       service: "onlyfans",
       favoriteSourceIndex: 10,
       favoriteAddedAt: "2026-03-19T12:00:00.000Z",
+      favedSeq: 20,
     }),
   ];
 
   const sorted = sortFavoriteCreators(creators, "favorites");
 
-  assert.deepEqual(sorted.map((creator) => creator.id), ["recent", "legacy"]);
+  assert.deepEqual(sorted.map((creator) => creator.id), ["newer-seq", "older-seq"]);
 });
 
 test("filterFavoritePosts searches title, content, creator name, and service", () => {
@@ -113,27 +117,29 @@ test("filterFavoritePosts searches title, content, creator name, and service", (
   assert.deepEqual(filterFavoritePosts(posts, { query: "maple", service: "Tous" }).map((post) => post.id), ["post-2"]);
 });
 
-test("sortFavoritePosts supports added-first and published sorts", () => {
+test("sortFavoritePosts supports faved-date and published sorts", () => {
   const posts = [
     makePost({
-      id: "legacy",
+      id: "older-seq",
       site: "kemono",
       favoriteSourceIndex: 0,
       favoriteAddedAt: null,
+      favedSeq: 12,
       published: "2026-03-18T10:00:00.000Z",
     }),
     makePost({
-      id: "newer",
+      id: "newer-seq",
       site: "coomer",
       service: "onlyfans",
       favoriteSourceIndex: 4,
       favoriteAddedAt: "2026-03-19T12:00:00.000Z",
+      favedSeq: 30,
       published: "2026-03-17T10:00:00.000Z",
     }),
   ];
 
-  assert.deepEqual(sortFavoritePosts(posts, "favorites").map((post) => post.id), ["newer", "legacy"]);
-  assert.deepEqual(sortFavoritePosts(posts, "published").map((post) => post.id), ["legacy", "newer"]);
+  assert.deepEqual(sortFavoritePosts(posts, "favorites").map((post) => post.id), ["newer-seq", "older-seq"]);
+  assert.deepEqual(sortFavoritePosts(posts, "published").map((post) => post.id), ["older-seq", "newer-seq"]);
 });
 
 test("filterFavoriteCreators keeps creator-name filtering behavior", () => {

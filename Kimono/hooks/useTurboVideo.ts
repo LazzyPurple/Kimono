@@ -38,6 +38,15 @@ function readInitialVisibilityState(): boolean {
   return document.visibilityState !== "hidden";
 }
 
+function canUseMediaSourcePlayback(url: string | undefined): boolean {
+  if (!url) {
+    return false;
+  }
+
+  const normalizedUrl = url.split("?")[0]?.toLowerCase() ?? "";
+  return normalizedUrl.endsWith(".mp4") || normalizedUrl.endsWith(".m4v") || normalizedUrl.includes("/clip.mp4");
+}
+
 export function useTurboVideo(
   originalUrl: string | undefined,
   videoRef: RefObject<HTMLVideoElement | null>,
@@ -402,6 +411,11 @@ export function useTurboVideo(
 
   const playTurbo = useCallback(async () => {
     if (!isPageVisible || isFallback || isLoading || !originalUrl || !totalSizeRef.current || objectUrlRef.current) {
+      return;
+    }
+
+    if (!canUseMediaSourcePlayback(originalUrl)) {
+      fallbackToNative();
       return;
     }
 

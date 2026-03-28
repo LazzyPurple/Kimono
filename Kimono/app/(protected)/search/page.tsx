@@ -10,7 +10,7 @@ import { useLikes } from "@/contexts/LikesContext";
 import { useScrollRestoration } from "@/hooks/useScrollRestoration";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
-import { buildSearchCacheKey, type SearchFilter, type SearchSort } from "@/lib/perf-cache";
+import { buildSearchCacheKey, type SearchFilter, type SearchSort } from "@/lib/db/performance-cache";
 import { buildSearchPageTitle } from "@/lib/page-titles";
 import { shouldCacheSearchResponse } from "@/lib/search-response-cache";
 import type { UnifiedCreator } from "@/lib/api/helpers";
@@ -136,7 +136,7 @@ function SearchPageContent() {
             });
             likedCreatorKeys.forEach((key) => params.append("liked", key));
 
-            const response = await fetch(`/api/search-creators?${params.toString()}`);
+            const response = await fetch(`/api/creators/search?${params.toString()}`);
             if (!response.ok) {
               throw new Error("Network error");
             }
@@ -357,3 +357,5 @@ export default function SearchPage() {
     </Suspense>
   );
 }
+
+

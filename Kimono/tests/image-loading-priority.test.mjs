@@ -40,18 +40,21 @@ test("listing pages prioritize the first four MediaCard instances and forward sh
   assert.match(home, /mediaWidth=\{media\.width\}/);
   assert.match(home, /mediaHeight=\{media\.height\}/);
   assert.match(home, /mediaMimeType=\{media\.mimeType\}/);
+  assert.match(home, /videoPreviewMode="viewport"/);
 
   assert.match(popular, /data\.posts\.map\(\(post, index\) =>/);
   assert.match(popular, /priority=\{index < 4\}/);
   assert.match(popular, /mediaWidth=\{media\.width\}/);
   assert.match(popular, /mediaHeight=\{media\.height\}/);
   assert.match(popular, /mediaMimeType=\{media\.mimeType\}/);
-
+  assert.match(popular, /videoPreviewMode="viewport"/);
+  assert.match(popular, /detailSource="popular"/);
   assert.match(creator, /visiblePosts\.map\(\(post, index\) =>/);
   assert.match(creator, /priority=\{index < 4\}/);
   assert.match(creator, /mediaWidth=\{media\.width\}/);
   assert.match(creator, /mediaHeight=\{media\.height\}/);
   assert.match(creator, /mediaMimeType=\{media\.mimeType\}/);
+  assert.match(creator, /videoPreviewMode="viewport"/);
 
   assert.match(favorites, /paginatedPosts\.map\(\(post, index\) =>/);
   assert.match(favorites, /mediaWidth=\{media\.width\}/);
@@ -65,3 +68,4 @@ test("post gallery keeps the first image eager and lazy-loads the rest", () => {
   assert.match(postPage, /images\.map\(\(media, index\) =>/);
   assert.match(postPage, /loading=\{index === 0 \? undefined : "lazy"\}/);
 });
+

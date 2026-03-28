@@ -7,7 +7,7 @@ import {
   buildMediaSourcePublicUrl,
   createPreviewSourceFingerprint,
 } from "./popular-preview-assets.ts";
-import type { PerformanceRepository } from "./perf-repository.ts";
+import type { PerformanceRepository } from "./db/index.ts";
 
 type MediaSourceLookupRepository = Pick<PerformanceRepository, "getMediaSourceCache">;
 
@@ -63,3 +63,4 @@ export async function hydratePostVideoSources(
     })
   );
 }
+

@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -10,7 +10,7 @@ function read(relativePath) {
 }
 
 test("media source stream route supports ranged local streaming with cache headers", () => {
-  const source = read("app/api/media-source/[site]/[sourceFingerprint]/route.ts");
+  const source = read("app/api/media/[site]/[fp]/route.ts");
 
   assert.match(source, /createReadStream/);
   assert.match(source, /status:\s*206/);
@@ -20,12 +20,32 @@ test("media source stream route supports ranged local streaming with cache heade
 });
 
 test("media source warm route validates post video paths instead of accepting arbitrary urls", () => {
-  const source = read("app/api/media-source/warm/route.ts");
+  const source = read("app/api/media/warm/route.ts");
 
   assert.match(source, /path/);
   assert.match(source, /creatorId/);
   assert.match(source, /postId/);
   assert.match(source, /service/);
   assert.match(source, /getPostDetail/);
+  assert.doesNotMatch(source, /sourceVideoUrl\s*:/);
+});
+
+test("media source warm route short-circuits on source fingerprint cache state before refetching post detail", () => {
+  const source = read("app/api/media/warm/route.ts");
+
+  assert.match(source, /sourceFingerprint/);
+  assert.match(source, /getMediaSourceCache/);
+  assert.match(source, /localSourceAvailable/);
+  assert.match(source, /sourceCacheStatus/);
+});
+
+
+test("download route streams validated videos as attachments", () => {
+  const source = read("app/api/media/download/route.ts");
+
+  assert.match(source, /content-disposition/);
+  assert.match(source, /resolveRequestedPostVideoSource/);
+  assert.match(source, /getMediaSourceCache/);
+  assert.match(source, /attachment/);
   assert.doesNotMatch(source, /sourceVideoUrl\s*:/);
 });

@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createServerHealthService } from "../lib/server-health.ts";
@@ -21,7 +21,7 @@ test("server health service aggregates runtime, cooldowns and local snapshot sta
       { site: "coomer", bucket: "discover", blockedUntil: Date.UTC(2026, 2, 20, 12, 10, 0), retryAfterMs: 12000 },
     ]),
     getStore: async () => ({
-      getFavoriteSnapshot: async ({ kind, site }) => ({
+      getFavoriteCacheSnapshot: async ({ kind, site }) => ({
         data: kind === "creator" ? JSON.stringify([{ id: `${site}-creator` }]) : JSON.stringify([{ id: `${site}-post` }, { id: `${site}-post-2` }]),
         updatedAt: new Date("2026-03-20T12:00:00.000Z"),
       }),
@@ -32,7 +32,7 @@ test("server health service aggregates runtime, cooldowns and local snapshot sta
       disconnect: async () => undefined,
     }),
     getRepository: async () => ({
-      searchCreatorsPage: async ({ filter }) => ({
+      searchCreatorCatalogPage: async ({ filter }) => ({
         items: [],
         total: filter === "kemono" ? 10 : 20,
         page: 1,
@@ -41,14 +41,14 @@ test("server health service aggregates runtime, cooldowns and local snapshot sta
         snapshotFresh: filter === "kemono",
         syncedAt: new Date("2026-03-20T11:00:00.000Z"),
       }),
-      getMediaSourceCacheStats: async () => ({
+      getMediaSourceStatsSnapshot: async () => ({
         totalEntries: 3,
         totalSizeBytes: 123456789,
         readyEntries: 2,
         remoteHttpErrors: 1,
         toolMissing: 0,
       }),
-      getPreviewAssetStats: async () => ({
+      getPreviewStatsSnapshot: async () => ({
         totalEntries: 4,
         readyEntries: 2,
         partialEntries: 1,
@@ -72,3 +72,4 @@ test("server health service aggregates runtime, cooldowns and local snapshot sta
   assert.equal(snapshot.mediaSources.readyEntries, 2);
   assert.equal(snapshot.previews.readyEntries, 2);
 });
+

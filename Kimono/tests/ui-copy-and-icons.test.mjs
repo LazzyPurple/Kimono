@@ -28,7 +28,7 @@ const uiFiles = [
   "components/VideoPlayer.tsx",
 ];
 
-const mojibakePattern = /�|�|…|—|❤|\uFFFD/;
+const mojibakePattern = /�|�|…|—|❤|\uFFFD/;
 
 test("key UI files do not contain mojibake characters", () => {
   for (const file of uiFiles) {

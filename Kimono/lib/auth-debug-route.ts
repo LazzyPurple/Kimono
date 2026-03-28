@@ -1,11 +1,11 @@
-﻿import { createHash } from "node:crypto";
-import { getDataStore } from "./data-store.ts";
+import { createHash } from "node:crypto";
+import { getDataStore } from "./db/index.ts";
 import { resolveLocalDevMode } from "./local-dev-mode.ts";
 import { shouldEnableCredentialAuth } from "./auth-guards.ts";
 import { toAuthDebugErrorDetails, shouldEnableAuthDebugLog } from "./auth-debug.ts";
 import { getDiagnosticAccessDecision } from "./diagnostic-access.ts";
 
-import type { DataStore, StoredUser } from "./data-store.ts";
+import type { DataStore, StoredUser } from "./db/index.ts";
 
 type EnvShape = Record<string, string | undefined>;
 type AuthDebugStore = Pick<DataStore, "getOrCreateAdminUser" | "disconnect">;
@@ -390,4 +390,5 @@ export async function collectAuthDebugSnapshot(options?: {
     }
   }
 }
+
 

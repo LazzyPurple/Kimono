@@ -102,8 +102,8 @@ test("media platform reuses a known source and hydrates the post with cached art
   });
 
   assert.equal(touched.length, 1);
-  assert.equal(hydrated.previewThumbnailUrl, "/api/preview-assets/popular/kemono/fingerprint-123456789012/thumb.webp");
-  assert.equal(hydrated.previewClipUrl, "/api/preview-assets/popular/kemono/fingerprint-123456789012/clip.mp4");
+  assert.equal(hydrated.previewThumbnailUrl, "/api/media/preview/popular/kemono/fingerprint-123456789012/thumb.webp");
+  assert.equal(hydrated.previewClipUrl, "/api/media/preview/popular/kemono/fingerprint-123456789012/clip.mp4");
   assert.equal(hydrated.longestVideoDurationSeconds, 42);
   assert.equal(hydrated.mediaKind, "video");
   assert.equal(hydrated.mediaProbeStatus, "probed");

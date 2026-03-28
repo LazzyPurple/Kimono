@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { generateTotpSetup } from "@/lib/auth/totp";
-import { getDataStore } from "@/lib/data-store";
+import { getDataStore } from "@/lib/db/index";
 import { getTotpSetupAvailability } from "@/lib/auth-guards";
 import { isLocalDevMode } from "@/lib/local-dev-mode";
 
@@ -75,3 +75,4 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ success: true, message: "2FA activee avec succes" });
 }
+

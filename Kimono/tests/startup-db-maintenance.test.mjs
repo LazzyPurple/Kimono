@@ -1,4 +1,4 @@
-import test from "node:test";
+﻿import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -17,7 +17,7 @@ function read(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), "utf8");
 }
 
-test("startup DB maintenance purges only rebuildable tables and resets media cache directories", async () => {
+test("startup DB maintenance preserves creator catalog tables while purging rebuildable caches", async () => {
   const executedSql = [];
   const resetDirs = [];
 
@@ -37,6 +37,10 @@ test("startup DB maintenance purges only rebuildable tables and resets media cac
     logger: { info() {}, warn() {} },
   });
 
+  assert.equal(REBUILDABLE_DB_TABLES.includes("CreatorIndex"), false);
+  assert.equal(REBUILDABLE_DB_TABLES.includes("CreatorsCache"), false);
+  assert.equal(PRESERVED_DB_TABLES.includes("CreatorIndex"), true);
+  assert.equal(PRESERVED_DB_TABLES.includes("CreatorsCache"), true);
   assert.deepEqual(summary.tablesPurged, REBUILDABLE_DB_TABLES);
   assert.deepEqual(summary.directoriesReset, [
     path.resolve(root, "tmp/custom-preview-assets"),
@@ -58,6 +62,8 @@ test("startup DB maintenance purges only rebuildable tables and resets media cac
       `${table} must be preserved during startup purge`
     );
   }
+
+  assert.deepEqual(resetDirs, summary.directoriesReset);
 });
 
 test("startup DB maintenance ignores missing tables and cache directories", async () => {
@@ -91,6 +97,7 @@ test("startup DB maintenance ignores missing tables and cache directories", asyn
   assert.equal(summary.tablesPurged.includes("PostCache"), true);
   assert.equal(summary.tablesPurged.includes("MediaSourceCache"), false);
   assert.equal(summary.directoriesReset.includes(path.resolve(root, "tmp", "media-source-cache")), true);
+  assert.equal(resetDirs.length >= 1, true);
 });
 
 test("startup DB maintenance fails fast on unexpected SQL errors", async () => {
@@ -112,9 +119,20 @@ test("startup DB maintenance fails fast on unexpected SQL errors", async () => {
   );
 });
 
-test("server startup triggers rebuildable DB maintenance before serving traffic", () => {
+test("server startup runs creator sync at boot and no longer auto-purges rebuildable DB state", () => {
   const source = read("server.js");
 
-  assert.match(source, /purgeRebuildableDataOnStartup/);
-  assert.match(source, /startup rebuildable data purge complete/);
+  assert.match(source, /runCreatorSync/);
+  assert.match(source, /scheduleCreatorSyncRefresh/);
+  assert.doesNotMatch(source, /purgeRebuildableDataOnStartup/);
+  assert.doesNotMatch(source, /startup rebuildable data purge complete/);
+  assert.match(source, /startup creator index warm complete/);
+  assert.match(source, /startup creator index warm failed/);
+  assert.match(source, /continuing without blocking boot/);
+  assert.match(source, /startup creator index refresh schedule initialized/);
+  assert.match(source, /void\s+\(async/);
+  assert.equal(source.includes("createServer("), true);
 });
+
+
+

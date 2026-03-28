@@ -9,6 +9,7 @@ export interface FavoriteChronologyRecord {
   creatorId: string;
   postId: string | null;
   favoritedAt: Date;
+  favedSeq: number | null;
 }
 
 export type FavoriteOrderSource = "exact" | "retained" | "fallback";
@@ -20,6 +21,7 @@ export interface FavoriteCreatorListItem extends UnifiedCreator {
   favoriteSourceIndex: number;
   snapshotUpdatedAt: string | null;
   stale: boolean;
+  favedSeq: number | null;
 }
 
 export interface FavoritePostListItem extends UnifiedPost {
@@ -30,6 +32,7 @@ export interface FavoritePostListItem extends UnifiedPost {
   favoriteSourceIndex: number;
   snapshotUpdatedAt: string | null;
   stale: boolean;
+  favedSeq: number | null;
 }
 
 const SITE_ORDER: Record<Site, number> = {
@@ -69,18 +72,35 @@ export function buildFavoriteChronologyMap(entries: FavoriteChronologyRecord[]):
 
 function toTimestamp(value: string | number | Date | null | undefined): number {
   if (!value) {
-    return Number.NEGATIVE_INFINITY;
+    return Number.POSITIVE_INFINITY;
   }
 
   const date = value instanceof Date ? value : new Date(value);
   const time = date.getTime();
-  return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY;
+  return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY;
+}
+
+function compareKnownFavedSeq(left: { favedSeq: number }, right: { favedSeq: number }): number {
+  return right.favedSeq - left.favedSeq;
 }
 
 function compareAddedFirst(
-  left: { site: Site; favoriteAddedAt: string | null; favoriteDateKnown?: boolean; favoriteOrderSource?: FavoriteOrderSource; favoriteSourceIndex: number },
-  right: { site: Site; favoriteAddedAt: string | null; favoriteDateKnown?: boolean; favoriteOrderSource?: FavoriteOrderSource; favoriteSourceIndex: number }
+  left: { site: Site; favoriteAddedAt: string | null; favoriteDateKnown?: boolean; favoriteOrderSource?: FavoriteOrderSource; favoriteSourceIndex: number; favedSeq?: number | null },
+  right: { site: Site; favoriteAddedAt: string | null; favoriteDateKnown?: boolean; favoriteOrderSource?: FavoriteOrderSource; favoriteSourceIndex: number; favedSeq?: number | null }
 ): number {
+  const leftSeq = left.favedSeq ?? null;
+  const rightSeq = right.favedSeq ?? null;
+  const leftHasSeq = Number.isFinite(leftSeq as number);
+  const rightHasSeq = Number.isFinite(rightSeq as number);
+
+  if (leftHasSeq && rightHasSeq && leftSeq !== rightSeq) {
+    return compareKnownFavedSeq(left as { favedSeq: number }, right as { favedSeq: number });
+  }
+
+  if (leftHasSeq !== rightHasSeq) {
+    return leftHasSeq ? -1 : 1;
+  }
+
   const leftAddedAt = toTimestamp(left.favoriteAddedAt);
   const rightAddedAt = toTimestamp(right.favoriteAddedAt);
   const leftDateKnown = left.favoriteDateKnown ?? Number.isFinite(leftAddedAt);
@@ -191,3 +211,6 @@ export function normalizeFavoritesPageParam(value: string | null | undefined): n
 
   return Math.trunc(parsed);
 }
+
+
+

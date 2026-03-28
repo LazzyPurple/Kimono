@@ -1,9 +1,10 @@
-generator client {
+﻿generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
+  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -37,49 +38,66 @@ model Session {
 
 model KimonoSession {
   id       String   @id @default(cuid())
-  site     String
+  site     String   @unique
   cookie   String
   username String
   savedAt  DateTime @default(now())
+
+  @@index([savedAt], map: "KimonoSession_savedAt_idx")
 }
 
-model CreatorsCache {
-  site      String   @id
-  data      String
-  updatedAt DateTime @updatedAt
-}
-
-model CreatorIndex {
-  site              String
-  service           String
-  creatorId         String
-  name              String
-  normalizedName    String
-  favorited         Int      @default(0)
-  updatedAt         DateTime?
-  indexedAt         DateTime?
-  profileImageUrl   String?
-  bannerImageUrl    String?
-  publicId          String?
-  postCount         Int?
-  rawPreviewPayload String?
-  syncedAt          DateTime @default(now())
+model Creator {
+  site            String
+  service         String
+  creatorId       String
+  name            String
+  normalizedName  String
+  indexed         BigInt?
+  updated         BigInt?
+  favorited       Int       @default(0)
+  postCount       Int       @default(0)
+  publicId        String?
+  relationId      BigInt?
+  dmCount         Int       @default(0)
+  shareCount      Int       @default(0)
+  hasChats        Boolean   @default(false)
+  chatCount       Int       @default(0)
+  profileImageUrl String?
+  bannerImageUrl  String?
+  rawIndexPayload String?
+  rawProfilePayload String?
+  catalogSyncedAt DateTime  @default(now())
+  profileCachedAt DateTime?
+  profileExpiresAt DateTime?
+  archivedAt      DateTime?
 
   @@id([site, service, creatorId])
-  @@index([normalizedName], map: "CreatorIndex_normalizedName_idx")
-  @@index([site, syncedAt], map: "CreatorIndex_site_syncedAt_idx")
+  @@index([normalizedName], map: "Creator_normalizedName_idx")
+  @@index([site, service, favorited], map: "Creator_site_service_favorited_idx")
+  @@index([site, service, updated], map: "Creator_site_service_updated_idx")
+  @@index([catalogSyncedAt], map: "Creator_catalogSyncedAt_idx")
+  @@index([profileExpiresAt], map: "Creator_profileExpiresAt_idx")
 }
 
-model PostCache {
+model Post {
   site                        String
   service                     String
   creatorId                   String
   postId                      String
   title                       String?
+  contentHtml                 String?
   excerpt                     String?
   publishedAt                 DateTime?
   addedAt                     DateTime?
   editedAt                    DateTime?
+  fileName                    String?
+  filePath                    String?
+  attachmentsJson             String?
+  embedJson                   String?
+  tagsJson                    String?
+  prevPostId                  String?
+  nextPostId                  String?
+  favCount                    Int       @default(0)
   previewImageUrl             String?
   videoUrl                    String?
   thumbUrl                    String?
@@ -87,73 +105,139 @@ model PostCache {
   authorName                  String?
   rawPreviewPayload           String?
   rawDetailPayload            String?
-  detailLevel                 String
-  sourceKind                  String
+  detailLevel                 String    @default("preview")
+  sourceKind                  String    @default("upstream")
+  isPopular                   Boolean   @default(false)
+  primaryPopularPeriod        String?
+  primaryPopularDate          String?
+  primaryPopularOffset        Int?
+  primaryPopularRank          Int?
+  popularContextsJson         String?
   longestVideoUrl             String?
   longestVideoDurationSeconds Float?
+  previewStatus               String?
+  nativeThumbnailUrl          String?
   previewThumbnailAssetPath   String?
   previewClipAssetPath        String?
-  previewStatus               String?
   previewGeneratedAt          DateTime?
   previewError                String?
   previewSourceFingerprint    String?
-  cachedAt                    DateTime @default(now())
+  mediaMimeType               String?
+  mediaWidth                  Int?
+  mediaHeight                 Int?
+  cachedAt                    DateTime  @default(now())
   expiresAt                   DateTime
+  staleUntil                  DateTime?
+  lastSeenAt                  DateTime?
 
   @@id([site, service, creatorId, postId])
-  @@index([site, service, creatorId, publishedAt], map: "PostCache_creator_idx")
-  @@index([expiresAt], map: "PostCache_expiresAt_idx")
-  @@index([site, previewSourceFingerprint], map: "PostCache_previewSourceFingerprint_idx")
+  @@index([site, service, creatorId, publishedAt], map: "Post_creator_published_idx")
+  @@index([expiresAt], map: "Post_expiresAt_idx")
+  @@index([site, previewSourceFingerprint], map: "Post_previewSourceFingerprint_idx")
+  @@index([site, isPopular, primaryPopularPeriod, primaryPopularDate, primaryPopularOffset, primaryPopularRank], map: "Post_popular_lookup_idx")
+  @@index([lastSeenAt], map: "Post_lastSeenAt_idx")
 }
 
-model PreviewAssetCache {
-  site               String
-  sourceVideoUrl     String
-  sourceFingerprint  String
-  durationSeconds    Float?
-  thumbnailAssetPath String?
-  clipAssetPath      String?
-  status             String   @default("pending")
-  generatedAt        DateTime @default(now())
-  lastSeenAt         DateTime @default(now())
-  error              String?
+model FavoriteChronology {
+  kind            String
+  site            String
+  service         String
+  creatorId       String
+  postId          String   @default("")
+  favoritedAt     DateTime @default(now())
+  lastConfirmedAt DateTime @default(now())
+
+  @@id([kind, site, service, creatorId, postId])
+  @@index([lastConfirmedAt], map: "FavoriteChronology_lastConfirmedAt_idx")
+  @@index([kind, site, favoritedAt], map: "FavoriteChronology_kind_site_favoritedAt_idx")
+  @@index([favedSeq], map: "FavoriteChronology_favedSeq_idx")
+}
+
+model FavoriteCache {
+  kind       String
+  site       String
+  payloadJson String
+  updatedAt  DateTime @default(now())
+  expiresAt  DateTime
+
+  @@id([kind, site])
+  @@index([expiresAt], map: "FavoriteCache_expiresAt_idx")
+}
+
+model MediaAsset {
+  site                String
+  sourceFingerprint   String
+  sourceUrl           String
+  sourcePath          String?
+  mediaKind           String?
+  mimeType            String?
+  width               Int?
+  height              Int?
+  durationSeconds     Float?
+  nativeThumbnailUrl  String?
+  thumbnailAssetPath  String?
+  clipAssetPath       String?
+  probeStatus         String   @default("pending")
+  previewStatus       String   @default("pending")
+  firstSeenAt         DateTime @default(now())
+  lastSeenAt          DateTime @default(now())
+  hotUntil            DateTime?
+  retryAfter          DateTime?
+  generationAttempts  Int      @default(0)
+  lastError           String?
+  lastObservedContext String?
+  cachedAt            DateTime @default(now())
+  expiresAt           DateTime?
 
   @@id([site, sourceFingerprint])
-  @@index([lastSeenAt], map: "PreviewAssetCache_lastSeenAt_idx")
+  @@index([lastSeenAt], map: "MediaAsset_lastSeenAt_idx")
+  @@index([hotUntil], map: "MediaAsset_hotUntil_idx")
+  @@index([retryAfter], map: "MediaAsset_retryAfter_idx")
+  @@index([expiresAt], map: "MediaAsset_expiresAt_idx")
 }
 
-model PopularSnapshot {
-  snapshotRunId String
-  rank          Int
-  site          String
-  period        String
-  rangeKey      String   @default("")
-  pageOffset    Int      @default(0)
-  snapshotDate  String
-  syncedAt      DateTime @default(now())
-  postSite      String
-  postService   String
-  creatorId     String
-  postId        String
+model MediaSource {
+  site                String
+  sourceFingerprint   String
+  sourceUrl           String
+  sourcePath          String?
+  localPath           String?
+  downloadStatus      String   @default("pending")
+  downloadedAt        DateTime?
+  lastSeenAt          DateTime @default(now())
+  retentionUntil      DateTime?
+  fileSizeBytes       BigInt?
+  mimeType            String?
+  downloadError       String?
+  downloadAttempts    Int      @default(0)
+  lastObservedContext String?
+  priorityClass       String?
+  retryAfter          DateTime?
+  firstSeenAt         DateTime @default(now())
 
-  @@id([snapshotRunId, rank])
-  @@index([site, period, rangeKey, pageOffset, syncedAt], map: "PopularSnapshot_lookup_idx")
-  @@index([snapshotDate], map: "PopularSnapshot_snapshotDate_idx")
+  @@id([site, sourceFingerprint])
+  @@index([lastSeenAt], map: "MediaSource_lastSeenAt_idx")
+  @@index([retentionUntil], map: "MediaSource_retentionUntil_idx")
+  @@index([priorityClass], map: "MediaSource_priorityClass_idx")
+  @@index([retryAfter], map: "MediaSource_retryAfter_idx")
+}
+
+model DiscoveryCache {
+  site       String   @id
+  payloadJson String
+  updatedAt  DateTime @default(now())
+  expiresAt  DateTime
+
+  @@index([expiresAt], map: "DiscoveryCache_expiresAt_idx")
 }
 
 model DiscoveryBlock {
-  id        String   @id @default(cuid())
   site      String
   service   String
   creatorId String
   blockedAt DateTime @default(now())
 
-  @@unique([site, service, creatorId])
-}
-
-model DiscoveryCache {
-  id        String   @id @default(cuid())
-  data      String
-  updatedAt DateTime @default(now())
+  @@id([site, service, creatorId])
+  @@index([blockedAt], map: "DiscoveryBlock_blockedAt_idx")
 }
 

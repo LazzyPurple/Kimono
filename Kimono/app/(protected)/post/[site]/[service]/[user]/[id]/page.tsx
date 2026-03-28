@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, Calendar, Download, ExternalLink, Heart, Loader2, User } from "lucide-react";
@@ -11,7 +11,7 @@ import { useLikes } from "@/contexts/LikesContext";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { proxyCdnUrl, resolvePostMedia, type PostVideoSource, type Site, type UnifiedPost } from "@/lib/api/helpers";
 import { fetchJsonWithBrowserCache } from "@/lib/browser-data-cache";
-import { BROWSER_POST_CACHE_TTL_MS, buildCreatorProfileCacheKey, buildPostCacheKey } from "@/lib/perf-cache";
+import { BROWSER_POST_CACHE_TTL_MS, buildCreatorProfileCacheKey, buildPostCacheKey } from "@/lib/db/performance-cache";
 import { buildPostPageTitle } from "@/lib/page-titles";
 import type { Creator } from "@/lib/api/kemono";
 
@@ -26,12 +26,14 @@ function isVideo(path: string): boolean {
 export default function PostPage() {
   const params = useParams<{ site: string; service: string; user: string; id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isPostLiked, togglePostLike } = useLikes();
 
   const site = params.site as Site;
   const service = params.service;
   const user = params.user;
   const id = params.id;
+  const postSource = searchParams.get("source");
 
   const isValidSite = site === "kemono" || site === "coomer";
   const isValid = isValidSite && Boolean(service) && Boolean(user) && Boolean(id);
@@ -61,10 +63,10 @@ export default function PostPage() {
       try {
         const [postResponse, profileResponse] = await Promise.allSettled([
           fetchJsonWithBrowserCache<UnifiedPost>({
-            key: `post-detail:${buildPostCacheKey({ site, service, creatorId: user, postId: id })}`,
+            key: `post-detail:v2:${buildPostCacheKey({ site, service, creatorId: user, postId: id })}`,
             ttlMs: BROWSER_POST_CACHE_TTL_MS,
             loader: async () => {
-              const response = await fetch(`/api/post?site=${site}&service=${service}&user=${user}&id=${id}`);
+              const response = await fetch(`/api/posts/${site}/${service}/${user}/${id}`);
               if (!response.ok) {
                 throw new Error("Failed to load the post.");
               }
@@ -76,7 +78,7 @@ export default function PostPage() {
             key: buildCreatorProfileCacheKey({ site, service, creatorId: user }),
             ttlMs: BROWSER_POST_CACHE_TTL_MS,
             loader: async () => {
-              const response = await fetch(`/api/creator-profile?site=${site}&service=${service}&id=${user}`);
+              const response = await fetch(`/api/creators/${site}/${service}/${user}`);
               return response.ok ? response.json() : null;
             },
           }),
@@ -253,6 +255,7 @@ export default function PostPage() {
                 poster={postMedia?.previewImageUrl}
                 filename={media.name || media.path}
                 className="w-full"
+                turboEnabled={postSource !== "popular"}
               />
             );
           })}
@@ -315,3 +318,6 @@ export default function PostPage() {
     </div>
   );
 }
+
+
+

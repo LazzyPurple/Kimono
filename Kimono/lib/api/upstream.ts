@@ -1,7 +1,8 @@
 ﻿import axios from "axios";
 
 import type { Creator, Post } from "./kemono.ts";
-import type { PopularPeriod } from "../perf-cache.ts";
+import type { PopularPeriod } from "../db/index.ts";
+import { createUpstreamBrowserHeaders } from "./upstream-browser-headers.ts";
 
 export const SITE_BASE_URLS = {
   kemono: "https://kemono.cr",
@@ -23,10 +24,8 @@ export async function fetchAllCreatorsFromSite(site: Site): Promise<Creator[]> {
   for (const endpoint of endpoints) {
     try {
       const response = await axios.get(`${baseUrl}${endpoint}`, {
-        headers: {
-          Accept: "text/css",
-        },
-        timeout: 15000,
+        headers: createUpstreamBrowserHeaders(site),
+        timeout: 60000,
       });
 
       const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
@@ -59,9 +58,7 @@ export async function fetchPopularPostsFromSite(input: {
   }
 
   const response = await fetch(targetUrl.toString(), {
-    headers: {
-      Accept: "text/css",
-    },
+    headers: createUpstreamBrowserHeaders(input.site),
   });
 
   if (!response.ok) {
@@ -86,14 +83,10 @@ export async function fetchPostDetailFromSite(input: {
   const response = await axios.get(
     `${SITE_BASE_URLS[input.site]}/api/v1/${input.service}/user/${input.creatorId}/post/${input.postId}`,
     {
-      headers: {
-        Accept: "text/css",
-        ...(input.cookie ? { Cookie: input.cookie } : {}),
-      },
-      timeout: 15000,
+      headers: createUpstreamBrowserHeaders(input.site, input.cookie),
+      timeout: 60000,
     }
   );
 
   return response.data?.post ?? response.data;
 }
-

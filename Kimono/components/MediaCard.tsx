@@ -28,17 +28,13 @@ interface MediaCardProps {
   user: string;
   publishedAt?: string | number;
   durationSeconds?: number | null;
-  videoPreviewMode?: "hover" | "viewport";
+  videoPreviewMode?: "hover" | "viewport" | "disabled";
   priority?: boolean;
   mediaWidth?: number | null;
   mediaHeight?: number | null;
   mediaMimeType?: string | null;
+  detailSource?: string;
 }
-
-const videoDurationCache = new Map<string, number | null>();
-const DURATION_PROBE_LIMIT = 2;
-const durationProbeQueue: Array<() => void> = [];
-let durationProbeActiveCount = 0;
 
 function isDocumentVisible(): boolean {
   if (typeof document === "undefined") {
@@ -46,71 +42,6 @@ function isDocumentVisible(): boolean {
   }
 
   return document.visibilityState !== "hidden";
-}
-
-function runDurationProbeQueue(): void {
-  while (durationProbeActiveCount < DURATION_PROBE_LIMIT && durationProbeQueue.length > 0) {
-    const next = durationProbeQueue.shift();
-    if (!next) {
-      return;
-    }
-
-    durationProbeActiveCount += 1;
-    next();
-  }
-}
-
-function withDurationProbeSlot<T>(task: () => Promise<T>): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    durationProbeQueue.push(() => {
-      void task()
-        .then(resolve, reject)
-        .finally(() => {
-          durationProbeActiveCount = Math.max(0, durationProbeActiveCount - 1);
-          runDurationProbeQueue();
-        });
-    });
-
-    runDurationProbeQueue();
-  });
-}
-
-function readVideoDuration(url: string): Promise<number | null> {
-  return withDurationProbeSlot(() => new Promise((resolve) => {
-    if (!isDocumentVisible()) {
-      resolve(null);
-      return;
-    }
-
-    const video = document.createElement("video");
-    let settled = false;
-
-    const finalize = (duration: number | null) => {
-      if (settled) {
-        return;
-      }
-
-      settled = true;
-      video.removeAttribute("src");
-      video.load();
-      resolve(duration);
-    };
-
-    const timeout = window.setTimeout(() => finalize(null), 12000);
-
-    video.preload = "metadata";
-    video.muted = true;
-    video.playsInline = true;
-    video.onloadedmetadata = () => {
-      window.clearTimeout(timeout);
-      finalize(Number.isFinite(video.duration) ? video.duration : null);
-    };
-    video.onerror = () => {
-      window.clearTimeout(timeout);
-      finalize(null);
-    };
-    video.src = url;
-  }));
 }
 
 function formatPublishedDate(publishedAt?: string | number): string | null {
@@ -138,11 +69,12 @@ export default function MediaCard({
   user,
   publishedAt,
   durationSeconds = null,
-  videoPreviewMode = "hover",
+  videoPreviewMode = "viewport",
   priority = false,
   mediaWidth = null,
   mediaHeight = null,
   mediaMimeType = null,
+  detailSource,
 }: MediaCardProps) {
   const [hovered, setHovered] = useState(false);
   const [hasHovered, setHasHovered] = useState(false);
@@ -161,6 +93,9 @@ export default function MediaCard({
   const liked = isPostLiked(site, service, user, postId);
   const showImage = Boolean(previewImageUrl) && !imgError;
   const publishedLabel = formatPublishedDate(publishedAt);
+  const detailHref = detailSource
+    ? `/post/${site}/${service}/${user}/${postId}?source=${encodeURIComponent(detailSource)}`
+    : `/post/${site}/${service}/${user}/${postId}`;
   const resolvedVideoCandidates = Array.from(
     new Set((videoCandidates?.length ? videoCandidates : videoUrl ? [videoUrl] : []).filter(Boolean))
   ) as string[];
@@ -182,74 +117,14 @@ export default function MediaCard({
       return;
     }
 
-    if (durationSeconds != null) {
-      setDurationLabel(formatVideoDurationLabel(durationSeconds));
-      const canWarmInBackground = (videoPreviewMode === "viewport" || !showImage) && isDocumentVisible();
-      if (canWarmInBackground) {
-        setShouldWarmVideo(true);
-      }
-      return;
-    }
+    const cachedStates = resolvedVideoCandidates.map((candidateUrl) => readVideoPreviewState(previewCacheRef.current, candidateUrl));
+    const cachedDurations = cachedStates.map((state) => state?.durationSeconds ?? null);
+    const cachedWarmPreview = cachedStates.some((state) => state?.warmed);
+    const effectiveDuration = durationSeconds ?? pickLongestVideoDuration(cachedDurations);
+    const canWarmInBackground = videoPreviewMode !== "disabled" && (videoPreviewMode === "viewport" || !showImage) && isDocumentVisible();
 
-    let cancelled = false;
-    let idleCallbackId: number | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const cachedDurations: Array<number | null | undefined> = [];
-    let hasCachedWarmPreview = false;
-
-    for (const candidateUrl of resolvedVideoCandidates) {
-      const cachedState = readVideoPreviewState(previewCacheRef.current, candidateUrl);
-      if (!cachedState) {
-        cachedDurations.push(undefined);
-        continue;
-      }
-
-      if (cachedState.durationSeconds != null) {
-        videoDurationCache.set(candidateUrl, cachedState.durationSeconds);
-      }
-
-      cachedDurations.push(cachedState.durationSeconds);
-      hasCachedWarmPreview = hasCachedWarmPreview || cachedState.warmed;
-    }
-
-    setDurationLabel(formatVideoDurationLabel(pickLongestVideoDuration(cachedDurations)));
-
-    const canWarmInBackground = (videoPreviewMode === "viewport" || !showImage) && isDocumentVisible();
-
-    if (hasCachedWarmPreview && canWarmInBackground) {
-      setShouldWarmVideo(true);
-    }
-
-    if (!canWarmInBackground) {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const warmSoon = () => {
-      if (!cancelled && isDocumentVisible()) {
-        setShouldWarmVideo(true);
-      }
-    };
-
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      idleCallbackId = window.requestIdleCallback(warmSoon, { timeout: 900 });
-    } else {
-      timeoutId = setTimeout(warmSoon, 180);
-    }
-
-    return () => {
-      cancelled = true;
-
-      if (idleCallbackId != null && typeof window !== "undefined" && "cancelIdleCallback" in window) {
-        window.cancelIdleCallback(idleCallbackId);
-      }
-
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    };
+    setDurationLabel(formatVideoDurationLabel(effectiveDuration));
+    setShouldWarmVideo(Boolean(canWarmInBackground && (cachedWarmPreview || durationSeconds != null)));
   }, [durationSeconds, resolvedVideoCandidates, showImage, type, videoPreviewMode]);
 
   useEffect(() => {
@@ -283,9 +158,11 @@ export default function MediaCard({
     hoverTimerRef.current = setTimeout(() => {
       setHovered(true);
       setHasHovered(true);
-      setShouldWarmVideo(true);
+      if (videoPreviewMode !== "disabled") {
+        setShouldWarmVideo(true);
+      }
     }, 120);
-  }, []);
+  }, [videoPreviewMode]);
 
   const handleMouseLeave = useCallback(() => {
     if (hoverTimerRef.current) {
@@ -298,6 +175,7 @@ export default function MediaCard({
 
   const shouldMountVideo =
     type === "video" &&
+    videoPreviewMode !== "disabled" &&
     Boolean(videoUrl) &&
     (
       hasHovered ||
@@ -335,59 +213,6 @@ export default function MediaCard({
     video.currentTime = 0;
   }, [hovered, shouldMountVideo]);
 
-  useEffect(() => {
-    if (type !== "video") {
-      setDurationLabel(null);
-      return;
-    }
-
-    if (durationSeconds != null) {
-      setDurationLabel(formatVideoDurationLabel(durationSeconds));
-      return;
-    }
-
-    const longestKnownDuration = pickLongestVideoDuration(
-      resolvedVideoCandidates.map((url) => videoDurationCache.get(url))
-    );
-    setDurationLabel(formatVideoDurationLabel(longestKnownDuration));
-
-    if (!isDocumentVisible() || resolvedVideoCandidates.length === 0 || !(shouldWarmVideo || shouldMountVideo || hovered)) {
-      return;
-    }
-
-    const unresolvedUrls = resolvedVideoCandidates.filter((url) => !videoDurationCache.has(url));
-    if (unresolvedUrls.length === 0) {
-      return;
-    }
-
-    let cancelled = false;
-
-    void Promise.all(
-      unresolvedUrls.map(async (url) => {
-        const duration = await readVideoDuration(url);
-        videoDurationCache.set(url, duration);
-        rememberVideoPreviewDuration(previewCacheRef.current, url, duration);
-
-        if (duration != null) {
-          markVideoPreviewWarm(previewCacheRef.current, url);
-        }
-      })
-    ).then(() => {
-      if (cancelled) {
-        return;
-      }
-
-      const nextDuration = pickLongestVideoDuration(
-        resolvedVideoCandidates.map((url) => videoDurationCache.get(url))
-      );
-      setDurationLabel(formatVideoDurationLabel(nextDuration));
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [durationSeconds, hovered, resolvedVideoCandidates, shouldMountVideo, shouldWarmVideo, type]);
-
   const handleVideoReady = useCallback(() => {
     if (!videoUrl) {
       return;
@@ -401,25 +226,22 @@ export default function MediaCard({
     }
 
     const duration = Number.isFinite(videoElement.duration) ? videoElement.duration : null;
-    if (duration != null) {
-      videoDurationCache.set(videoUrl, duration);
-      rememberVideoPreviewDuration(previewCacheRef.current, videoUrl, duration);
-      if (durationSeconds == null) {
-        setDurationLabel((currentLabel) => currentLabel ?? formatVideoDurationLabel(duration));
-      }
+    rememberVideoPreviewDuration(previewCacheRef.current, videoUrl, duration);
+
+    if (durationSeconds == null && duration != null) {
+      setDurationLabel((currentLabel) => currentLabel ?? formatVideoDurationLabel(duration));
     }
   }, [durationSeconds, videoUrl]);
 
   const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
   const showVideoSkeleton = type === "video" && !showImage && !shouldMountVideo;
-  const hasServerClip = Boolean(videoCandidates?.some((url) => url.startsWith("/api/preview-assets/")));
-  const wantsMetadata = shouldWarmVideo || videoPreviewMode === "viewport" || !showImage || hasServerClip;
+  const wantsMetadata = shouldWarmVideo || shouldShowVideo;
   const videoPreload = shouldShowVideo ? "auto" : wantsMetadata ? "metadata" : "none";
 
   return (
     <a
       ref={cardRef}
-      href={`/post/${site}/${service}/${user}/${postId}`}
+      href={detailHref}
       className={`group block overflow-hidden rounded-xl border bg-[#12121a] transition-all duration-300 cursor-pointer ${
         liked
           ? "border-red-500/50 shadow-[0_0_15px_-5px_theme(colors.red.500)] hover:border-red-500"
@@ -556,3 +378,5 @@ export default function MediaCard({
     </a>
   );
 }
+
+

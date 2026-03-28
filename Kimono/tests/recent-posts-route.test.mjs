@@ -33,7 +33,7 @@ test("recent posts payload hydrates the shared media state before returning post
       contexts.push(options?.context ?? null);
       return posts.map((post) => ({
         ...post,
-        previewThumbnailUrl: "/api/preview-assets/popular/kemono/fingerprint/thumb.webp",
+        previewThumbnailUrl: "/api/media/preview/popular/kemono/fingerprint/thumb.webp",
         mediaArtifactStatus: "ready",
       }));
     },
@@ -41,6 +41,6 @@ test("recent posts payload hydrates the shared media state before returning post
 
   assert.deepEqual(contexts, ["recent-posts"]);
   assert.equal(payload.length, 1);
-  assert.equal(payload[0]?.previewThumbnailUrl, "/api/preview-assets/popular/kemono/fingerprint/thumb.webp");
+  assert.equal(payload[0]?.previewThumbnailUrl, "/api/media/preview/popular/kemono/fingerprint/thumb.webp");
   assert.equal(payload[0]?.mediaArtifactStatus, "ready");
 });

@@ -21,7 +21,7 @@ import {
   BROWSER_POST_CACHE_TTL_MS,
   buildCreatorPostsCacheKey,
   buildCreatorProfileCacheKey,
-} from "@/lib/perf-cache";
+} from "@/lib/db/performance-cache";
 import { buildCreatorPageTitle } from "@/lib/page-titles";
 import type { Creator } from "@/lib/api/kemono";
 import {
@@ -143,7 +143,7 @@ export default function CreatorPage() {
         key: buildCreatorProfileCacheKey({ site, service, creatorId: id }),
         ttlMs: BROWSER_POST_CACHE_TTL_MS,
         loader: async () => {
-          const response = await fetch(`/api/creator-profile?site=${site}&service=${service}&id=${id}`);
+          const response = await fetch(`/api/creators/${site}/${service}/${id}`);
           return response.ok ? response.json() : null;
         },
       });
@@ -170,9 +170,13 @@ export default function CreatorPage() {
           }),
           ttlMs: BROWSER_POST_CACHE_TTL_MS,
           loader: async () => {
-            const response = await fetch(`/api/creator-posts?site=${site}&service=${service}&id=${id}&offset=${currentOffset}`);
+            const response = await fetch(`/api/creators/${site}/${service}/${id}/posts?offset=${currentOffset}`);
             const raw = await response.json();
-            return Array.isArray(raw) ? raw : [];
+            return Array.isArray(raw)
+              ? raw
+              : Array.isArray(raw?.posts)
+                ? raw.posts
+                : [];
           },
         });
 
@@ -202,7 +206,7 @@ export default function CreatorPage() {
       key: recommendedCacheKey,
       ttlMs: BROWSER_POST_CACHE_TTL_MS,
       loader: async () => {
-        const response = await fetch(`/api/recommended?site=${site}&service=${service}&id=${id}`);
+        const response = await fetch(`/api/creators/${site}/${service}/${id}/recommended`);
         const data = await response.json();
         return Array.isArray(data) ? data : [];
       },
@@ -278,7 +282,7 @@ export default function CreatorPage() {
           params.set("q", query);
         }
 
-        const response = await fetch("/api/creator-posts/search?" + params.toString());
+        const response = await fetch(`/api/creators/${site}/${service}/${id}/posts?` + params.toString());
         if (!response.ok) {
           throw new Error("filtered creator search unavailable");
         }
@@ -662,7 +666,7 @@ export default function CreatorPage() {
                   mediaWidth={media.width}
                   mediaHeight={media.height}
                   mediaMimeType={media.mimeType}
-                      videoPreviewMode="hover"
+                      videoPreviewMode="viewport"
                     />
                   );
                 })}
@@ -707,6 +711,12 @@ export default function CreatorPage() {
     </div>
   );
 }
+
+
+
+
+
+
 
 
 

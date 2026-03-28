@@ -77,7 +77,7 @@ test("hydratePostVideoSources maps each post video to upstream and local stream 
   assert.equal(videoSources[0]?.upstreamUrl, "https://coomer.st/data/abc/intro.mp4");
   assert.equal(videoSources[0]?.localSourceAvailable, true);
   assert.equal(videoSources[0]?.sourceCacheStatus, "source-ready");
-  assert.equal(videoSources[0]?.localStreamUrl?.startsWith("/api/media-source/coomer/"), true);
+  assert.equal(videoSources[0]?.localStreamUrl?.startsWith("/api/media/coomer/"), true);
   assert.equal(videoSources[1]?.path, "/abc/alt-video.mp4");
   assert.equal(videoSources[1]?.localSourceAvailable, false);
   assert.equal(videoSources[1]?.sourceCacheStatus, "source-downloading");

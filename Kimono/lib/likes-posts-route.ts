@@ -1,16 +1,15 @@
-import { createHybridContentService } from "./hybrid-content.ts";
-import { buildFavoriteChronologyMap, createFavoriteChronologyKey, type FavoritePostListItem } from "./favorites-page-state.ts";
+﻿import { buildFavoriteChronologyMap, createFavoriteChronologyKey, type FavoritePostListItem } from "./favorites-page-state.ts";
 import type { FavoriteChronologyRecord } from "./favorites-page-state.ts";
-import type { SupportedSite, StoredKimonoSession } from "./data-store.ts";
-import { getDataStore } from "./data-store.ts";
+import type { SupportedSite, StoredKimonoSession } from "./db/index.ts";
+import { db, withDbConnection } from "./db/index.ts";
 import { loadStoredKimonoSessionRecord } from "./remote-session.ts";
-import { hydratePostsWithMediaPlatform } from "./post-preview-hydration.ts";
-import { getPerformanceRepository } from "./perf-repository.ts";
 import type { UnifiedPost } from "./api/helpers.ts";
 import { readSessionUpstreamCache } from "./session-upstream-cache.ts";
 
-const FAVORITE_POSTS_FRESH_TTL_MS = 45_000;
-const FAVORITE_POSTS_STALE_TTL_MS = 10 * 60 * 1000;
+import { TTL } from "./config/ttl.ts";
+
+const FAVORITE_POSTS_FRESH_TTL_MS = TTL.favorites.fresh;
+const FAVORITE_POSTS_STALE_TTL_MS = TTL.favorites.stale;
 
 export interface LikesPostsPayload {
   loggedIn: boolean;
@@ -29,8 +28,6 @@ interface LikesPostsDependencies {
   readSnapshot?: (site: SupportedSite) => Promise<UnifiedPost[] | { posts: UnifiedPost[]; updatedAt: Date | null }>;
   writeSnapshot?: (site: SupportedSite, posts: UnifiedPost[]) => Promise<void>;
 }
-
-const hybridContent = createHybridContentService();
 
 function normalizeFavoritePostSnapshotResult(
   snapshot: UnifiedPost[] | { posts: UnifiedPost[]; updatedAt: Date | null }
@@ -66,10 +63,13 @@ function mapFavoritePosts(
     const retainedDate = typeof (post as { favoriteAddedAt?: string | null }).favoriteAddedAt === "string"
       ? (post as { favoriteAddedAt?: string | null }).favoriteAddedAt ?? null
       : null;
+    const retainedSeq = typeof (post as { faved_seq?: number | null }).faved_seq === "number"
+      ? (post as { faved_seq?: number | null }).faved_seq ?? null
+      : null;
     const favoriteAddedAt = chronology?.favoritedAt.toISOString() ?? retainedDate;
     const favoriteOrderSource = chronology
       ? "exact"
-      : retainedDate
+      : retainedDate || retainedSeq != null
         ? "retained"
         : "fallback";
 
@@ -84,41 +84,55 @@ function mapFavoritePosts(
         : index,
       snapshotUpdatedAt: snapshotUpdatedAt?.toISOString() ?? null,
       stale,
+      favedSeq: chronology?.favedSeq ?? retainedSeq ?? null,
     } satisfies FavoritePostListItem;
   });
 }
 
 async function readFavoritePostSnapshot(site: SupportedSite): Promise<{ posts: UnifiedPost[]; updatedAt: Date | null }> {
-  const store = await getDataStore();
+  const snapshot = await withDbConnection((conn) => db.getFavoriteCache(conn as never, "post", site));
+  if (!snapshot?.payloadJson) {
+    return { posts: [], updatedAt: null };
+  }
+
   try {
-    const snapshot = await store.getFavoriteSnapshot({ kind: "post", site });
-    if (!snapshot?.data) {
-      return { posts: [], updatedAt: null };
-    }
-    const parsed = JSON.parse(snapshot.data);
+    const parsed = JSON.parse(snapshot.payloadJson);
     return {
       posts: Array.isArray(parsed) ? parsed : [],
       updatedAt: snapshot.updatedAt ?? null,
     };
   } catch {
-    return { posts: [], updatedAt: null };
-  } finally {
-    await store.disconnect();
+    return { posts: [], updatedAt: snapshot.updatedAt ?? null };
   }
 }
 
 async function writeFavoritePostSnapshot(site: SupportedSite, posts: UnifiedPost[]): Promise<void> {
-  const store = await getDataStore();
-  try {
-    await store.setFavoriteSnapshot({
-      kind: "post",
-      site,
-      data: posts,
-      updatedAt: new Date(),
-    });
-  } finally {
-    await store.disconnect();
-  }
+  await withDbConnection((conn) => db.upsertFavoriteCache(conn as never, {
+    kind: "post",
+    site,
+    payloadJson: JSON.stringify(posts),
+    updatedAt: new Date(),
+    expiresAt: new Date(Date.now() + TTL.favorites.cache),
+  }));
+}
+
+async function persistFavoritePostChronology(site: SupportedSite, posts: UnifiedPost[]): Promise<void> {
+  await withDbConnection(async (conn) => {
+    for (const post of posts) {
+      await db.upsertFavoriteChronologyEntry(conn as never, {
+        kind: "post",
+        site,
+        service: post.service,
+        creatorId: post.user,
+        postId: post.id,
+        favoritedAt: new Date(),
+        lastConfirmedAt: new Date(),
+        favedSeq: typeof (post as { faved_seq?: number | null }).faved_seq === "number"
+          ? (post as { faved_seq?: number | null }).faved_seq ?? null
+          : null,
+      });
+    }
+  });
 }
 
 async function defaultFetchFavoritePosts(input: { site: SupportedSite; cookie: string }): Promise<UnifiedPost[]> {
@@ -139,21 +153,11 @@ async function defaultFetchFavoritePosts(input: { site: SupportedSite; cookie: s
 }
 
 async function defaultHydratePosts(posts: UnifiedPost[]): Promise<UnifiedPost[]> {
-  const repository = await getPerformanceRepository();
-  return hydratePostsWithMediaPlatform(posts, {
-    repository,
-    context: "favorites-posts",
-    resolvePriorityClass: () => "liked",
-  });
+  return posts;
 }
 
 async function defaultListFavoriteChronology(input: { kind: "post"; site: SupportedSite }): Promise<FavoriteChronologyRecord[]> {
-  const store = await getDataStore();
-  try {
-    return await store.listFavoriteChronology(input);
-  } finally {
-    await store.disconnect();
-  }
+  return withDbConnection((conn) => db.getFavoriteChronology(conn as never, input.kind, input.site));
 }
 
 async function defaultResolveCreatorNames(posts: UnifiedPost[]): Promise<Map<string, string>> {
@@ -161,12 +165,8 @@ async function defaultResolveCreatorNames(posts: UnifiedPost[]): Promise<Map<str
   const entries = await Promise.all(
     uniqueCreators.map(async (key): Promise<[string, string | null]> => {
       const [site, service, creatorId] = key.split(":");
-      const result = await hybridContent.getCreatorProfile({
-        site: site as SupportedSite,
-        service,
-        creatorId,
-      });
-      return [key, result.profile?.name ?? null];
+      const creator = await withDbConnection((conn) => db.getCreatorById(conn as never, site as SupportedSite, service, creatorId));
+      return [key, creator?.name ?? null];
     })
   );
 
@@ -197,13 +197,14 @@ export async function getLikesPostsPayload(dependencies: LikesPostsDependencies)
   try {
     const rawPosts = await fetchFavoritePosts({ site: dependencies.site, cookie: session.cookie });
     const posts = rawPosts.map((post, index) => ({ ...post, site: dependencies.site, favoriteSourceIndex: index }));
+    await persistFavoritePostChronology(dependencies.site, posts).catch(() => undefined);
     const [hydratedPosts, chronologyEntries, creatorNames] = await Promise.all([
       hydratePosts(posts),
       listFavoriteChronology({ kind: "post", site: dependencies.site }),
       resolveCreatorNames(posts),
     ]);
     const items = mapFavoritePosts(hydratedPosts, chronologyEntries, creatorNames, new Date(), false);
-    void writeSnapshot(dependencies.site, hydratedPosts).catch(() => undefined);
+    await writeSnapshot(dependencies.site, hydratedPosts).catch(() => undefined);
 
     return {
       loggedIn: true,
@@ -235,4 +236,5 @@ export async function getLikesPostsPayload(dependencies: LikesPostsDependencies)
     };
   }
 }
+
 

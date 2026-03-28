@@ -11,7 +11,7 @@ const {
   formatStartupDiagnostics,
   loadRuntimeEnv,
 } = require("./lib/server/startup.cjs");
-const { purgeRebuildableDataOnStartup } = require("./lib/server/startup-db-maintenance.cjs");
+const { runCreatorSync, scheduleCreatorSyncRefresh } = require("./lib/server/creator-sync-runtime.cjs");
 
 const entryDir = __dirname;
 const loadedEnvFiles = loadRuntimeEnv({ appDir: entryDir, env: process.env });
@@ -65,7 +65,15 @@ if (loadedEnvFiles.length > 0) {
   console.log(`[BOOT] Loaded env files: ${loadedEnvFiles.join(", ")}`);
 }
 
-console.log(formatStartupDiagnostics(currentDiagnostics()));
+const startupDiagnostics = currentDiagnostics();
+console.log(formatStartupDiagnostics(startupDiagnostics));
+
+if (startupDiagnostics.runtime?.previewTools?.ffmpeg?.status !== "available") {
+  void appendServerLog("info", "preview generation disabled: ffmpeg missing at boot", {
+    ffmpegStatus: startupDiagnostics.runtime?.previewTools?.ffmpeg?.status ?? null,
+    ffprobeStatus: startupDiagnostics.runtime?.previewTools?.ffprobe?.status ?? null,
+  });
+}
 
 process.on("unhandledRejection", (reason) => {
   const message = reason instanceof Error ? reason.message : String(reason);
@@ -90,15 +98,16 @@ process.on("uncaughtException", (error) => {
 });
 
 async function start() {
-  const purgeSummary = await purgeRebuildableDataOnStartup({
+  const creatorRefreshSchedule = scheduleCreatorSyncRefresh({
     env: process.env,
-    workspaceRoot: process.cwd(),
     logger: console,
   });
 
-  console.log(`[BOOT] startup rebuildable data purge complete: tables=${purgeSummary.tablesPurged.length}, dirs=${purgeSummary.directoriesReset.length}, skipped=${purgeSummary.skipped ? "yes" : "no"}`);
-
-  await appendServerLog("info", "startup rebuildable data purge complete", purgeSummary);
+  await appendServerLog("info", "startup creator index refresh schedule initialized", {
+    skipped: creatorRefreshSchedule.skipped,
+    driver: creatorRefreshSchedule.driver,
+    intervalMs: creatorRefreshSchedule.intervalMs,
+  });
 
   const app = next(serverConfig);
   const handle = app.getRequestHandler();
@@ -139,9 +148,29 @@ async function start() {
       `> Ready on http://${serverConfig.hostname}:${serverConfig.port} (appDir=${serverConfig.dir})`
     );
   });
+
+  void (async () => {
+    try {
+      const creatorWarmSummary = await runCreatorSync({
+        env: process.env,
+        logger: console,
+        force: false,
+      });
+
+      console.log(`[BOOT] startup creator index warm complete: refreshed=${creatorWarmSummary.refreshedSites.length}, reused=${creatorWarmSummary.reusedSites.length}, failed=${creatorWarmSummary.failedSites.length}, skipped=${creatorWarmSummary.skipped ? "yes" : "no"}`);
+      await appendServerLog("info", "startup creator index warm complete", creatorWarmSummary);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.warn(`[BOOT] startup creator index warm failed; continuing without blocking boot (${errorMessage})`);
+      await appendServerLog("warn", "startup creator index warm failed", {
+        errorMessage,
+      });
+    }
+  })();
 }
 
 start().catch((error) => {
   logFatal(error);
   process.exit(1);
 });
+

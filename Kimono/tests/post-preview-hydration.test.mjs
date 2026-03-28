@@ -44,11 +44,11 @@ test("applyCachedPreviewFields injects cached preview assets onto a raw post", (
   assert.equal(hydrated.longestVideoDurationSeconds, 95);
   assert.equal(
     hydrated.previewThumbnailUrl,
-    "/api/preview-assets/popular/kemono/fingerprint-1/thumb.webp"
+    "/api/media/preview/popular/kemono/fingerprint-1/thumb.webp"
   );
   assert.equal(
     hydrated.previewClipUrl,
-    "/api/preview-assets/popular/kemono/fingerprint-1/clip.mp4"
+    "/api/media/preview/popular/kemono/fingerprint-1/clip.mp4"
   );
   assert.equal(hydrated.previewStatus, "ready");
   assert.equal(hydrated.previewGeneratedAt, "2026-03-14T10:00:00.000Z");
@@ -58,8 +58,8 @@ test("applyCachedPreviewFields injects cached preview assets onto a raw post", (
 test("applyCachedPreviewFields keeps richer preview values already present on the post", () => {
   const hydrated = applyCachedPreviewFields(
     makePost({
-      previewThumbnailUrl: "/api/preview-assets/custom/thumb.webp",
-      previewClipUrl: "/api/preview-assets/custom/clip.mp4",
+      previewThumbnailUrl: "/api/media/preview/custom/thumb.webp",
+      previewClipUrl: "/api/media/preview/custom/clip.mp4",
       longestVideoDurationSeconds: 41,
       previewStatus: "generated-inline",
       previewSourceFingerprint: "custom-inline",
@@ -76,8 +76,8 @@ test("applyCachedPreviewFields keeps richer preview values already present on th
     }
   );
 
-  assert.equal(hydrated.previewThumbnailUrl, "/api/preview-assets/custom/thumb.webp");
-  assert.equal(hydrated.previewClipUrl, "/api/preview-assets/custom/clip.mp4");
+  assert.equal(hydrated.previewThumbnailUrl, "/api/media/preview/custom/thumb.webp");
+  assert.equal(hydrated.previewClipUrl, "/api/media/preview/custom/clip.mp4");
   assert.equal(hydrated.longestVideoDurationSeconds, 41);
   assert.equal(hydrated.previewStatus, "generated-inline");
   assert.equal(hydrated.previewSourceFingerprint, "custom-inline");
@@ -119,7 +119,7 @@ test("hydratePostsWithCachedPreviewAssets enriches each post with matching cache
   ]);
   assert.equal(
     hydrated[0]?.previewThumbnailUrl,
-    "/api/preview-assets/popular/kemono/fingerprint-1/thumb.webp"
+    "/api/media/preview/popular/kemono/fingerprint-1/thumb.webp"
   );
   assert.equal(hydrated[1]?.previewThumbnailUrl, undefined);
 });

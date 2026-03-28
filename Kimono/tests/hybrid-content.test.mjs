@@ -341,8 +341,8 @@ test("hybrid creator posts reuses cached preview assets when refreshing live pos
   });
 
   assert.equal(result.source, "live");
-  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/preview-assets/popular/kemono/fingerprint-10/thumb.webp");
-  assert.equal(result.posts[0]?.previewClipUrl, "/api/preview-assets/popular/kemono/fingerprint-10/clip.mp4");
+  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/media/preview/popular/kemono/fingerprint-10/thumb.webp");
+  assert.equal(result.posts[0]?.previewClipUrl, "/api/media/preview/popular/kemono/fingerprint-10/clip.mp4");
   assert.equal(result.posts[0]?.longestVideoDurationSeconds, 63);
   assert.equal(writes.length, 1);
   assert.equal(writes[0]?.previewThumbnailAssetPath, "popular/kemono/fingerprint-10/thumb.webp");
@@ -424,8 +424,8 @@ test("hybrid creator posts also hydrate from the shared media platform when post
   });
 
   assert.equal(touches.length, 1);
-  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/preview-assets/popular/kemono/shared-fingerprint/thumb.webp");
-  assert.equal(result.posts[0]?.previewClipUrl, "/api/preview-assets/popular/kemono/shared-fingerprint/clip.mp4");
+  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/media/preview/popular/kemono/shared-fingerprint/thumb.webp");
+  assert.equal(result.posts[0]?.previewClipUrl, "/api/media/preview/popular/kemono/shared-fingerprint/clip.mp4");
   assert.equal(result.posts[0]?.mediaArtifactStatus, "ready");
   assert.equal(writes.length, 1);
   assert.equal(writes[0]?.previewThumbnailAssetPath, "popular/kemono/shared-fingerprint/thumb.webp");
@@ -484,8 +484,8 @@ test("hybrid popular surfaces cached preview assets as public urls", async () =>
   });
 
   assert.equal(result.source, "cache");
-  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/preview-assets/popular/kemono/fingerprint-1/thumb.webp");
-  assert.equal(result.posts[0]?.previewClipUrl, "/api/preview-assets/popular/kemono/fingerprint-1/clip.mp4");
+  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/media/preview/popular/kemono/fingerprint-1/thumb.webp");
+  assert.equal(result.posts[0]?.previewClipUrl, "/api/media/preview/popular/kemono/fingerprint-1/clip.mp4");
   assert.equal(result.posts[0]?.longestVideoDurationSeconds, 42);
 });
 
@@ -595,8 +595,8 @@ test("hybrid popular cache hits still hydrate posts from the shared media platfo
 
   assert.equal(result.source, "cache");
   assert.equal(touches.length, 1);
-  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/preview-assets/popular/kemono/fingerprint-shared/thumb.webp");
-  assert.equal(result.posts[0]?.previewClipUrl, "/api/preview-assets/popular/kemono/fingerprint-shared/clip.mp4");
+  assert.equal(result.posts[0]?.previewThumbnailUrl, "/api/media/preview/popular/kemono/fingerprint-shared/thumb.webp");
+  assert.equal(result.posts[0]?.previewClipUrl, "/api/media/preview/popular/kemono/fingerprint-shared/clip.mp4");
   assert.equal(result.posts[0]?.mediaArtifactStatus, "ready");
 });
 

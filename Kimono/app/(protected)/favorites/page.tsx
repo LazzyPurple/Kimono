@@ -45,18 +45,12 @@ interface SiteState {
   expired?: boolean;
 }
 
-interface CreatorFavoritesPayload {
+interface FavoritesPayload {
   loggedIn?: boolean;
   expired?: boolean;
   username?: string | null;
-  favorites?: FavoriteCreatorListItem[];
-}
-
-interface PostFavoritesPayload {
-  loggedIn?: boolean;
-  expired?: boolean;
-  username?: string | null;
-  items?: FavoritePostListItem[];
+  creators?: FavoriteCreatorListItem[];
+  posts?: FavoritePostListItem[];
 }
 
 const defaultState: SiteState = {
@@ -89,6 +83,9 @@ function normalizeSort(tab: FavoritesTab, value: string | null): FavoritesSort {
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
   return response.json() as Promise<T>;
 }
 
@@ -178,12 +175,23 @@ function FavoritesPageContent() {
     const setter = site === "kemono" ? setKemono : setCoomer;
     setter((previous) => ({ ...previous, loading: true }));
 
-    const [creatorResult, postResult] = await Promise.allSettled([
-      fetchJson<CreatorFavoritesPayload>(`/api/kimono-favorites?site=${site}`),
-      fetchJson<PostFavoritesPayload>(`/api/likes/posts?site=${site}`),
-    ]);
-
-    if (creatorResult.status !== "fulfilled" && postResult.status !== "fulfilled") {
+    try {
+      const payload = await fetchJson<FavoritesPayload>(`/api/favorites?site=${site}`);
+      setter({
+        loggedIn: Boolean(payload.loggedIn),
+        loading: false,
+        username: payload.username ?? undefined,
+        favoriteCreators: (payload.creators ?? []).map((creator) => ({
+          ...creator,
+          site: creator.site ?? site,
+        })),
+        favoritePosts: (payload.posts ?? []).map((post) => ({
+          ...post,
+          site: post.site ?? site,
+        })),
+        expired: Boolean(payload.expired),
+      });
+    } catch {
       setter({
         loggedIn: false,
         loading: false,
@@ -191,30 +199,7 @@ function FavoritesPageContent() {
         favoritePosts: [],
         expired: true,
       });
-      return;
     }
-
-    const creatorPayload = creatorResult.status === "fulfilled"
-      ? creatorResult.value
-      : { loggedIn: false, expired: true, favorites: [] };
-    const postPayload = postResult.status === "fulfilled"
-      ? postResult.value
-      : { loggedIn: false, expired: true, items: [] };
-
-    setter({
-      loggedIn: Boolean(creatorPayload.loggedIn || postPayload.loggedIn),
-      loading: false,
-      username: (creatorPayload.username ?? postPayload.username ?? undefined) || undefined,
-      favoriteCreators: (creatorPayload.favorites ?? []).map((creator) => ({
-        ...creator,
-        site: creator.site ?? site,
-      })),
-      favoritePosts: (postPayload.items ?? []).map((post) => ({
-        ...post,
-        site: post.site ?? site,
-      })),
-      expired: Boolean(creatorPayload.expired || postPayload.expired),
-    });
   }, []);
 
   useEffect(() => {
@@ -252,7 +237,7 @@ function FavoritesPageContent() {
     setLoginError("");
 
     try {
-      const response = await fetch("/api/kimono-login", {
+      const response = await fetch("/api/sessions/upstream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -279,8 +264,14 @@ function FavoritesPageContent() {
   }
 
   async function handleLogout(site: Site) {
-    await fetch(`/api/kimono-favorites?site=${site}`, { method: "DELETE" });
+    const response = await fetch(`/api/sessions/upstream?site=${site}`, { method: "DELETE" });
     const setter = site === "kemono" ? setKemono : setCoomer;
+
+    if (!response.ok) {
+      await fetchFavorites(site);
+      return;
+    }
+
     setter({
       loggedIn: false,
       loading: false,
@@ -486,7 +477,7 @@ function FavoritesPageContent() {
                         : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                     }`}
                   >
-                    Added first
+                    Faved Date
                   </Button>
                   <Button
                     size="sm"
@@ -511,7 +502,7 @@ function FavoritesPageContent() {
                         : "border border-[#1e1e2e] bg-transparent text-[#6b7280] hover:bg-[#1e1e2e] hover:text-[#f0f0f5]"
                     }`}
                   >
-                    Added first
+                    Faved Date
                   </Button>
                   <Button
                     size="sm"
@@ -706,3 +697,4 @@ export default function FavoritesPage() {
     </Suspense>
   );
 }
+

@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
-import { getDataStore, type SupportedSite } from "@/lib/data-store";
+﻿import { NextResponse } from "next/server";
+import { getDataStore, type SupportedSite } from "@/lib/db/index";
+import { createUpstreamBrowserHeaders } from "@/lib/api/upstream-browser-headers";
 import { createRateLimitError, getGlobalUpstreamRateGuard } from "@/lib/api/upstream-rate-guard";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +50,7 @@ async function fetchRecommendations(
     const timeoutId = setTimeout(() => controller.abort(), 15000);
 
     const res = await fetch(url, {
-      headers: { Accept: "text/css" },
+      headers: createUpstreamBrowserHeaders(site),
       signal: controller.signal,
     });
     clearTimeout(timeoutId);

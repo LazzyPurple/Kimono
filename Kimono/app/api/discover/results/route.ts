@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDataStore } from "@/lib/data-store";
+import { getDataStore } from "@/lib/db/index";
 
 export const dynamic = "force-dynamic";
 
@@ -33,3 +33,4 @@ export async function GET() {
     return NextResponse.json({ error: "Erreur lors de la recuperation" }, { status: 500 });
   }
 }
+

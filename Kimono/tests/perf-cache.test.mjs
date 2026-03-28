@@ -11,7 +11,7 @@ import {
   isSnapshotFresh,
   isTimedCacheFresh,
   normalizeCreatorName,
-} from "../lib/perf-cache.ts";
+} from "../lib/db/performance-cache.ts";
 
 test("normalizeCreatorName trims, lowercases and collapses spaces", () => {
   assert.equal(normalizeCreatorName("  Belle   Delphine  "), "belle delphine");

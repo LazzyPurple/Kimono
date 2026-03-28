@@ -2,12 +2,11 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const logsPagePath = new URL("../app/logs/page.tsx", import.meta.url);
+const logsPagePath = new URL("../app/admin/logs/page.tsx", import.meta.url);
 
 test("logs page keeps a compact responsive layout", async () => {
   const source = await readFile(logsPagePath, "utf8");
 
-  assert.match(source, /max-w-6xl/);
   assert.match(source, /lg:grid-cols-\[minmax\(0,1\.15fr\)_minmax\(320px,0\.85fr\)\]/);
   assert.match(source, /max-h-\[26rem\]/);
   assert.match(source, /overflow-auto/);

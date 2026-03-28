@@ -304,7 +304,7 @@ test("popular preview asset service skips regeneration while a preview retry bac
   assert.equal(result.previewOutcome, "skipped-no-ffmpeg");
 });
 
-test("popular preview asset service downloads a complete local source for premium priorities before generating previews", async () => {
+test("popular preview asset service downloads a complete local source for playback priority before generating previews", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kimono-preview-premium-"));
   const mediaSourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "kimono-source-premium-"));
   const now = new Date("2026-03-22T12:00:00.000Z");
@@ -379,20 +379,94 @@ test("popular preview asset service downloads a complete local source for premiu
         file: { name: "video.mp4", path: "/coomer/video.mp4" },
       }),
       now,
-      priorityClass: "popular",
+      priorityClass: "playback",
     });
 
     assert.equal(downloadCalls.length, 1);
     assert.equal(sourceWrites.length, 2);
     assert.equal(sourceWrites[0]?.downloadStatus, "source-downloading");
-    assert.equal(sourceWrites[0]?.priorityClass, "popular");
+    assert.equal(sourceWrites[0]?.priorityClass, "playback");
     assert.equal(sourceWrites[1]?.downloadStatus, "source-ready");
-    assert.equal(sourceWrites[1]?.priorityClass, "popular");
+    assert.equal(sourceWrites[1]?.priorityClass, "playback");
     assert.equal(generateCalls.length, 1);
     assert.match(generateCalls[0]?.sourceVideoUrl ?? "", /source\.mp4$/);
     assert.equal(result.previewOutcome, "generated");
     assert.equal(result.previewStatus, "ready");
     assert.equal(previewWrites[0]?.status, "ready");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(mediaSourceDir, { recursive: true, force: true });
+  }
+});
+test("popular preview asset service keeps remote sources for popular warmups", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "kimono-preview-popular-"));
+  const mediaSourceDir = fs.mkdtempSync(path.join(os.tmpdir(), "kimono-source-popular-"));
+  const downloadCalls = [];
+  const generateCalls = [];
+
+  try {
+    const service = createPopularPreviewAssetService({
+      repository: {
+        getPreviewAssetCache: async () => null,
+        upsertPreviewAssetCache: async () => undefined,
+        touchPreviewAssetCache: async () => undefined,
+        listPreviewAssetCachesOlderThan: async () => [],
+        deletePreviewAssetCaches: async () => undefined,
+        getMediaSourceCache: async () => null,
+        upsertMediaSourceCache: async () => undefined,
+        touchMediaSourceCache: async () => undefined,
+        listExpiredMediaSourceCaches: async () => [],
+        deleteMediaSourceCaches: async () => undefined,
+        getMediaSourceCacheStats: async () => ({
+          totalEntries: 0,
+          totalSizeBytes: 0,
+          readyEntries: 0,
+          remoteHttpErrors: 0,
+          toolMissing: 0,
+        }),
+        getPreviewAssetStats: async () => ({
+          totalEntries: 0,
+          readyEntries: 0,
+          partialEntries: 0,
+          failedEntries: 0,
+        }),
+      },
+      previewAssetDir: tempDir,
+      mediaSourceCacheDir: mediaSourceDir,
+      analyzeVideoSource: async () => ({ durationSeconds: 41, mimeType: "video/mp4" }),
+      downloadMediaSource: async (input) => {
+        downloadCalls.push(input);
+        return {
+          localVideoPath: input.relativeSourcePath,
+          fileSizeBytes: 8852604,
+          mimeType: "video/mp4",
+          downloadedAt: new Date("2026-03-22T12:00:00.000Z"),
+        };
+      },
+      generatePreviewAssets: async (input) => {
+        generateCalls.push(input);
+        return {
+          thumbnailAssetPath: input.paths.thumbnailAssetPath,
+          clipAssetPath: input.paths.clipAssetPath,
+        };
+      },
+      fileExists: async () => false,
+    });
+
+    await service.preparePreviewForPost({
+      site: "coomer",
+      post: makePost({
+        site: "coomer",
+        service: "fansly",
+        file: { name: "video.mp4", path: "/coomer/video.mp4" },
+      }),
+      now: new Date("2026-03-22T12:00:00.000Z"),
+      priorityClass: "popular",
+    });
+
+    assert.equal(downloadCalls.length, 0);
+    assert.equal(generateCalls.length, 1);
+    assert.match(generateCalls[0]?.sourceVideoUrl ?? "", /^https:\/\//);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
     fs.rmSync(mediaSourceDir, { recursive: true, force: true });
