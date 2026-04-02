@@ -1,20 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Clock3, FileText, Film, Heart, Image as ImageIcon, Play } from "lucide-react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { Clock3, Film, Image as ImageIcon } from "lucide-react";
 import type { Site } from "@/lib/api/helpers";
-import { useLikes } from "@/contexts/LikesContext";
-import {
-  formatVideoDurationLabel,
-  pickLongestVideoDuration,
-} from "@/lib/media-card-utils";
-import {
-  getDefaultVideoPreviewCache,
-  markVideoPreviewWarm,
-  readVideoPreviewState,
-  rememberVideoPreviewDuration,
-} from "@/lib/video-preview-cache";
+import { detectMediaKind, getThumbnailUrl } from "@/lib/media-platform";
 
 interface MediaCardProps {
   title: string;
@@ -36,347 +26,91 @@ interface MediaCardProps {
   detailSource?: string;
 }
 
-function isDocumentVisible(): boolean {
-  if (typeof document === "undefined") {
-    return true;
-  }
-
-  return document.visibilityState !== "hidden";
+function formatPublishedDate(publishedAt?: string | number): string | null {
+  if (!publishedAt) return null;
+  const date = new Date(typeof publishedAt === "number" ? publishedAt * 1000 : publishedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-GB");
 }
 
-function formatPublishedDate(publishedAt?: string | number): string | null {
-  if (!publishedAt) {
-    return null;
-  }
-
-  const date = new Date(typeof publishedAt === "number" ? publishedAt * 1000 : publishedAt);
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return date.toLocaleDateString("en-GB");
+function formatDuration(durationSeconds?: number | null): string | null {
+  if (!durationSeconds || !Number.isFinite(durationSeconds)) return null;
+  const total = Math.max(0, Math.round(durationSeconds));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 export default function MediaCard({
   title,
   previewImageUrl,
   videoUrl,
-  videoCandidates,
   type = "image",
   site,
   service,
   postId,
-  user,
   publishedAt,
   durationSeconds = null,
-  videoPreviewMode = "viewport",
   priority = false,
-  mediaWidth = null,
-  mediaHeight = null,
   mediaMimeType = null,
-  detailSource,
 }: MediaCardProps) {
-  const [hovered, setHovered] = useState(false);
-  const [hasHovered, setHasHovered] = useState(false);
-  const [imgError, setImgError] = useState(false);
-  const [shouldWarmVideo, setShouldWarmVideo] = useState(false);
-  const [durationLabel, setDurationLabel] = useState<string | null>(null);
+  const [activated, setActivated] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
-  const cardRef = useRef<HTMLAnchorElement>(null);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isHoveredRef = useRef(hovered);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const playPromiseRef = useRef<Promise<void> | undefined>(undefined);
-  const previewCacheRef = useRef(getDefaultVideoPreviewCache());
-
-  const { isPostLiked, togglePostLike } = useLikes();
-  const liked = isPostLiked(site, service, user, postId);
-  const showImage = Boolean(previewImageUrl) && !imgError;
+  const mediaKind = useMemo(() => detectMediaKind({ mimeType: mediaMimeType, imageUrl: previewImageUrl, videoUrl, type }), [mediaMimeType, previewImageUrl, type, videoUrl]);
+  const thumbnailUrl = useMemo(() => getThumbnailUrl(site, previewImageUrl ?? videoUrl ?? null), [previewImageUrl, site, videoUrl]);
   const publishedLabel = formatPublishedDate(publishedAt);
-  const detailHref = detailSource
-    ? `/post/${site}/${service}/${user}/${postId}?source=${encodeURIComponent(detailSource)}`
-    : `/post/${site}/${service}/${user}/${postId}`;
-  const resolvedVideoCandidates = Array.from(
-    new Set((videoCandidates?.length ? videoCandidates : videoUrl ? [videoUrl] : []).filter(Boolean))
-  ) as string[];
-  const resolutionLabel = mediaWidth != null && mediaHeight != null
-    ? `${mediaWidth}x${mediaHeight}`
-    : null;
-  const skeletonToneClass = resolutionLabel
-    ? mediaHeight != null && mediaWidth != null && mediaHeight > mediaWidth
-      ? "from-pink-500/20 via-[#24142b] to-[#0a0a0f]"
-      : mediaHeight != null && mediaWidth != null && mediaWidth > mediaHeight
-        ? "from-sky-500/20 via-[#101827] to-[#0a0a0f]"
-        : "from-violet-500/20 via-[#1a1630] to-[#0a0a0f]"
-    : "from-white/10 via-[#1e1e2e]/90 to-[#0a0a0f]";
-
-  useEffect(() => {
-    if (type !== "video" || resolvedVideoCandidates.length === 0) {
-      setDurationLabel(null);
-      setShouldWarmVideo(false);
-      return;
-    }
-
-    const cachedStates = resolvedVideoCandidates.map((candidateUrl) => readVideoPreviewState(previewCacheRef.current, candidateUrl));
-    const cachedDurations = cachedStates.map((state) => state?.durationSeconds ?? null);
-    const cachedWarmPreview = cachedStates.some((state) => state?.warmed);
-    const effectiveDuration = durationSeconds ?? pickLongestVideoDuration(cachedDurations);
-    const canWarmInBackground = videoPreviewMode !== "disabled" && (videoPreviewMode === "viewport" || !showImage) && isDocumentVisible();
-
-    setDurationLabel(formatVideoDurationLabel(effectiveDuration));
-    setShouldWarmVideo(Boolean(canWarmInBackground && (cachedWarmPreview || durationSeconds != null)));
-  }, [durationSeconds, resolvedVideoCandidates, showImage, type, videoPreviewMode]);
-
-  useEffect(() => {
-    if (type !== "video" || videoPreviewMode !== "viewport" || !videoUrl || !cardRef.current) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!isDocumentVisible()) {
-          return;
-        }
-
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setShouldWarmVideo(true);
-          observer.disconnect();
-        }
-      },
-      {
-        rootMargin: "1200px 0px",
-        threshold: 0.01,
-      }
-    );
-
-    observer.observe(cardRef.current);
-
-    return () => observer.disconnect();
-  }, [type, videoPreviewMode, videoUrl]);
-
-  const handleMouseEnter = useCallback(() => {
-    hoverTimerRef.current = setTimeout(() => {
-      setHovered(true);
-      setHasHovered(true);
-      if (videoPreviewMode !== "disabled") {
-        setShouldWarmVideo(true);
-      }
-    }, 120);
-  }, [videoPreviewMode]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (hoverTimerRef.current) {
-      clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = null;
-    }
-
-    setHovered(false);
-  }, []);
-
-  const shouldMountVideo =
-    type === "video" &&
-    videoPreviewMode !== "disabled" &&
-    Boolean(videoUrl) &&
-    (
-      hasHovered ||
-      (videoPreviewMode === "viewport" && (shouldWarmVideo || !showImage)) ||
-      (!showImage && shouldWarmVideo)
-    );
-
-  useEffect(() => {
-    isHoveredRef.current = hovered;
-
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-
-    if (hovered) {
-      playPromiseRef.current = video.play();
-      playPromiseRef.current?.catch(() => {});
-      return;
-    }
-
-    if (playPromiseRef.current) {
-      playPromiseRef.current
-        .then(() => {
-          if (!isHoveredRef.current) {
-            video.pause();
-            video.currentTime = 0;
-          }
-        })
-        .catch(() => {});
-      return;
-    }
-
-    video.pause();
-    video.currentTime = 0;
-  }, [hovered, shouldMountVideo]);
-
-  const handleVideoReady = useCallback(() => {
-    if (!videoUrl) {
-      return;
-    }
-
-    markVideoPreviewWarm(previewCacheRef.current, videoUrl);
-
-    const videoElement = videoRef.current;
-    if (!videoElement) {
-      return;
-    }
-
-    const duration = Number.isFinite(videoElement.duration) ? videoElement.duration : null;
-    rememberVideoPreviewDuration(previewCacheRef.current, videoUrl, duration);
-
-    if (durationSeconds == null && duration != null) {
-      setDurationLabel((currentLabel) => currentLabel ?? formatVideoDurationLabel(duration));
-    }
-  }, [durationSeconds, videoUrl]);
-
-  const shouldShowVideo = shouldMountVideo && (!showImage || hovered);
-  const showVideoSkeleton = type === "video" && !showImage && !shouldMountVideo;
-  const wantsMetadata = shouldWarmVideo || shouldShowVideo;
-  const videoPreload = shouldShowVideo ? "auto" : wantsMetadata ? "metadata" : "none";
+  const durationLabel = formatDuration(durationSeconds);
+  const href = `/posts/${site}/${postId}`;
 
   return (
-    <a
-      ref={cardRef}
-      href={detailHref}
-      className={`group block overflow-hidden rounded-xl border bg-[#12121a] transition-all duration-300 cursor-pointer ${
-        liked
-          ? "border-red-500/50 shadow-[0_0_15px_-5px_theme(colors.red.500)] hover:border-red-500"
-          : "border-[#1e1e2e] hover:border-[#7c3aed]/50"
-      }`}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-    >
-      <div className="relative flex aspect-square items-center justify-center overflow-hidden bg-[#0a0a0f]">
-        {type === "video" ? (
-          <>
-            {showImage ? (
-              <img
-                src={previewImageUrl}
-                alt={title}
-                loading={priority ? undefined : "lazy"}
-                fetchPriority={priority ? "high" : undefined}
-                decoding="async"
-                referrerPolicy="no-referrer"
-                onError={() => setImgError(true)}
-                className={`absolute inset-0 h-full w-full object-cover object-center transition-all duration-300 ${
-                  hovered ? "scale-105 opacity-0" : "opacity-100 group-hover:scale-105"
-                }`}
-              />
-            ) : showVideoSkeleton ? (
-              <div className={`absolute inset-0 overflow-hidden bg-gradient-to-br ${skeletonToneClass} animate-pulse`} aria-hidden="true">
-                <div className="absolute inset-x-0 top-0 h-1/3 bg-gradient-to-b from-white/10 to-transparent" />
-                <div className="absolute left-4 top-4 inline-flex min-h-6 items-center rounded-full border border-white/10 bg-black/25 px-2 text-[10px] font-medium uppercase tracking-[0.18em] text-white/70 backdrop-blur-sm">
-                  VIDEO
-                </div>
-                <div className="absolute right-4 top-4 inline-flex min-h-6 items-center rounded-full border border-white/10 bg-black/25 px-2 text-[10px] font-medium text-white/70 backdrop-blur-sm">
-                  {resolutionLabel ?? "Preparing"}
-                </div>
-                <div className="absolute left-4 bottom-10 h-3 w-28 rounded-full bg-white/10" />
-                <div className="absolute left-4 bottom-4 h-3 w-20 rounded-full bg-white/10" />
-              </div>
-            ) : !shouldMountVideo ? (
-              <Film className="absolute z-0 h-12 w-12 text-[#6b7280]" />
-            ) : null}
-
-            {shouldMountVideo && videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                muted
-                loop
-                playsInline
-                preload={videoPreload}
-                onLoadedData={handleVideoReady}
-                onCanPlay={handleVideoReady}
-                className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-300 ${
-                  shouldShowVideo ? "z-10 opacity-100" : "-z-10 opacity-0"
-                }`}
-              />
-            ) : null}
-          </>
-        ) : type === "image" ? (
-          showImage ? (
-            <img
-              src={previewImageUrl}
-              alt={title}
-              loading={priority ? undefined : "lazy"}
-              fetchPriority={priority ? "high" : undefined}
-              decoding="async"
-              referrerPolicy="no-referrer"
-              onError={() => setImgError(true)}
-              className="absolute inset-0 h-full w-full object-cover object-center transition-transform duration-300 group-hover:scale-105"
-            />
-          ) : (
-            <ImageIcon className="absolute z-0 h-12 w-12 text-[#6b7280]" />
-          )
+    <Link href={href} className="neo-panel group flex h-full flex-col overflow-hidden bg-[#111111] transition-transform duration-150 hover:-translate-x-1 hover:-translate-y-1" onMouseEnter={() => setActivated(true)}>
+      <div className="relative aspect-[4/5] overflow-hidden border-b-2 border-white bg-[#0a0a0a]">
+        {mediaKind === "video" && videoUrl ? (
+          <video
+            className="h-full w-full object-cover"
+            src={activated ? videoUrl : undefined}
+            poster={!imageError ? thumbnailUrl ?? undefined : undefined}
+            preload="none"
+            muted
+            loop
+            playsInline
+            onCanPlay={(event) => { event.currentTarget.play().catch(() => {}); }}
+          />
+        ) : thumbnailUrl && !imageError ? (
+          <img
+            src={thumbnailUrl}
+            alt={title}
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "high" : undefined}
+            decoding="async"
+            referrerPolicy="no-referrer"
+            onError={() => setImageError(true)}
+            className="h-full w-full object-cover"
+          />
         ) : (
-          <FileText className="absolute z-0 h-12 w-12 text-[#6b7280]" />
-        )}
-
-        {type === "video" && !hovered && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-            <Play className="h-10 w-10 text-white drop-shadow" />
+          <div className="flex h-full w-full items-center justify-center bg-[#1a1a1a] text-[#888888]">
+            {mediaKind === "video" ? <Film className="h-10 w-10" /> : <ImageIcon className="h-10 w-10" />}
           </div>
         )}
 
-        <div className={`absolute left-2 top-2 z-20 transition-opacity duration-200 ${liked ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
-          <button
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              togglePostLike(site, service, user, postId);
-            }}
-            className="cursor-pointer rounded-full bg-black/40 p-1.5 transition-colors hover:bg-black/60"
-          >
-            <Heart
-              className={`h-4 w-4 transition-colors ${liked ? "fill-red-500 text-red-500" : "text-white/80"}`}
-            />
-          </button>
-        </div>
-
-        <div className="absolute right-2 top-2 z-20 flex flex-col items-end gap-2">
-          <div
-            className={`rounded-md p-1.5 backdrop-blur-sm ${
-              type === "video"
-                ? "bg-pink-600/80 text-white"
-                : "bg-[#7c3aed]/80 text-white"
-            }`}
-          >
-            {type === "video" ? (
-              <Film className="h-4 w-4" />
-            ) : type === "text" ? (
-              <FileText className="h-4 w-4" />
-            ) : (
-              <ImageIcon className="h-4 w-4" />
-            )}
-          </div>
-
-          {durationLabel && (
-            <div className="inline-flex items-center gap-1 rounded-md bg-black/55 px-2 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
-              <Clock3 className="h-3.5 w-3.5" />
-              <span>{durationLabel}</span>
-            </div>
-          )}
+        <div className="absolute left-3 top-3 flex flex-wrap gap-2">
+          <span className="border-2 border-white bg-[#111111] px-2 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white">{mediaKind}</span>
+          {durationLabel ? <span className="border-2 border-white bg-[#7C3AED] px-2 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white">{durationLabel}</span> : null}
         </div>
       </div>
 
-      <div className="space-y-2.5 p-3">
-        <h3 className="min-h-[2.5rem] break-words text-sm font-medium leading-tight text-[#f0f0f5]">
-          {title || "Untitled"}
-        </h3>
-        <div className="flex flex-wrap items-center gap-2 text-xs text-[#6b7280]">
-          <Badge variant="outline" className="border-[#1e1e2e] text-xs text-[#6b7280]">
-            {service}
-          </Badge>
-          {publishedLabel && <span className="rounded-full border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1">{publishedLabel}</span>}
+      <div className="flex flex-1 flex-col gap-4 p-4">
+        <div className="space-y-2">
+          <p className="neo-label">{site}</p>
+          <h3 className="line-clamp-2 text-lg font-black text-white">{title || "Untitled"}</h3>
+        </div>
+
+        <div className="mt-auto flex flex-wrap items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-[#888888]">
+          <span className="border-2 border-white px-2 py-1">{service}</span>
+          {publishedLabel ? <span className="inline-flex items-center gap-2 border-2 border-white px-2 py-1"><Clock3 className="h-3.5 w-3.5" />{publishedLabel}</span> : null}
         </div>
       </div>
-    </a>
+    </Link>
   );
 }
-
-

@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,10 +43,14 @@ function hardRedirect(href: string) {
   window.location.assign(href);
 }
 
-export default function LoginPageClient() {
-  const searchParams = useSearchParams();
+export default function LoginPageClient({
+  initialStepParam,
+}: {
+  initialStepParam?: string | string[] | undefined;
+}) {
+  const resolvedStepParam = Array.isArray(initialStepParam) ? initialStepParam[0] : initialStepParam;
   const [step, setStep] = useState<LoginStep>(() =>
-    getInitialLoginStep(searchParams.get("step"))
+    getInitialLoginStep(resolvedStepParam)
   );
   const [password, setPassword] = useState("");
   const [totpCode, setTotpCode] = useState("");
@@ -58,7 +61,7 @@ export default function LoginPageClient() {
   useDocumentTitle(buildAppPageTitle("Sign in"));
 
   useEffect(() => {
-    const nextStep = getInitialLoginStep(searchParams.get("step"));
+    const nextStep = getInitialLoginStep(resolvedStepParam);
     setStep(nextStep);
 
     if (nextStep !== "totp") {
@@ -89,7 +92,7 @@ export default function LoginPageClient() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
+  }, [resolvedStepParam]);
 
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault();

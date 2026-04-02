@@ -27,9 +27,10 @@ test("o2switch packaging config defines the Linux prebuilt artifact shape", asyn
 
 test("runtime package manifest keeps prod deps and strips local-only dependencies", async () => {
   const sourcePackage = readJson("package.json");
+  const sourceLock = readJson("package-lock.json");
   const { createRuntimePackageManifest } = await import(configModuleUrl);
 
-  const runtimePackage = createRuntimePackageManifest(sourcePackage);
+  const runtimePackage = createRuntimePackageManifest(sourcePackage, sourceLock);
 
   assert.equal(runtimePackage.private, true);
   assert.equal(runtimePackage.scripts.start, "node server.js");
@@ -41,6 +42,20 @@ test("runtime package manifest keeps prod deps and strips local-only dependencie
   assert.equal(runtimePackage.dependencies["@prisma/adapter-better-sqlite3"], undefined);
   assert.equal(runtimePackage.dependencies["better-sqlite3"], undefined);
   assert.equal(runtimePackage.devDependencies, undefined);
+});
+
+test("runtime package manifest pins exact runtime dependency versions from package-lock", async () => {
+  const sourcePackage = readJson("package.json");
+  const sourceLock = readJson("package-lock.json");
+  const { createRuntimePackageManifest } = await import(configModuleUrl);
+
+  const runtimePackage = createRuntimePackageManifest(sourcePackage, sourceLock);
+
+  assert.equal(runtimePackage.dependencies.next, "16.1.7");
+  assert.equal(runtimePackage.dependencies.react, "19.2.3");
+  assert.equal(runtimePackage.dependencies["react-dom"], "19.2.3");
+  assert.equal(runtimePackage.dependencies.mysql2, "3.19.0");
+  assert.equal(runtimePackage.dependencies["next-auth"], "5.0.0-beta.30");
 });
 
 test("powershell wrapper converts Windows paths without piping raw backslashes into wslpath", () => {
@@ -92,6 +107,16 @@ test("WSL build script skips local Prisma generation for the production artifact
   assert.doesNotMatch(buildScript, /PRISMA_DISABLE_CONFIG=1 npm run prisma:generate/);
 });
 
+test("WSL build script writes the runtime package from package.json plus package-lock", () => {
+  const buildScript = fs.readFileSync(
+    path.join(root, "scripts", "build-o2switch-package.sh"),
+    "utf8"
+  );
+
+  assert.match(buildScript, /write-o2switch-runtime-package\.mjs/);
+  assert.match(buildScript, /package\.json" \\\n  "\$SOURCE_COPY\/package-lock\.json" \\\n  "\$RUNTIME_ROOT\/package\.json"/);
+});
+
 test("main source tree exposes the production bootstrap expected by o2switch", () => {
   const pkg = readJson("package.json");
   const serverPath = path.join(root, "server.js");
@@ -110,6 +135,7 @@ test("db performance compat layer keeps Prisma imports lazy for production runti
   assert.equal(source.includes('from "../prisma.ts"'), false);
   assert.ok(source.includes('await import("../prisma.ts")'));
 });
+
 test("local-only Prisma files avoid static @prisma/client imports in the production build path", () => {
   const dataStoreSource = fs.readFileSync(path.join(root, "lib", "db", "app-store.ts"), "utf8");
   const perfRepositorySource = fs.readFileSync(path.join(root, "lib", "db", "performance.ts"), "utf8");
@@ -123,9 +149,10 @@ test("local-only Prisma files avoid static @prisma/client imports in the product
 
 test("runtime package manifest keeps ffmpeg dependencies required for server-side popular previews", async () => {
   const sourcePackage = readJson("package.json");
+  const sourceLock = readJson("package-lock.json");
   const { createRuntimePackageManifest } = await import(configModuleUrl);
 
-  const runtimePackage = createRuntimePackageManifest(sourcePackage);
+  const runtimePackage = createRuntimePackageManifest(sourcePackage, sourceLock);
 
   assert.ok(runtimePackage.dependencies["ffmpeg-static"]);
   assert.ok(runtimePackage.dependencies["fluent-ffmpeg"]);

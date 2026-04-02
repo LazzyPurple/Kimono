@@ -1,8 +1,6 @@
-﻿import axios from "axios";
-
-import type { Creator, Post } from "./kemono.ts";
 import type { PopularPeriod } from "../db/index.ts";
-import { createUpstreamBrowserHeaders } from "./upstream-browser-headers.ts";
+import type { Creator, Post } from "./kemono.ts";
+import { fetchUpstreamJson, fetchUpstreamText } from "./upstream-fetch.ts";
 
 export const SITE_BASE_URLS = {
   kemono: "https://kemono.cr",
@@ -23,12 +21,13 @@ export async function fetchAllCreatorsFromSite(site: Site): Promise<Creator[]> {
 
   for (const endpoint of endpoints) {
     try {
-      const response = await axios.get(`${baseUrl}${endpoint}`, {
-        headers: createUpstreamBrowserHeaders(site),
-        timeout: 60000,
+      const raw = await fetchUpstreamText({
+        site,
+        url: `${baseUrl}${endpoint}`,
+        timeoutMs: 60_000,
       });
 
-      const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data;
+      const data = JSON.parse(raw);
       if (Array.isArray(data) && data.length > 0) {
         return data;
       }
@@ -57,15 +56,12 @@ export async function fetchPopularPostsFromSite(input: {
     targetUrl.searchParams.set("o", String(input.offset));
   }
 
-  const response = await fetch(targetUrl.toString(), {
-    headers: createUpstreamBrowserHeaders(input.site),
+  const data = await fetchUpstreamJson<any>({
+    site: input.site,
+    url: targetUrl.toString(),
+    timeoutMs: 60_000,
   });
 
-  if (!response.ok) {
-    throw new Error(`Popular upstream responded with ${response.status}`);
-  }
-
-  const data = await response.json();
   return {
     info: data?.info ?? null,
     props: data?.props ?? null,
@@ -80,13 +76,12 @@ export async function fetchPostDetailFromSite(input: {
   postId: string;
   cookie?: string;
 }): Promise<Post> {
-  const response = await axios.get(
-    `${SITE_BASE_URLS[input.site]}/api/v1/${input.service}/user/${input.creatorId}/post/${input.postId}`,
-    {
-      headers: createUpstreamBrowserHeaders(input.site, input.cookie),
-      timeout: 60000,
-    }
-  );
+  const data = await fetchUpstreamJson<any>({
+    site: input.site,
+    url: `${SITE_BASE_URLS[input.site]}/api/v1/${input.service}/user/${input.creatorId}/post/${input.postId}`,
+    cookie: input.cookie,
+    timeoutMs: 60_000,
+  });
 
-  return response.data?.post ?? response.data;
+  return data?.post ?? data;
 }

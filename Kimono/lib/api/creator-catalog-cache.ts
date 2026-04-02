@@ -1,5 +1,5 @@
-import { getDataStore } from "@/lib/db/index";
-import { TTL } from "@/lib/config/ttl.ts";
+import { getDataStore } from "../db/index.ts";
+import { TTL } from "../config/ttl.ts";
 
 const CACHE_TTL_MS = TTL.discover.cache;
 
@@ -26,5 +26,6 @@ export async function setCachedCreators(site: string, data: any[]): Promise<void
   const store = await getDataStore();
   await store.setCreatorsCache(site, data, new Date());
 }
+
 
 

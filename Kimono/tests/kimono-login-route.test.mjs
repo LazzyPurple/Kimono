@@ -58,6 +58,19 @@ test("kimono login short-circuits while the upstream cooldown is still active", 
   assert.match(second.body.error ?? "", /limitee/i);
 });
 
+test("kimono login maps credential failures to 401", async () => {
+  const result = await processKimonoLogin(makeInput({
+    site: "kemono",
+    loginRequest: async () => ({
+      status: 403,
+      data: { error: "bad credentials" },
+    }),
+  }));
+
+  assert.equal(result.status, 401);
+  assert.equal(result.body.error, "bad credentials");
+});
+
 test("kimono login saves the session when upstream authentication succeeds", async () => {
   const saved = [];
   const result = await processKimonoLogin({

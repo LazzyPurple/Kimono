@@ -1,5 +1,4 @@
-﻿import axios from "axios";
-import { createUpstreamBrowserHeaders } from "./api/upstream-browser-headers.ts";
+import { fetchUpstreamResponse } from "./api/upstream-fetch.ts";
 import { getDataStore, type SupportedSite } from "./db/index.ts";
 import { createUpstreamRateGuard, getGlobalUpstreamRateGuard } from "./api/upstream-rate-guard.ts";
 
@@ -42,22 +41,28 @@ async function defaultLoginRequest(input: {
   password: string;
 }): Promise<LoginResponse> {
   const baseUrl = input.site === "kemono" ? "https://kemono.cr" : "https://coomer.st";
-  const response = await axios.post(
-    `${baseUrl}/api/v1/authentication/login`,
-    { username: input.username, password: input.password },
-    {
-      headers: {
-        ...createUpstreamBrowserHeaders(input.site),
-        "Content-Type": "application/json",
-      },
-      validateStatus: () => true,
-    }
-  );
+  const response = await fetchUpstreamResponse({
+    site: input.site,
+    url: `${baseUrl}/api/v1/authentication/login`,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ username: input.username, password: input.password }),
+    allowHttpErrors: true,
+  });
+
+  let data: { error?: string } | null = null;
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
 
   return {
     status: response.status,
-    data: response.data,
-    headers: response.headers as Record<string, string | string[] | undefined>,
+    data,
+    headers: Object.fromEntries(response.headers.entries()),
   };
 }
 

@@ -1,7 +1,6 @@
-﻿const BASE_RUNTIME_DEPENDENCIES = [
+const BASE_RUNTIME_DEPENDENCIES = [
   "@simplewebauthn/browser",
   "@simplewebauthn/server",
-  "axios",
   "bcryptjs",
   "class-variance-authority",
   "clsx",
@@ -71,12 +70,33 @@ export const LOCAL_ONLY_DEPENDENCIES = [
 
 export const RUNTIME_DEPENDENCY_NAMES = [...BASE_RUNTIME_DEPENDENCIES];
 
-export function createRuntimePackageManifest(sourcePackage) {
+function getLockPackages(sourceLock) {
+  return sourceLock && typeof sourceLock === "object" && sourceLock.packages && typeof sourceLock.packages === "object"
+    ? sourceLock.packages
+    : null;
+}
+
+function getLockedVersion(sourceLock, name) {
+  const lockPackages = getLockPackages(sourceLock);
+  if (!lockPackages) {
+    return null;
+  }
+
+  const packageEntry = lockPackages[`node_modules/${name}`];
+  if (packageEntry && typeof packageEntry.version === "string") {
+    return packageEntry.version;
+  }
+
+  return null;
+}
+
+export function createRuntimePackageManifest(sourcePackage, sourceLock = null) {
   const sourceDependencies = sourcePackage.dependencies ?? {};
   const sourceOptionalDependencies = sourcePackage.optionalDependencies ?? {};
   const runtimeDependencies = Object.fromEntries(
     RUNTIME_DEPENDENCY_NAMES.flatMap((name) => {
-      const version = sourceDependencies[name] ?? sourceOptionalDependencies[name];
+      const lockedVersion = getLockedVersion(sourceLock, name);
+      const version = lockedVersion ?? sourceDependencies[name] ?? sourceOptionalDependencies[name];
       return version ? [[name, version]] : [];
     })
   );
@@ -91,3 +111,4 @@ export function createRuntimePackageManifest(sourcePackage) {
     dependencies: runtimeDependencies,
   };
 }
+

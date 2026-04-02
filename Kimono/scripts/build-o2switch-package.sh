@@ -102,6 +102,7 @@ stage_runtime_path 'deploy/o2switch-init.sql'
 echo "[o2switch] Writing runtime package.json..."
 node "$SOURCE_COPY/scripts/write-o2switch-runtime-package.mjs" \
   "$SOURCE_COPY/package.json" \
+  "$SOURCE_COPY/package-lock.json" \
   "$RUNTIME_ROOT/package.json"
 
 echo "[o2switch] Generating Linux runtime package-lock.json..."

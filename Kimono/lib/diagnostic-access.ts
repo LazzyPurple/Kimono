@@ -1,4 +1,4 @@
-﻿import { timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 
 import { isLocalDevMode } from "./local-dev-mode.ts";
 
@@ -19,7 +19,7 @@ type DiagnosticTokenInput = {
 export type DiagnosticAccessDecision =
   | {
       type: "allowed";
-      via: "local-dev" | "session" | "debug-token";
+      via: "local-dev" | "session" | "debug-token" | "env-bypass";
     }
   | {
       type: "denied";
@@ -28,6 +28,15 @@ export type DiagnosticAccessDecision =
 function normalizeToken(value: string | null | undefined): string | null {
   const trimmedValue = value?.trim();
   return trimmedValue ? trimmedValue : null;
+}
+
+function parseBooleanFlag(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
 }
 
 function getHeaderToken(headers?: Headers | null): string | null {
@@ -49,6 +58,10 @@ function getQueryToken(url?: string | URL | null): string | null {
 
 export function extractDiagnosticAccessToken(input: DiagnosticTokenInput = {}): string | null {
   return getHeaderToken(input.headers) ?? getQueryToken(input.url);
+}
+
+export function shouldEnableDiagnosticBypass(env: EnvShape = process.env): boolean {
+  return parseBooleanFlag(env.AUTH_DEBUG_BYPASS);
 }
 
 export function hasValidDiagnosticAccessToken(
@@ -85,6 +98,13 @@ export function getDiagnosticAccessDecision(input: {
     };
   }
 
+  if (shouldEnableDiagnosticBypass(input.env)) {
+    return {
+      type: "allowed",
+      via: "env-bypass",
+    };
+  }
+
   if (input.session?.user?.id && !input.session.needsTotp) {
     return {
       type: "allowed",
@@ -110,7 +130,7 @@ export async function getCurrentDiagnosticAccessDecision(
   const localDevMode = isLocalDevMode();
   const providedToken = extractDiagnosticAccessToken(input);
 
-  if (localDevMode || hasValidDiagnosticAccessToken(providedToken)) {
+  if (localDevMode || hasValidDiagnosticAccessToken(providedToken) || shouldEnableDiagnosticBypass()) {
     return getDiagnosticAccessDecision({
       localDevMode,
       session: null,

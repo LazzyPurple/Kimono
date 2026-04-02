@@ -1,12 +1,13 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   extractDiagnosticAccessToken,
   getDiagnosticAccessDecision,
+  shouldEnableDiagnosticBypass,
 } from "../lib/diagnostic-access.ts";
 
-test("diagnostic access allows local dev, authenticated sessions, or a matching debug token", () => {
+test("diagnostic access allows local dev, env bypass, authenticated sessions, or a matching debug token", () => {
   assert.deepEqual(
     getDiagnosticAccessDecision({
       localDevMode: true,
@@ -17,6 +18,23 @@ test("diagnostic access allows local dev, authenticated sessions, or a matching 
     {
       type: "allowed",
       via: "local-dev",
+    }
+  );
+
+  assert.equal(shouldEnableDiagnosticBypass({ AUTH_DEBUG_BYPASS: "true" }), true);
+
+  assert.deepEqual(
+    getDiagnosticAccessDecision({
+      localDevMode: false,
+      session: null,
+      providedToken: null,
+      env: {
+        AUTH_DEBUG_BYPASS: "true",
+      },
+    }),
+    {
+      type: "allowed",
+      via: "env-bypass",
     }
   );
 

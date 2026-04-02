@@ -1,320 +1,130 @@
-import {
-  buildPreviewAssetPublicUrl,
-  createPreviewSourceFingerprint,
-} from "./popular-preview-assets.ts";
-import {
-  getFullImageUrl,
-  getPostVideoUrls,
-  isImage,
-  type UnifiedPost,
-} from "./api/helpers.ts";
-import type {
-  MediaSourceCacheRecord,
-  MediaSourcePriorityClass,
-  PerformanceRepository,
-  PreviewAssetCacheInput,
-  PreviewAssetCacheRecord,
-  Site,
-} from "./db/index.ts";
+import type { Site } from "./api/helpers.ts";
 
-const MEDIA_HOT_WINDOW_MS = 72 * 60 * 60 * 1000;
+export const PLATFORM_BASE_URLS: Record<Site, string> = {
+  kemono: "https://kemono.cr",
+  coomer: "https://coomer.st",
+};
 
-type MediaKind = "image" | "video" | "unknown";
+export const PLATFORM_CDN_URLS: Record<Site, string> = {
+  kemono: "https://img.kemono.cr",
+  coomer: "https://img.coomer.st",
+};
 
-type MediaPlatformRepository = Pick<
-  PerformanceRepository,
-  "getPreviewAssetCache" | "upsertPreviewAssetCache" | "touchPreviewAssetCache"
-> & Partial<Pick<
-  PerformanceRepository,
-  "getMediaSourceCache" | "touchMediaSourceCache"
->>;
+export type MediaKind = "image" | "video" | "unknown";
 
-interface ObserveMediaContext {
-  context: string;
-  now?: Date;
+const IMAGE_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"];
+const VIDEO_EXTENSIONS = [".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"];
+
+function stripKnownOrigin(value: string): string {
+  return value
+    .replace(/^https?:\/\/kemono\.cr/i, "")
+    .replace(/^https?:\/\/coomer\.st/i, "")
+    .replace(/^https?:\/\/img\.kemono\.(?:cr|su)/i, "")
+    .replace(/^https?:\/\/img\.coomer\.(?:st|su)/i, "");
 }
 
-interface ScheduleGenerationInput {
-  site: Site;
-  sourceFingerprint: string;
-  sourceMediaUrl: string;
-  mediaKind: MediaKind;
-  context: string;
-  post: UnifiedPost;
-  priorityClass?: MediaSourcePriorityClass | null;
-}
-
-export interface MediaSourceProbeResult {
-  durationSeconds?: number | null;
-  width?: number | null;
-  height?: number | null;
-  mimeType?: string | null;
-}
-
-interface ProbeMediaSourceInput {
-  site: Site;
-  sourceFingerprint: string;
-  sourceMediaUrl: string;
-  mediaKind: MediaKind;
-  context: string;
-  post: UnifiedPost;
-}
-
-interface MediaPlatformDependencies {
-  repository: MediaPlatformRepository;
-  probeMediaSource?: (input: ProbeMediaSourceInput) => Promise<MediaSourceProbeResult | null>;
-  scheduleGeneration?: (input: ScheduleGenerationInput) => Promise<void>;
-  resolvePriorityClass?: (input: { post: UnifiedPost; context: string }) => MediaSourcePriorityClass | null | undefined;
-}
-
-interface PrimaryMediaSource {
-  mediaKind: MediaKind;
-  sourceMediaUrl: string;
-  nativeThumbnailUrl: string | null;
-}
-
-function addHotWindow(now: Date): Date {
-  return new Date(now.getTime() + MEDIA_HOT_WINDOW_MS);
-}
-
-function resolvePrimaryMediaSource(post: UnifiedPost): PrimaryMediaSource | null {
-  const videoUrls = getPostVideoUrls(post);
-  if (videoUrls.length > 0) {
-    return {
-      mediaKind: "video",
-      sourceMediaUrl: videoUrls[0],
-      nativeThumbnailUrl: null,
-    };
-  }
-
-  const imagePath = [post.file?.path, ...(post.attachments?.map((attachment) => attachment.path) ?? [])]
-    .filter((path): path is string => Boolean(path))
-    .find((path) => isImage(path));
-
-  if (!imagePath) {
+function normalizePath(input: string | null | undefined): string | null {
+  if (!input) {
     return null;
   }
 
-  return {
-    mediaKind: "image",
-    sourceMediaUrl: getFullImageUrl(post.site, imagePath),
-    nativeThumbnailUrl: post.previewThumbnailUrl ?? null,
-  };
-}
-
-function hydratePostFromSourceRecord(post: UnifiedPost, record: MediaSourceCacheRecord | null | undefined): UnifiedPost {
-  if (!record) {
-    return post;
+  if (/^https?:\/\//i.test(input)) {
+    return stripKnownOrigin(input);
   }
 
-  return {
-    ...post,
-    localSourceAvailable: post.localSourceAvailable ?? Boolean(record.localVideoPath && record.downloadStatus === "source-ready"),
-    sourceCacheStatus: post.sourceCacheStatus ?? record.downloadStatus,
-    sourceRetentionUntil: post.sourceRetentionUntil ?? record.retentionUntil?.toISOString() ?? null,
-    priorityClass: post.priorityClass ?? record.priorityClass ?? null,
-    mediaMimeType: post.mediaMimeType ?? record.mimeType ?? null,
-  };
+  return input.startsWith("/") ? input : `/${input}`;
 }
 
-function hydratePostFromMediaRecord(
-  post: UnifiedPost,
-  record: PreviewAssetCacheRecord,
-  now: Date
-): UnifiedPost {
-  return {
-    ...post,
-    previewThumbnailUrl:
-      post.previewThumbnailUrl
-      ?? buildPreviewAssetPublicUrl(record.thumbnailAssetPath)
-      ?? record.nativeThumbnailUrl
-      ?? undefined,
-    previewClipUrl: post.previewClipUrl ?? buildPreviewAssetPublicUrl(record.clipAssetPath) ?? undefined,
-    longestVideoDurationSeconds:
-      post.longestVideoDurationSeconds ?? record.durationSeconds ?? null,
-    previewStatus: post.previewStatus ?? record.artifactStatus ?? record.status,
-    previewGeneratedAt: post.previewGeneratedAt ?? record.generatedAt?.toISOString() ?? null,
-    previewError: post.previewError ?? record.error ?? record.lastError ?? null,
-    previewSourceFingerprint: post.previewSourceFingerprint ?? record.sourceFingerprint,
-    mediaKind: post.mediaKind ?? record.mediaKind ?? null,
-    mediaProbeStatus: post.mediaProbeStatus ?? record.probeStatus ?? null,
-    mediaArtifactStatus: post.mediaArtifactStatus ?? record.artifactStatus ?? record.status,
-    nativeThumbnailUrl: post.nativeThumbnailUrl ?? record.nativeThumbnailUrl ?? null,
-    mediaMimeType: post.mediaMimeType ?? record.mimeType ?? null,
-    mediaWidth: post.mediaWidth ?? record.width ?? null,
-    mediaHeight: post.mediaHeight ?? record.height ?? null,
-    isMediaHot: post.isMediaHot ?? Boolean(record.hotUntil && record.hotUntil >= now),
-  };
-}
-
-function hasProbeMetadata(probe: MediaSourceProbeResult | null | undefined): boolean {
-  if (!probe) {
+function hasExtension(value: string | null | undefined, extensions: string[]): boolean {
+  if (!value) {
     return false;
   }
 
-  return probe.durationSeconds != null
-    || probe.width != null
-    || probe.height != null
-    || typeof probe.mimeType === "string";
+  const clean = value.split("?")[0].toLowerCase();
+  return extensions.some((extension) => clean.endsWith(extension));
 }
 
-function createPendingMediaRecord(input: {
-  site: Site;
-  sourceFingerprint: string;
-  sourceMediaUrl: string;
-  mediaKind: MediaKind;
-  nativeThumbnailUrl: string | null;
-  probe: MediaSourceProbeResult | null;
-  now: Date;
-  context: string;
-}): PreviewAssetCacheInput {
+export function detectMediaKind(input: {
+  mimeType?: string | null;
+  imageUrl?: string | null;
+  videoUrl?: string | null;
+  type?: string | null;
+}): MediaKind {
+  const normalizedType = input.type?.toLowerCase();
+  if (normalizedType === "image" || normalizedType === "video") {
+    return normalizedType;
+  }
+
+  const mimeType = input.mimeType?.toLowerCase() ?? "";
+  if (mimeType.startsWith("image/")) {
+    return "image";
+  }
+  if (mimeType.startsWith("video/")) {
+    return "video";
+  }
+
+  if (hasExtension(input.videoUrl ?? null, VIDEO_EXTENSIONS)) {
+    return "video";
+  }
+  if (hasExtension(input.imageUrl ?? null, IMAGE_EXTENSIONS)) {
+    return "image";
+  }
+
+  return "unknown";
+}
+
+export function getThumbnailUrl(site: Site, source: string | null | undefined): string | null {
+  const normalized = normalizePath(source);
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(source ?? "") && !normalized.startsWith("/data/")) {
+    return source ?? null;
+  }
+
+  if (normalized.startsWith("/thumbnail/")) {
+    return `${PLATFORM_CDN_URLS[site]}${normalized}`;
+  }
+
+  if (normalized.startsWith("/data/")) {
+    return `${PLATFORM_CDN_URLS[site]}/thumbnail${normalized}`;
+  }
+
+  return `${PLATFORM_CDN_URLS[site]}/thumbnail/data${normalized}`;
+}
+
+export function getFullResUrl(site: Site, source: string | null | undefined): string | null {
+  const normalized = normalizePath(source);
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^https?:\/\//i.test(source ?? "") && !normalized.startsWith("/data/")) {
+    return source ?? null;
+  }
+
+  if (normalized.startsWith("/data/")) {
+    return `${PLATFORM_BASE_URLS[site]}${normalized}`;
+  }
+
+  return `${PLATFORM_BASE_URLS[site]}/data${normalized}`;
+}
+
+export function getCreatorIconUrl(site: Site, service: string, creatorId: string): string {
+  return `${PLATFORM_CDN_URLS[site]}/icons/${service}/${creatorId}`;
+}
+
+export function getCreatorBannerUrl(site: Site, service: string, creatorId: string): string {
+  return `${PLATFORM_CDN_URLS[site]}/banners/${service}/${creatorId}`;
+}
+
+export function createMediaPlatform() {
   return {
-    site: input.site,
-    sourceVideoUrl: input.sourceMediaUrl,
-    sourceFingerprint: input.sourceFingerprint,
-    durationSeconds: input.probe?.durationSeconds ?? null,
-    thumbnailAssetPath: null,
-    clipAssetPath: null,
-    status: "pending",
-    generatedAt: input.now,
-    lastSeenAt: input.now,
-    error: null,
-    mediaKind: input.mediaKind,
-    mimeType: input.probe?.mimeType ?? null,
-    width: input.probe?.width ?? null,
-    height: input.probe?.height ?? null,
-    nativeThumbnailUrl: input.nativeThumbnailUrl,
-    probeStatus: hasProbeMetadata(input.probe) ? "probed" : "pending",
-    artifactStatus: "pending",
-    firstSeenAt: input.now,
-    hotUntil: addHotWindow(input.now),
-    retryAfter: null,
-    generationAttempts: 0,
-    lastError: null,
-    lastObservedContext: input.context,
+    detectMediaKind,
+    getThumbnailUrl,
+    getFullResUrl,
+    getCreatorIconUrl,
+    getCreatorBannerUrl,
   };
 }
-
-export function createMediaPlatform(dependencies: MediaPlatformDependencies) {
-  const scheduleGeneration = dependencies.scheduleGeneration ?? (async () => {});
-  const probeMediaSource = dependencies.probeMediaSource ?? (async () => null);
-
-  return {
-    async observeAndHydratePosts(posts: UnifiedPost[], context: ObserveMediaContext): Promise<UnifiedPost[]> {
-      const now = context.now ?? new Date();
-
-      return Promise.all(
-        posts.map(async (post) => {
-          const source = resolvePrimaryMediaSource(post);
-          if (!source) {
-            return post;
-          }
-
-          const sourceFingerprint = createPreviewSourceFingerprint(post.site, source.sourceMediaUrl);
-          const [cachedPreview, cachedSource] = await Promise.all([
-            dependencies.repository.getPreviewAssetCache({
-              site: post.site,
-              sourceFingerprint,
-            }),
-            dependencies.repository.getMediaSourceCache?.({
-              site: post.site,
-              sourceFingerprint,
-            }) ?? Promise.resolve(null),
-          ]);
-
-          if (cachedPreview) {
-            await dependencies.repository.touchPreviewAssetCache({
-              site: post.site,
-              sourceFingerprint,
-              lastSeenAt: now,
-            });
-          }
-
-          if (cachedSource && dependencies.repository.touchMediaSourceCache) {
-            await dependencies.repository.touchMediaSourceCache({
-              site: post.site,
-              sourceFingerprint,
-              lastSeenAt: now,
-            });
-          }
-
-          let hydrated = cachedPreview
-            ? hydratePostFromMediaRecord(post, cachedPreview, now)
-            : post;
-          hydrated = hydratePostFromSourceRecord(hydrated, cachedSource);
-
-          if (cachedPreview) {
-            return hydrated;
-          }
-
-          let probe: MediaSourceProbeResult | null = null;
-          if (source.mediaKind === "video") {
-            try {
-              probe = await probeMediaSource({
-                site: post.site,
-                sourceFingerprint,
-                sourceMediaUrl: source.sourceMediaUrl,
-                mediaKind: source.mediaKind,
-                context: context.context,
-                post,
-              });
-            } catch {
-              probe = null;
-            }
-          }
-
-          const pendingRecord = createPendingMediaRecord({
-            site: post.site,
-            sourceFingerprint,
-            sourceMediaUrl: source.sourceMediaUrl,
-            mediaKind: source.mediaKind,
-            nativeThumbnailUrl: source.nativeThumbnailUrl,
-            probe,
-            now,
-            context: context.context,
-          });
-
-          await dependencies.repository.upsertPreviewAssetCache(pendingRecord);
-          await scheduleGeneration({
-            site: post.site,
-            sourceFingerprint,
-            sourceMediaUrl: source.sourceMediaUrl,
-            mediaKind: source.mediaKind,
-            context: context.context,
-            post,
-            priorityClass: dependencies.resolvePriorityClass?.({ post, context: context.context }) ?? cachedSource?.priorityClass ?? null,
-          });
-
-          hydrated = hydratePostFromMediaRecord(
-            hydrated,
-            {
-              ...pendingRecord,
-              durationSeconds: pendingRecord.durationSeconds ?? null,
-              thumbnailAssetPath: null,
-              clipAssetPath: null,
-              error: null,
-              generatedAt: pendingRecord.generatedAt,
-              lastSeenAt: pendingRecord.lastSeenAt,
-              mediaKind: pendingRecord.mediaKind ?? null,
-              mimeType: pendingRecord.mimeType ?? null,
-              width: pendingRecord.width ?? null,
-              height: pendingRecord.height ?? null,
-              nativeThumbnailUrl: pendingRecord.nativeThumbnailUrl ?? null,
-              probeStatus: pendingRecord.probeStatus ?? null,
-              artifactStatus: pendingRecord.artifactStatus ?? null,
-              firstSeenAt: pendingRecord.firstSeenAt ?? null,
-              hotUntil: pendingRecord.hotUntil ?? null,
-              retryAfter: pendingRecord.retryAfter ?? null,
-              generationAttempts: pendingRecord.generationAttempts ?? null,
-              lastError: pendingRecord.lastError ?? null,
-              lastObservedContext: pendingRecord.lastObservedContext ?? null,
-            },
-            now
-          );
-          return hydratePostFromSourceRecord(hydrated, cachedSource);
-        })
-      );
-    },
-  };
-}
-

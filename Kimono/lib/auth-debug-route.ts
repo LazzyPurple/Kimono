@@ -31,7 +31,7 @@ type AdminUserSnapshot = {
 };
 
 export type AuthDebugRouteAccessDecision =
-  | { type: "allowed"; via: "local-dev" | "debug-token" | "session" }
+  | { type: "allowed"; via: "local-dev" | "debug-token" | "session" | "env-bypass" }
   | { type: "denied" };
 
 export type PasswordProbeSnapshot = {
@@ -390,5 +390,6 @@ export async function collectAuthDebugSnapshot(options?: {
     }
   }
 }
+
 
 

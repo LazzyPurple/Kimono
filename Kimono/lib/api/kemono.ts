@@ -1,12 +1,5 @@
-﻿import axios, { AxiosError, type AxiosInstance } from "axios";
-
-import { getCachedCreators, setCachedCreators } from "@/lib/api/creator-catalog-cache";
-import { createUpstreamBrowserHeaders } from "@/lib/api/upstream-browser-headers";
-import {
-  createRateLimitError,
-  getGlobalUpstreamRateGuard,
-  resolveUpstreamBucket,
-} from "@/lib/api/upstream-rate-guard";
+import { getCachedCreators, setCachedCreators } from "./creator-catalog-cache.ts";
+import { fetchUpstreamJson, fetchUpstreamText } from "./upstream-fetch.ts";
 
 export interface Creator {
   id: string;
@@ -44,51 +37,30 @@ export interface Post {
   }>;
 }
 
-const client: AxiosInstance = axios.create({
-  baseURL: "https://kemono.cr/api",
-  headers: createUpstreamBrowserHeaders("kemono"),
-  timeout: 15000,
-});
+const BASE_URL = "https://kemono.cr/api";
+const RETRY_DELAYS_MS = [1_000, 3_000];
+const DEFAULT_TIMEOUT_MS = 15_000;
 
-const RETRY_DELAYS = [1000, 3000];
-const rateGuard = getGlobalUpstreamRateGuard();
+function buildUrl(pathname: string, params?: Record<string, string | string[] | undefined>): string {
+  const targetUrl = new URL(`${BASE_URL}${pathname}`);
 
-client.interceptors.request.use(async (config) => {
-  const bucket = resolveUpstreamBucket(config.url);
-  const decision = rateGuard.canRequest("kemono", bucket);
-  if (!decision.allowed) {
-    throw createRateLimitError("kemono", decision.retryAfterMs, bucket);
-  }
-  return config;
-});
-
-client.interceptors.response.use(undefined, async (error: AxiosError) => {
-  const config = error.config as AxiosError["config"] & { __retryCount?: number };
-  const status = error.response?.status ?? 0;
-
-  if (status === 429) {
-    const bucket = resolveUpstreamBucket(config?.url);
-    rateGuard.registerRateLimit("kemono", {
-      status,
-      headers: error.response?.headers as Record<string, string | number | null | undefined> | undefined,
-    }, bucket);
-    throw error;
+  if (params) {
+    for (const [key, value] of Object.entries(params)) {
+      if (value == null) {
+        continue;
+      }
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          targetUrl.searchParams.append(key, item);
+        }
+      } else {
+        targetUrl.searchParams.set(key, value);
+      }
+    }
   }
 
-  if (!config) {
-    throw error;
-  }
-
-  config.__retryCount = config.__retryCount || 0;
-  if ((status === 0 || status >= 500) && config.__retryCount < RETRY_DELAYS.length) {
-    const delay = RETRY_DELAYS[config.__retryCount];
-    config.__retryCount += 1;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    return client(config);
-  }
-
-  throw error;
-});
+  return targetUrl.toString();
+}
 
 export async function fetchCreatorPosts(
   service: string,
@@ -98,15 +70,17 @@ export async function fetchCreatorPosts(
   query?: string,
   tags?: string[]
 ): Promise<Post[]> {
-  const params: Record<string, string | string[]> = { o: String(offset) };
-  if (query) params.q = query;
-  if (tags && tags.length) params.tag = tags;
-
-  const { data } = await client.get<Post[]>(`/v1/${service}/user/${creatorId}/posts`, {
-    params,
-    ...(cookie ? { headers: createUpstreamBrowserHeaders("kemono", cookie) } : {}),
+  return fetchUpstreamJson<Post[]>({
+    site: "kemono",
+    url: buildUrl(`/v1/${service}/user/${creatorId}/posts`, {
+      o: String(offset),
+      ...(query ? { q: query } : {}),
+      ...(tags && tags.length ? { tag: tags } : {}),
+    }),
+    cookie,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    retryDelaysMs: RETRY_DELAYS_MS,
   });
-  return data;
 }
 
 export async function fetchCreatorProfile(
@@ -114,8 +88,12 @@ export async function fetchCreatorProfile(
   creatorId: string
 ): Promise<Creator | null> {
   try {
-    const { data } = await client.get<Creator>(`/v1/${service}/user/${creatorId}/profile`);
-    return data;
+    return await fetchUpstreamJson<Creator>({
+      site: "kemono",
+      url: buildUrl(`/v1/${service}/user/${creatorId}/profile`),
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+      retryDelaysMs: RETRY_DELAYS_MS,
+    });
   } catch {
     return null;
   }
@@ -129,8 +107,13 @@ export async function searchCreators(query: string): Promise<Creator[]> {
 
     for (const endpoint of endpoints) {
       try {
-        const { data } = await client.get(endpoint);
-        const creators: Creator[] = typeof data === "string" ? JSON.parse(data) : data;
+        const raw = await fetchUpstreamText({
+          site: "kemono",
+          url: buildUrl(endpoint),
+          timeoutMs: DEFAULT_TIMEOUT_MS,
+          retryDelaysMs: RETRY_DELAYS_MS,
+        });
+        const creators: Creator[] = JSON.parse(raw);
 
         if (Array.isArray(creators) && creators.length > 0) {
           allCreators = creators;
@@ -153,24 +136,31 @@ export async function searchCreators(query: string): Promise<Creator[]> {
 }
 
 export async function fetchRecentPosts(offset: number = 0): Promise<Post[]> {
-  const { data } = await client.get<Post[]>("/v1/recent", {
-    params: { o: offset },
+  return fetchUpstreamJson<Post[]>({
+    site: "kemono",
+    url: buildUrl("/v1/recent", { o: String(offset) }),
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    retryDelaysMs: RETRY_DELAYS_MS,
   });
-  return data;
 }
 
 export async function fetchFavorites(cookie: string): Promise<Creator[]> {
-  const { data } = await client.get<Creator[]>("/v1/account/favorites", {
-    headers: createUpstreamBrowserHeaders("kemono", cookie),
-    params: { type: "artist" },
+  return fetchUpstreamJson<Creator[]>({
+    site: "kemono",
+    url: buildUrl("/v1/account/favorites", { type: "artist" }),
+    cookie,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    retryDelaysMs: RETRY_DELAYS_MS,
   });
-  return data;
 }
 
 export async function fetchFavoritePosts(cookie: string): Promise<Post[]> {
-  const { data } = await client.get<Post[]>("/v1/account/favorites", {
-    headers: createUpstreamBrowserHeaders("kemono", cookie),
-    params: { type: "post" },
+  return fetchUpstreamJson<Post[]>({
+    site: "kemono",
+    url: buildUrl("/v1/account/favorites", { type: "post" }),
+    cookie,
+    timeoutMs: DEFAULT_TIMEOUT_MS,
+    retryDelaysMs: RETRY_DELAYS_MS,
   });
-  return data;
 }
+
