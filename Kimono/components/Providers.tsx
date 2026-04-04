@@ -1,6 +1,7 @@
 "use client";
 
 import { SessionProvider } from "next-auth/react";
+import { LikesProvider } from "@/contexts/LikesContext";
 
 export default function Providers({
   children,
@@ -10,8 +11,12 @@ export default function Providers({
   localDevMode?: boolean;
 }) {
   if (localDevMode) {
-    return <>{children}</>;
+    return <LikesProvider>{children}</LikesProvider>;
   }
 
-  return <SessionProvider>{children}</SessionProvider>;
+  return (
+    <SessionProvider>
+      <LikesProvider>{children}</LikesProvider>
+    </SessionProvider>
+  );
 }

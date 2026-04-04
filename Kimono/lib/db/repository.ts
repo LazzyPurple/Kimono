@@ -358,6 +358,17 @@ export async function getCreatorById(conn: DbConnection, site: KimonoSite, servi
   });
 }
 
+export async function getCreatorBySiteAndId(conn: DbConnection, site: KimonoSite, creatorId: string): Promise<CreatorRow | null> {
+  return withDbLog("getCreatorBySiteAndId", { site, creatorId }, async () => {
+    const rows = await queryRows(
+      conn,
+      "SELECT * FROM `Creator` WHERE site = ? AND creatorId = ? AND archivedAt IS NULL ORDER BY favorited DESC, updated DESC, normalizedName ASC LIMIT 1",
+      [site, creatorId],
+    );
+    return rows[0] ? mapCreatorRow(rows[0]) : null;
+  });
+}
+
 export async function upsertCreators(conn: DbConnection, creators: InsertCreatorRow[]): Promise<{ inserted: number; updated: number }> {
   return withDbLog("upsertCreators", { count: creators.length }, async () => {
     let inserted = 0;
