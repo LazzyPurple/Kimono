@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
-import { collectAuthDebugSnapshot, collectPublicRuntimeEnvProbe } from "@/lib/auth-debug-route";
+import { collectAuthDebugSnapshot } from "@/lib/auth-debug-route";
 import { getCurrentDiagnosticAccessDecision, shouldEnableDiagnosticBypass } from "@/lib/diagnostic-access";
 import { DiagnosticsLocked, DiagnosticsPageShell, JsonCard, StatusPill } from "@/components/main/DiagnosticsPrimitives";
 
@@ -26,23 +26,21 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
     return <DiagnosticsLocked bypassEnabled={bypassEnabled} />;
   }
 
-  const runtime = collectPublicRuntimeEnvProbe();
   const auth = await collectAuthDebugSnapshot();
 
   return (
     <DiagnosticsPageShell
       eyebrow="Diagnostics"
       title="Auth debug"
-      description="Sanitized auth/runtime probe to diagnose why password login is failing on the lune."
+      description="Focused auth snapshot to diagnose password login failures on the lune."
       actions={
         <>
-          <StatusPill ok={runtime.credentialAuthEnabled} label={runtime.credentialAuthEnabled ? 'credentials on' : 'credentials off'} />
+          <StatusPill ok={auth.credentialAuthEnabled} label={auth.credentialAuthEnabled ? "credentials on" : "credentials off"} />
           <Link className="neo-button" href="/api/auth/debug">Auth debug JSON</Link>
         </>
       }
     >
-      <div className="grid gap-6 lg:grid-cols-2">
-        <JsonCard title="Runtime auth flags" value={runtime} />
+      <div className="grid gap-6">
         <JsonCard title="Database auth snapshot" value={auth} danger={!auth.database.ok} />
       </div>
     </DiagnosticsPageShell>

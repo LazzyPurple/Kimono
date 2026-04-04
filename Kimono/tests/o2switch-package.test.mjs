@@ -25,7 +25,7 @@ test("o2switch packaging config defines the Linux prebuilt artifact shape", asyn
   assert.ok(config.EXCLUDED_SOURCE_PATHS.includes(".env.local"));
 });
 
-test("runtime package manifest keeps prod deps and strips local-only dependencies", async () => {
+test("runtime package manifest keeps prod deps and strips removed local-only dependencies", async () => {
   const sourcePackage = readJson("package.json");
   const sourceLock = readJson("package-lock.json");
   const { createRuntimePackageManifest } = await import(configModuleUrl);
@@ -37,10 +37,12 @@ test("runtime package manifest keeps prod deps and strips local-only dependencie
   assert.equal(runtimePackage.scripts.build, undefined);
   assert.ok(runtimePackage.dependencies.next);
   assert.ok(runtimePackage.dependencies["next-auth"]);
-  assert.ok(runtimePackage.dependencies.mysql2);
+  assert.ok(runtimePackage.dependencies.postgres);
+  assert.equal(runtimePackage.dependencies.mysql2, undefined);
   assert.equal(runtimePackage.dependencies["@prisma/client"], undefined);
   assert.equal(runtimePackage.dependencies["@prisma/adapter-better-sqlite3"], undefined);
   assert.equal(runtimePackage.dependencies["better-sqlite3"], undefined);
+  assert.equal(runtimePackage.dependencies.prisma, undefined);
   assert.equal(runtimePackage.devDependencies, undefined);
 });
 
@@ -54,7 +56,7 @@ test("runtime package manifest pins exact runtime dependency versions from packa
   assert.equal(runtimePackage.dependencies.next, "16.1.7");
   assert.equal(runtimePackage.dependencies.react, "19.2.3");
   assert.equal(runtimePackage.dependencies["react-dom"], "19.2.3");
-  assert.equal(runtimePackage.dependencies.mysql2, "3.19.0");
+  assert.match(runtimePackage.dependencies.postgres, /^\d+\.\d+\.\d+$/);
   assert.equal(runtimePackage.dependencies["next-auth"], "5.0.0-beta.30");
 });
 
@@ -97,7 +99,7 @@ test("WSL build script is checked in as a real Unix shell script", () => {
   assert.match(gitAttributes, /^\*\.sh text eol=lf$/m);
 });
 
-test("WSL build script skips local Prisma generation for the production artifact", () => {
+test("WSL build script no longer tries to generate or package local Prisma artifacts", () => {
   const buildScript = fs.readFileSync(
     path.join(root, "scripts", "build-o2switch-package.sh"),
     "utf8"
@@ -105,6 +107,7 @@ test("WSL build script skips local Prisma generation for the production artifact
 
   assert.doesNotMatch(buildScript, /npm run prisma:generate/);
   assert.doesNotMatch(buildScript, /PRISMA_DISABLE_CONFIG=1 npm run prisma:generate/);
+  assert.doesNotMatch(buildScript, /prisma\/schema\.prisma/);
 });
 
 test("WSL build script writes the runtime package from package.json plus package-lock", () => {
@@ -126,25 +129,14 @@ test("main source tree exposes the production bootstrap expected by o2switch", (
     pkg.scripts["build:o2switch-package"],
     "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-o2switch-package.ps1"
   );
+  assert.equal(pkg.scripts["prisma:generate"], undefined);
+  assert.equal(pkg.scripts["prisma:push"], undefined);
   assert.equal(fs.existsSync(serverPath), true, "server.js should exist at the app root");
-});
-
-test("db performance compat layer keeps Prisma imports lazy for production runtime packaging", () => {
-  const source = fs.readFileSync(path.join(process.cwd(), "lib", "db", "performance.ts"), "utf8");
-
-  assert.equal(source.includes('from "../prisma.ts"'), false);
-  assert.ok(source.includes('await import("../prisma.ts")'));
-});
-
-test("local-only Prisma files avoid static @prisma/client imports in the production build path", () => {
-  const dataStoreSource = fs.readFileSync(path.join(root, "lib", "db", "app-store.ts"), "utf8");
-  const perfRepositorySource = fs.readFileSync(path.join(root, "lib", "db", "performance.ts"), "utf8");
-  const prismaSource = fs.readFileSync(path.join(root, "lib", "prisma.ts"), "utf8");
-
-  assert.ok(!dataStoreSource.includes('from "@prisma/client"'));
-  assert.ok(!perfRepositorySource.includes('from "@prisma/client"'));
-  assert.ok(!prismaSource.includes('import { PrismaClient } from "@prisma/client"'));
-  assert.ok(prismaSource.includes('localRequire("@prisma/client")'));
+  assert.equal(fs.existsSync(path.join(root, "lib", "prisma.ts")), false);
+  assert.equal(fs.existsSync(path.join(root, "lib", "db", "local-repository.ts")), false);
+  assert.equal(fs.existsSync(path.join(root, "lib", "db", "app-store.ts")), false);
+  assert.equal(fs.existsSync(path.join(root, "lib", "db", "performance.ts")), false);
+  assert.equal(fs.existsSync(path.join(root, "lib", "db", "performance-cache.ts")), false);
 });
 
 test("runtime package manifest keeps ffmpeg dependencies required for server-side popular previews", async () => {

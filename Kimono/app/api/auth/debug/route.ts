@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   collectAuthDebugSnapshot,
-  collectPublicRuntimeEnvProbe,
   probeAdminPassword,
   simulateMasterPasswordAuthorize,
 } from "@/lib/auth-debug-route";
@@ -29,7 +28,6 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    runtime: collectPublicRuntimeEnvProbe(),
     auth: await collectAuthDebugSnapshot(),
   });
 }
@@ -49,7 +47,6 @@ export async function POST(request: Request) {
   const password = typeof body?.password === "string" ? body.password : null;
 
   return NextResponse.json({
-    runtime: collectPublicRuntimeEnvProbe(),
     auth: await collectAuthDebugSnapshot(),
     passwordProbe: probeAdminPassword(password),
     authorizeSimulation: password ? await simulateMasterPasswordAuthorize(password) : null,

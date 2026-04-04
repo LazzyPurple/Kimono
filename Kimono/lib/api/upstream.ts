@@ -1,4 +1,4 @@
-import type { PopularPeriod } from "../db/index.ts";
+export type PopularPeriod = "recent" | "day" | "week" | "month";
 import type { Creator, Post } from "./kemono.ts";
 import { fetchUpstreamJson, fetchUpstreamText } from "./upstream-fetch.ts";
 
@@ -85,3 +85,4 @@ export async function fetchPostDetailFromSite(input: {
 
   return data?.post ?? data;
 }
+

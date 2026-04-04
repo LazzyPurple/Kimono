@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { getDataStore } from "./db/index.ts";
 import { resolveLocalDevMode } from "./local-dev-mode.ts";
 import { shouldEnableCredentialAuth } from "./auth-guards.ts";
@@ -70,39 +69,6 @@ export type AuthDebugSnapshot = {
       };
 };
 
-export type DatabaseUrlDebugSnapshot = {
-  scheme: string | null;
-  hasCredentials: boolean;
-  hasHostname: boolean;
-  hasPort: boolean;
-  hasDatabaseName: boolean;
-  hasWhitespace: boolean;
-  hasNewline: boolean;
-  hasQuotes: boolean;
-  hasLeadingOrTrailingWhitespace: boolean;
-  parseable: boolean;
-  valueHash: string;
-};
-
-export type PublicRuntimeEnvProbe = {
-  routeVersion: "2026-03-13-open-auth-debug-v2";
-  nodeEnv: string | null;
-  localDevMode: boolean;
-  credentialAuthEnabled: boolean;
-  env: {
-    databaseUrlConfigured: boolean;
-    adminPasswordConfigured: boolean;
-    authSecretConfigured: boolean;
-    authUrlConfigured: boolean;
-    webauthnOriginConfigured: boolean;
-    webauthnRpIdConfigured: boolean;
-    webauthnRpNameConfigured: boolean;
-    authDebugLogEnabled: boolean;
-    authDebugTokenConfigured: boolean;
-    databaseUrlDebug: DatabaseUrlDebugSnapshot | null;
-  };
-};
-
 function hasConfiguredValue(value: string | undefined): boolean {
   return Boolean(value?.trim());
 }
@@ -123,65 +89,6 @@ function toAdminUserSnapshot(user: StoredUser): AdminUserSnapshot {
   return {
     exists: true,
     totpEnabled: Boolean(user.totpEnabled),
-  };
-}
-
-function getDatabaseUrlDebugSnapshot(databaseUrl: string | undefined): DatabaseUrlDebugSnapshot | null {
-  if (!databaseUrl) {
-    return null;
-  }
-
-  const rawValue = databaseUrl;
-  const trimmedValue = rawValue.trim();
-  const match = trimmedValue.match(/^([a-z0-9+.-]+):\/\/([^:@/?#]+)(?::([^@/?#]*))?@([^:/?#]+)(?::(\d+))?(?:\/([^?#]*))?/i);
-
-  return {
-    scheme: match?.[1] ?? null,
-    hasCredentials: Boolean(match?.[2]),
-    hasHostname: Boolean(match?.[4]),
-    hasPort: Boolean(match?.[5]),
-    hasDatabaseName: Boolean(match?.[6]),
-    hasWhitespace: /\s/.test(rawValue),
-    hasNewline: /[\r\n]/.test(rawValue),
-    hasQuotes: /["'`]/.test(rawValue),
-    hasLeadingOrTrailingWhitespace: rawValue !== trimmedValue,
-    parseable: Boolean(match),
-    valueHash: createHash("sha256").update(rawValue).digest("hex").slice(0, 12),
-  };
-}
-
-export function collectPublicRuntimeEnvProbe(
-  env: EnvShape = process.env
-): PublicRuntimeEnvProbe {
-  const localDevMode = resolveLocalDevMode(env);
-
-  return {
-    routeVersion: "2026-03-13-open-auth-debug-v2",
-    nodeEnv: env.NODE_ENV ?? null,
-    localDevMode,
-    credentialAuthEnabled: shouldEnableCredentialAuth(localDevMode),
-    env: {
-      databaseUrlConfigured: hasConfiguredValue(env.DATABASE_URL),
-      adminPasswordConfigured: hasConfiguredValue(env.ADMIN_PASSWORD),
-      authSecretConfigured: hasConfiguredValue(env.AUTH_SECRET),
-      authUrlConfigured: hasConfiguredValue(env.AUTH_URL),
-      webauthnOriginConfigured: hasConfiguredValue(env.WEBAUTHN_ORIGIN),
-      webauthnRpIdConfigured: hasConfiguredValue(env.WEBAUTHN_RP_ID),
-      webauthnRpNameConfigured: hasConfiguredValue(env.WEBAUTHN_RP_NAME),
-      authDebugLogEnabled: shouldEnableAuthDebugLog(env),
-      authDebugTokenConfigured: hasConfiguredValue(env.AUTH_DEBUG_TOKEN),
-      databaseUrlDebug: getDatabaseUrlDebugSnapshot(env.DATABASE_URL),
-    },
-  };
-}
-
-export function collectDatabaseUrlDebugPayload(env: EnvShape = process.env) {
-  const runtime = collectPublicRuntimeEnvProbe(env);
-
-  return {
-    ok: true,
-    databaseUrlConfigured: runtime.env.databaseUrlConfigured,
-    databaseUrlDebug: runtime.env.databaseUrlDebug,
   };
 }
 
@@ -390,6 +297,3 @@ export async function collectAuthDebugSnapshot(options?: {
     }
   }
 }
-
-
-

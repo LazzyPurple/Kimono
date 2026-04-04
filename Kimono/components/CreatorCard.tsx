@@ -1,10 +1,11 @@
-﻿"use client";
+"use client";
 
 import { useState } from "react";
 import { Heart, User } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+
+import type { Site } from "@/lib/api/helpers";
 import { useLikes } from "@/contexts/LikesContext";
-import { proxyCdnUrl, type Site } from "@/lib/api/helpers";
+import { getCreatorBannerUrl, getCreatorIconUrl, getThumbnailUrl } from "@/lib/media-platform";
 
 interface CreatorCardProps {
   id: string;
@@ -13,6 +14,9 @@ interface CreatorCardProps {
   site: Site;
   favorited?: number | null;
   updated?: string | number;
+  postCount?: number | null;
+  profileImageUrl?: string | null;
+  bannerImageUrl?: string | null;
 }
 
 function formatCreatorDate(updated?: string | number): string | null {
@@ -65,14 +69,17 @@ export default function CreatorCard({
   site,
   favorited,
   updated,
+  postCount,
+  profileImageUrl,
+  bannerImageUrl,
 }: CreatorCardProps) {
   const [avatarError, setAvatarError] = useState(false);
   const [bannerError, setBannerError] = useState(false);
   const { isCreatorLiked, toggleCreatorLike } = useLikes();
 
   const liked = isCreatorLiked(site, service, id);
-  const avatarUrl = proxyCdnUrl(site, `/icons/${service}/${id}`);
-  const bannerUrl = proxyCdnUrl(site, `/banners/${service}/${id}`);
+  const avatarUrl = getThumbnailUrl(site, profileImageUrl) ?? getCreatorIconUrl(site, service, id);
+  const bannerUrl = getThumbnailUrl(site, bannerImageUrl) ?? getCreatorBannerUrl(site, service, id);
   const displayDate = formatCreatorDate(updated);
   const serviceBadgeClass = getServiceBadgeClass(service);
 
@@ -86,19 +93,18 @@ export default function CreatorCard({
       : "bg-pink-600/80 text-white";
 
   return (
-    <a href={`/creator/${site}/${service}/${id}`} className="group block">
+    <a href={`/creators/${site}/${id}`} className="group block">
       <div
         className="overflow-hidden rounded-2xl border-2 bg-[#12121a] transition-all duration-300"
         style={{
           borderColor: liked ? "#ef4444" : "rgba(124,58,237,0.25)",
         }}
-        onMouseEnter={(e) =>
-          ((e.currentTarget as HTMLDivElement).style.borderColor = liked ? "#ef4444" : siteColor)
-        }
-        onMouseLeave={(e) =>
-          ((e.currentTarget as HTMLDivElement).style.borderColor =
-            liked ? "#ef444488" : "rgba(124,58,237,0.25)")
-        }
+        onMouseEnter={(event) => {
+          event.currentTarget.style.borderColor = liked ? "#ef4444" : siteColor;
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.borderColor = liked ? "#ef444488" : "rgba(124,58,237,0.25)";
+        }}
       >
         <div className="relative" style={{ aspectRatio: "16/9" }}>
           <div className="absolute inset-0 overflow-hidden">
@@ -128,10 +134,10 @@ export default function CreatorCard({
 
           <div className="absolute left-2 top-2 z-10">
             <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                toggleCreatorLike(site, service, id);
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                void toggleCreatorLike(site, service, id);
               }}
               className="cursor-pointer rounded-full bg-black/40 p-1.5 transition-colors hover:bg-black/60"
             >
@@ -144,7 +150,9 @@ export default function CreatorCard({
           </div>
 
           <div className="absolute right-2 top-2 z-10">
-            <Badge className={`text-xs ${siteBadgeClass}`}>{site}</Badge>
+            <span className={`inline-flex rounded-full border border-white/10 px-2.5 py-1 text-xs font-bold uppercase tracking-[0.12em] ${siteBadgeClass}`}>
+              {site}
+            </span>
           </div>
         </div>
 
@@ -175,17 +183,19 @@ export default function CreatorCard({
               </h3>
 
               <div className="flex flex-wrap gap-2">
-                <Badge
-                  variant="outline"
-                  className={`whitespace-nowrap border text-xs ${serviceBadgeClass}`}
-                >
+                <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${serviceBadgeClass}`}>
                   {formatServiceLabel(service)}
-                </Badge>
+                </span>
               </div>
             </div>
           </div>
 
           <div className="flex flex-wrap gap-2 text-xs text-[#8b93a7]">
+            {postCount != null && (
+              <span className="inline-flex items-center rounded-full border border-white/15 bg-[#0a0a0f] px-2.5 py-1 text-white">
+                {postCount.toLocaleString()} posts
+              </span>
+            )}
             {favorited != null && (
               <span className="inline-flex items-center gap-1 rounded-full border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-pink-50">
                 <Heart className="h-3.5 w-3.5 fill-pink-400 text-pink-400" />

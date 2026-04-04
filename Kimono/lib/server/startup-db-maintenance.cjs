@@ -1,18 +1,17 @@
 const fs = require("fs");
 const path = require("path");
+const { createPostgresRuntimeClient } = require("./postgres-runtime.cjs");
 
 const DEFAULT_PREVIEW_ASSET_DIR = path.join("tmp", "preview-assets");
 const DEFAULT_MEDIA_SOURCE_CACHE_DIR = path.join("tmp", "media-source-cache");
 
 const REBUILDABLE_DB_TABLES = [
-  "CreatorSnapshot",
   "DiscoveryCache",
   "DiscoveryBlock",
-  "PostCache",
-  "PreviewAssetCache",
-  "MediaSourceCache",
-  "CreatorSearchCache",
-  "PopularSnapshot",
+  "Post",
+  "MediaAsset",
+  "MediaSource",
+  "FavoriteCache",
 ];
 
 const PRESERVED_DB_TABLES = [
@@ -21,9 +20,7 @@ const PRESERVED_DB_TABLES = [
   "Session",
   "KimonoSession",
   "FavoriteChronology",
-  "FavoriteSnapshot",
-  "CreatorsCache",
-  "CreatorIndex",
+  "Creator",
 ];
 
 function parseDatabaseDriver(databaseUrl) {
@@ -31,14 +28,8 @@ function parseDatabaseDriver(databaseUrl) {
   if (!normalized) {
     return null;
   }
-  if (normalized.startsWith("mysql://")) {
-    return "mysql";
-  }
   if (normalized.startsWith("postgres://") || normalized.startsWith("postgresql://")) {
     return "postgres";
-  }
-  if (normalized.startsWith("file:") || normalized.startsWith("sqlite:")) {
-    return "sqlite";
   }
   return "unknown";
 }
@@ -59,6 +50,7 @@ function isIgnorableSqlError(error) {
   const message = error instanceof Error ? error.message.toLowerCase() : "";
   return code === "ER_NO_SUCH_TABLE"
     || code === "42S02"
+    || code === "42P01"
     || message.includes("no such table");
 }
 
@@ -72,15 +64,14 @@ async function resetDirectoryContents(directoryPath, fileSystem = fs.promises) {
   await fileSystem.mkdir(directoryPath, { recursive: true });
 }
 
-async function createMySqlExecutor(databaseUrl) {
-  const mysql = require("mysql2/promise");
-  const connection = await mysql.createConnection(databaseUrl);
+async function createPostgresExecutor(databaseUrl) {
+  const connection = createPostgresRuntimeClient(databaseUrl);
   return {
     executeSql: async (sql) => {
-      await connection.execute(sql);
+      await connection.executeResult(sql);
     },
     close: async () => {
-      await connection.end();
+      await connection.close();
     },
   };
 }
@@ -94,7 +85,7 @@ async function purgeRebuildableDataOnStartup({
   resetDirectory = resetDirectoryContents,
 } = {}) {
   const databaseDriver = parseDatabaseDriver(env.DATABASE_URL);
-  if (databaseDriver !== "mysql") {
+  if (databaseDriver !== "postgres") {
     logger.info?.(`[BOOT] Startup rebuildable data purge skipped (driver=${databaseDriver ?? "none"}).`);
     return {
       skipped: true,
@@ -107,7 +98,7 @@ async function purgeRebuildableDataOnStartup({
   let localExecuteSql = executeSql;
   let localClose = closeSqlConnection;
   if (!localExecuteSql) {
-    const executor = await createMySqlExecutor(env.DATABASE_URL);
+    const executor = await createPostgresExecutor(env.DATABASE_URL);
     localExecuteSql = executor.executeSql;
     localClose = executor.close;
   }

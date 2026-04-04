@@ -1,9 +1,8 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
   collectAuthDebugSnapshot,
-  collectPublicRuntimeEnvProbe,
   getAuthDebugRouteAccessDecision,
   probeAdminPassword,
   simulateMasterPasswordAuthorize,
@@ -266,50 +265,4 @@ test("collectAuthDebugSnapshot reports database errors without throwing", async 
   assert.equal(snapshot.database.error?.errorCode, "ER_ACCESS_DENIED_ERROR");
   assert.equal(snapshot.database.error?.errorErrno, 1045);
   assert.equal(snapshot.database.error?.errorSqlState, "28000");
-});
-
-test("collectPublicRuntimeEnvProbe exposes a sanitized database url diagnostic without revealing the password", () => {
-  const probe = collectPublicRuntimeEnvProbe({
-    NODE_ENV: "production",
-    DATABASE_URL: "mysql://dosa4307_kimono: b9T2NJ3924vj3UhBbn2T @localhost:3306/dosa4307_kimono\n",
-    ADMIN_PASSWORD: "configured",
-    AUTH_SECRET: "secret",
-    AUTH_URL: "https://kimono.paracosm.fr",
-    WEBAUTHN_ORIGIN: "https://kimono.paracosm.fr",
-    WEBAUTHN_RP_ID: "kimono.paracosm.fr",
-    WEBAUTHN_RP_NAME: "Kimono",
-    AUTH_DEBUG_TOKEN: "debug-token",
-  });
-
-  assert.equal(probe.routeVersion, "2026-03-13-open-auth-debug-v2");
-  assert.equal(probe.nodeEnv, "production");
-  assert.equal(probe.localDevMode, false);
-  assert.equal(probe.credentialAuthEnabled, true);
-  assert.equal(probe.env.databaseUrlConfigured, true);
-  assert.equal(probe.env.adminPasswordConfigured, true);
-  assert.equal(probe.env.authSecretConfigured, true);
-  assert.equal(probe.env.authUrlConfigured, true);
-  assert.equal(probe.env.webauthnOriginConfigured, true);
-  assert.equal(probe.env.webauthnRpIdConfigured, true);
-  assert.equal(probe.env.webauthnRpNameConfigured, true);
-  assert.equal(probe.env.authDebugTokenConfigured, true);
-  assert.equal(probe.env.databaseUrlDebug.scheme, "mysql");
-  assert.equal(probe.env.databaseUrlDebug.hasCredentials, true);
-  assert.equal(probe.env.databaseUrlDebug.hasHostname, true);
-  assert.equal(probe.env.databaseUrlDebug.hasPort, true);
-  assert.equal(probe.env.databaseUrlDebug.hasDatabaseName, true);
-  assert.equal(probe.env.databaseUrlDebug.hasWhitespace, true);
-  assert.equal(probe.env.databaseUrlDebug.hasNewline, true);
-  assert.equal(probe.env.databaseUrlDebug.hasQuotes, false);
-  assert.equal(typeof probe.env.databaseUrlDebug.valueHash, "string");
-  assert.equal(probe.env.databaseUrlDebug.valueHash.length, 12);
-  assert.equal("username" in probe.env.databaseUrlDebug, false);
-  assert.equal("hostname" in probe.env.databaseUrlDebug, false);
-  assert.equal("port" in probe.env.databaseUrlDebug, false);
-  assert.equal("databaseName" in probe.env.databaseUrlDebug, false);
-  assert.equal("passwordLength" in probe.env.databaseUrlDebug, false);
-  assert.equal("passwordPreviewStart" in probe.env.databaseUrlDebug, false);
-  assert.equal("passwordPreviewEnd" in probe.env.databaseUrlDebug, false);
-  assert.equal("rawValue" in probe.env.databaseUrlDebug, false);
-  assert.equal("password" in probe.env.databaseUrlDebug, false);
 });

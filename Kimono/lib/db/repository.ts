@@ -1,5 +1,4 @@
-
-import type { Connection } from "mysql2/promise";
+import type { DbConnection } from "../db.ts";
 
 import { logAppError } from "../app-logger.ts";
 import { TTL } from "../config/ttl.ts";
@@ -20,7 +19,7 @@ import type {
   SearchCreatorsResult,
 } from "./types.ts";
 
-type QueryableConnection = Pick<Connection, "query" | "execute">;
+type QueryableConnection = Pick<DbConnection, "query" | "execute">;
 type RowShape = Record<string, unknown>;
 
 const CREATOR_UPSERT_BATCH_SIZE = 500;
@@ -66,31 +65,20 @@ async function executeResult(conn: QueryableConnection, sql: string, values: unk
     : 0;
 }
 
-function getRepositoryDialect(): "mysql" | "sqlite" {
-  return String(process.env.DATABASE_URL ?? "").startsWith("mysql") ? "mysql" : "sqlite";
-}
-
 async function hasColumn(conn: QueryableConnection, tableName: string, columnName: string): Promise<boolean> {
-  const dialect = getRepositoryDialect();
-  const cacheKey = `${dialect}:${tableName}:${columnName}`;
+  const cacheKey = `postgres:${tableName}:${columnName}`;
   const cached = columnPresenceCache.get(cacheKey);
   if (typeof cached === "boolean") {
     return cached;
   }
 
   try {
-    let present = false;
-    if (dialect === "mysql") {
-      const rows = await queryRows<{ total?: unknown }>(
-        conn,
-        "SELECT COUNT(*) AS total FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
-        [tableName, columnName],
-      );
-      present = Number(rows[0]?.total ?? 0) > 0;
-    } else {
-      const rows = await queryRows<{ name?: unknown }>(conn, `PRAGMA table_info(\`${tableName}\`)`);
-      present = rows.some((row) => String(row.name ?? "") === columnName);
-    }
+    const rows = await queryRows<{ total?: unknown }>(
+      conn,
+      "SELECT COUNT(*) AS total FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = LOWER(?) AND column_name = LOWER(?)",
+      [tableName, columnName],
+    );
+    const present = Number(rows[0]?.total ?? 0) > 0;
 
     columnPresenceCache.set(cacheKey, present);
     return present;
@@ -303,14 +291,19 @@ function buildDynamicUpdate(data: Record<string, unknown>): { sql: string; value
   };
 }
 
-export async function searchCreators(conn: Connection, opts: SearchCreatorsOpts): Promise<SearchCreatorsResult> {
+export async function searchCreators(conn: DbConnection, opts: SearchCreatorsOpts): Promise<SearchCreatorsResult> {
   return withDbLog("searchCreators", opts as Record<string, unknown>, async () => {
     const page = Math.max(1, Math.floor(opts.page ?? 1));
     const perPage = Math.max(1, Math.min(100, Math.floor(opts.perPage ?? 50)));
-    const order = opts.order === "asc" ? "ASC" : "DESC";
-    const sortColumn = opts.sort === "name" ? "normalizedName" : opts.sort === "updated" ? "updated" : "favorited";
+    const sort = opts.sort ?? "name";
+    const order = opts.order
+      ? (opts.order === "asc" ? "ASC" : "DESC")
+      : (sort === "name" ? "ASC" : "DESC");
+    const sortColumn = sort === "name" ? "normalizedName" : sort === "updated" ? "updated" : "favorited";
     const where: string[] = ["archivedAt IS NULL"];
     const values: unknown[] = [];
+    const query = opts.q?.trim() ?? "";
+    const vectorSql = "to_tsvector('simple', regexp_replace(coalesce(name, '') || ' ' || coalesce(normalizedName, ''), '[_-]+', ' ', 'g'))";
     if (opts.site) {
       where.push("site = ?");
       values.push(opts.site);
@@ -319,31 +312,53 @@ export async function searchCreators(conn: Connection, opts: SearchCreatorsOpts)
       where.push("service = ?");
       values.push(opts.service);
     }
-    if (opts.q?.trim()) {
-      where.push("(normalizedName LIKE ? OR name LIKE ? OR creatorId LIKE ?)");
-      const normalized = `%${opts.q.trim().toLowerCase()}%`;
-      const raw = `%${opts.q.trim()}%`;
-      values.push(normalized, raw, raw);
+    if (query) {
+      where.push(`${vectorSql} @@ plainto_tsquery('simple', ?)`);
+      values.push(query);
     }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
     const countRows = await queryRows<{ total: number }>(conn, `SELECT COUNT(*) AS total FROM \`Creator\` ${whereSql}`, values);
-    const rows = await queryRows(conn, `SELECT * FROM \`Creator\` ${whereSql} ORDER BY \`${sortColumn}\` ${order}, normalizedName ASC LIMIT ? OFFSET ?`, [...values, perPage, (page - 1) * perPage]);
+    const orderValues = query ? [query, ...values] : [...values];
+    const selectSql = query
+      ? `SELECT *, ts_rank(${vectorSql}, plainto_tsquery('simple', ?)) AS rank FROM \`Creator\` ${whereSql}`
+      : `SELECT * FROM \`Creator\` ${whereSql}`;
+    const orderSql = query
+      ? sort === "updated"
+        ? "rank DESC, updated DESC, normalizedName ASC"
+        : sort === "favorited"
+          ? "rank DESC, favorited DESC, normalizedName ASC"
+          : "rank DESC, normalizedName ASC"
+      : `\`${sortColumn}\` ${order}, normalizedName ASC`;
+
+    const rows = await queryRows(
+      conn,
+      `${selectSql} ORDER BY ${orderSql} LIMIT ? OFFSET ?`,
+      [...orderValues, perPage, (page - 1) * perPage],
+    );
+
+    const snapshotFresh = opts.site
+      ? await isCreatorCatalogFresh(conn, opts.site)
+      : (await Promise.all([
+          isCreatorCatalogFresh(conn, "kemono"),
+          isCreatorCatalogFresh(conn, "coomer"),
+        ])).every(Boolean);
+
     return {
       rows: rows.map((row) => mapCreatorRow(row)),
       total: Number(countRows[0]?.total ?? 0),
-      snapshotFresh: await isCreatorCatalogFresh(conn, opts.site ?? "kemono"),
+      snapshotFresh,
     };
   });
 }
 
-export async function getCreatorById(conn: Connection, site: KimonoSite, service: string, creatorId: string): Promise<CreatorRow | null> {
+export async function getCreatorById(conn: DbConnection, site: KimonoSite, service: string, creatorId: string): Promise<CreatorRow | null> {
   return withDbLog("getCreatorById", { site, service, creatorId }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `Creator` WHERE site = ? AND service = ? AND creatorId = ? LIMIT 1", [site, service, creatorId]);
     return rows[0] ? mapCreatorRow(rows[0]) : null;
   });
 }
 
-export async function upsertCreators(conn: Connection, creators: InsertCreatorRow[]): Promise<{ inserted: number; updated: number }> {
+export async function upsertCreators(conn: DbConnection, creators: InsertCreatorRow[]): Promise<{ inserted: number; updated: number }> {
   return withDbLog("upsertCreators", { count: creators.length }, async () => {
     let inserted = 0;
     let updated = 0;
@@ -361,13 +376,13 @@ export async function upsertCreators(conn: Connection, creators: InsertCreatorRo
         creator.hasChats ? 1 : 0, creator.chatCount, creator.profileImageUrl, creator.bannerImageUrl, creator.rawIndexPayload,
         creator.rawProfilePayload, creator.catalogSyncedAt ?? new Date(), creator.profileCachedAt, creator.profileExpiresAt, creator.archivedAt ?? null,
       ]);
-      await executeResult(conn, `INSERT INTO \`Creator\` (site, service, creatorId, name, normalizedName, indexed, updated, favorited, postCount, publicId, relationId, dmCount, shareCount, hasChats, chatCount, profileImageUrl, bannerImageUrl, rawIndexPayload, rawProfilePayload, catalogSyncedAt, profileCachedAt, profileExpiresAt, archivedAt) VALUES ${valuesSql} ON DUPLICATE KEY UPDATE name=VALUES(name), normalizedName=VALUES(normalizedName), indexed=VALUES(indexed), updated=VALUES(updated), favorited=VALUES(favorited), postCount=VALUES(postCount), publicId=VALUES(publicId), relationId=VALUES(relationId), dmCount=VALUES(dmCount), shareCount=VALUES(shareCount), hasChats=VALUES(hasChats), chatCount=VALUES(chatCount), profileImageUrl=COALESCE(VALUES(profileImageUrl), profileImageUrl), bannerImageUrl=COALESCE(VALUES(bannerImageUrl), bannerImageUrl), rawIndexPayload=VALUES(rawIndexPayload), catalogSyncedAt=VALUES(catalogSyncedAt)`, values);
+      await executeResult(conn, `INSERT INTO \`Creator\` (site, service, creatorId, name, normalizedName, indexed, updated, favorited, postCount, publicId, relationId, dmCount, shareCount, hasChats, chatCount, profileImageUrl, bannerImageUrl, rawIndexPayload, rawProfilePayload, catalogSyncedAt, profileCachedAt, profileExpiresAt, archivedAt) VALUES ${valuesSql} ON CONFLICT (site, service, creatorId) DO UPDATE SET name = EXCLUDED.name, normalizedName = EXCLUDED.normalizedName, indexed = EXCLUDED.indexed, updated = EXCLUDED.updated, favorited = EXCLUDED.favorited, postCount = EXCLUDED.postCount, publicId = EXCLUDED.publicId, relationId = EXCLUDED.relationId, dmCount = EXCLUDED.dmCount, shareCount = EXCLUDED.shareCount, hasChats = EXCLUDED.hasChats, chatCount = EXCLUDED.chatCount, profileImageUrl = COALESCE(EXCLUDED.profileImageUrl, Creator.profileImageUrl), bannerImageUrl = COALESCE(EXCLUDED.bannerImageUrl, Creator.bannerImageUrl), rawIndexPayload = EXCLUDED.rawIndexPayload, catalogSyncedAt = EXCLUDED.catalogSyncedAt, archivedAt = NULL`, values);
     }
     return { inserted, updated };
   });
 }
 
-export async function archiveStaleCreators(conn: Connection, site: KimonoSite, activeIds: Array<{ service: string; creatorId: string }>): Promise<number> {
+export async function archiveStaleCreators(conn: DbConnection, site: KimonoSite, activeIds: Array<{ service: string; creatorId: string }>): Promise<number> {
   return withDbLog("archiveStaleCreators", { site, activeCount: activeIds.length }, async () => {
     if (activeIds.length === 0) {
       return executeResult(conn, "UPDATE `Creator` SET archivedAt = NOW(3) WHERE site = ? AND archivedAt IS NULL", [site]);
@@ -376,13 +391,13 @@ export async function archiveStaleCreators(conn: Connection, site: KimonoSite, a
   });
 }
 
-export async function updateCreatorProfile(conn: Connection, site: KimonoSite, service: string, creatorId: string, data: Pick<CreatorRow, "rawProfilePayload" | "profileCachedAt" | "profileExpiresAt">): Promise<void> {
+export async function updateCreatorProfile(conn: DbConnection, site: KimonoSite, service: string, creatorId: string, data: Pick<CreatorRow, "rawProfilePayload" | "profileCachedAt" | "profileExpiresAt">): Promise<void> {
   return withDbLog("updateCreatorProfile", { site, service, creatorId }, async () => {
     await executeResult(conn, "UPDATE `Creator` SET rawProfilePayload = ?, profileCachedAt = ?, profileExpiresAt = ? WHERE site = ? AND service = ? AND creatorId = ?", [data.rawProfilePayload, data.profileCachedAt, data.profileExpiresAt, site, service, creatorId]);
   });
 }
 
-export async function isCreatorCatalogFresh(conn: Connection, site: KimonoSite): Promise<boolean> {
+export async function isCreatorCatalogFresh(conn: DbConnection, site: KimonoSite): Promise<boolean> {
   return withDbLog("isCreatorCatalogFresh", { site }, async () => {
     const rows = await queryRows<{ syncedAt: unknown; total: number }>(conn, "SELECT MAX(catalogSyncedAt) AS syncedAt, COUNT(*) AS total FROM `Creator` WHERE site = ? AND archivedAt IS NULL", [site]);
     const row = rows[0];
@@ -390,37 +405,37 @@ export async function isCreatorCatalogFresh(conn: Connection, site: KimonoSite):
     return Boolean(row && Number(row.total ?? 0) > 0 && syncedAt && (Date.now() - syncedAt.getTime()) <= TTL.creator.index);
   });
 }
-export async function getPostById(conn: Connection, site: KimonoSite, service: string, creatorId: string, postId: string): Promise<PostRow | null> {
+export async function getPostById(conn: DbConnection, site: KimonoSite, service: string, creatorId: string, postId: string): Promise<PostRow | null> {
   return withDbLog("getPostById", { site, service, creatorId, postId }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `Post` WHERE site = ? AND service = ? AND creatorId = ? AND postId = ? LIMIT 1", [site, service, creatorId, postId]);
     return rows[0] ? mapPostRow(rows[0]) : null;
   });
 }
 
-export async function getCreatorPosts(conn: Connection, site: KimonoSite, service: string, creatorId: string, offset: number, limit = 50): Promise<PostRow[]> {
+export async function getCreatorPosts(conn: DbConnection, site: KimonoSite, service: string, creatorId: string, offset: number, limit = 50): Promise<PostRow[]> {
   return withDbLog("getCreatorPosts", { site, service, creatorId, offset, limit }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `Post` WHERE site = ? AND service = ? AND creatorId = ? ORDER BY publishedAt DESC LIMIT ? OFFSET ?", [site, service, creatorId, limit, offset]);
     return rows.map((row) => mapPostRow(row));
   });
 }
 
-export async function upsertPost(conn: Connection, post: PostRow): Promise<void> {
+export async function upsertPost(conn: DbConnection, post: PostRow): Promise<void> {
   return withDbLog("upsertPost", { site: post.site, service: post.service, creatorId: post.creatorId, postId: post.postId }, async () => {
     const existing = await getPostById(conn, post.site, post.service, post.creatorId, post.postId);
     if (existing && existing.detailLevel === "full" && post.detailLevel === "preview") {
       return;
     }
-    await executeResult(conn, `INSERT INTO \`Post\` (site, service, creatorId, postId, title, contentHtml, excerpt, publishedAt, addedAt, editedAt, fileName, filePath, attachmentsJson, embedJson, tagsJson, prevPostId, nextPostId, favCount, previewImageUrl, videoUrl, thumbUrl, mediaType, authorName, rawPreviewPayload, rawDetailPayload, detailLevel, sourceKind, isPopular, primaryPopularPeriod, primaryPopularDate, primaryPopularOffset, primaryPopularRank, popularContextsJson, longestVideoUrl, longestVideoDurationSeconds, previewStatus, nativeThumbnailUrl, previewThumbnailAssetPath, previewClipAssetPath, previewGeneratedAt, previewError, previewSourceFingerprint, mediaMimeType, mediaWidth, mediaHeight, cachedAt, expiresAt, staleUntil, lastSeenAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE title=VALUES(title), contentHtml=VALUES(contentHtml), excerpt=VALUES(excerpt), publishedAt=VALUES(publishedAt), addedAt=VALUES(addedAt), editedAt=VALUES(editedAt), fileName=VALUES(fileName), filePath=VALUES(filePath), attachmentsJson=VALUES(attachmentsJson), embedJson=VALUES(embedJson), tagsJson=VALUES(tagsJson), prevPostId=VALUES(prevPostId), nextPostId=VALUES(nextPostId), favCount=VALUES(favCount), previewImageUrl=VALUES(previewImageUrl), videoUrl=VALUES(videoUrl), thumbUrl=VALUES(thumbUrl), mediaType=VALUES(mediaType), authorName=VALUES(authorName), rawPreviewPayload=VALUES(rawPreviewPayload), rawDetailPayload=VALUES(rawDetailPayload), detailLevel=VALUES(detailLevel), sourceKind=VALUES(sourceKind), isPopular=VALUES(isPopular), primaryPopularPeriod=VALUES(primaryPopularPeriod), primaryPopularDate=VALUES(primaryPopularDate), primaryPopularOffset=VALUES(primaryPopularOffset), primaryPopularRank=VALUES(primaryPopularRank), popularContextsJson=VALUES(popularContextsJson), longestVideoUrl=VALUES(longestVideoUrl), longestVideoDurationSeconds=VALUES(longestVideoDurationSeconds), previewStatus=VALUES(previewStatus), nativeThumbnailUrl=VALUES(nativeThumbnailUrl), previewThumbnailAssetPath=VALUES(previewThumbnailAssetPath), previewClipAssetPath=VALUES(previewClipAssetPath), previewGeneratedAt=VALUES(previewGeneratedAt), previewError=VALUES(previewError), previewSourceFingerprint=VALUES(previewSourceFingerprint), mediaMimeType=VALUES(mediaMimeType), mediaWidth=VALUES(mediaWidth), mediaHeight=VALUES(mediaHeight), cachedAt=VALUES(cachedAt), expiresAt=VALUES(expiresAt), staleUntil=VALUES(staleUntil), lastSeenAt=VALUES(lastSeenAt)`, [post.site, post.service, post.creatorId, post.postId, post.title, post.contentHtml, post.excerpt, post.publishedAt, post.addedAt, post.editedAt, post.fileName, post.filePath, post.attachmentsJson, post.embedJson, post.tagsJson, post.prevPostId, post.nextPostId, post.favCount, post.previewImageUrl, post.videoUrl, post.thumbUrl, post.mediaType, post.authorName, post.rawPreviewPayload, post.rawDetailPayload, post.detailLevel, post.sourceKind, post.isPopular ? 1 : 0, post.primaryPopularPeriod, post.primaryPopularDate, post.primaryPopularOffset, post.primaryPopularRank, post.popularContextsJson, post.longestVideoUrl, post.longestVideoDurationSeconds, post.previewStatus, post.nativeThumbnailUrl, post.previewThumbnailAssetPath, post.previewClipAssetPath, post.previewGeneratedAt, post.previewError, post.previewSourceFingerprint, post.mediaMimeType, post.mediaWidth, post.mediaHeight, post.cachedAt, post.expiresAt, post.staleUntil, post.lastSeenAt]);
+    await executeResult(conn, `INSERT INTO \`Post\` (site, service, creatorId, postId, title, contentHtml, excerpt, publishedAt, addedAt, editedAt, fileName, filePath, attachmentsJson, embedJson, tagsJson, prevPostId, nextPostId, favCount, previewImageUrl, videoUrl, thumbUrl, mediaType, authorName, rawPreviewPayload, rawDetailPayload, detailLevel, sourceKind, isPopular, primaryPopularPeriod, primaryPopularDate, primaryPopularOffset, primaryPopularRank, popularContextsJson, longestVideoUrl, longestVideoDurationSeconds, previewStatus, nativeThumbnailUrl, previewThumbnailAssetPath, previewClipAssetPath, previewGeneratedAt, previewError, previewSourceFingerprint, mediaMimeType, mediaWidth, mediaHeight, cachedAt, expiresAt, staleUntil, lastSeenAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (site, service, creatorId, postId) DO UPDATE SET title = EXCLUDED.title, contentHtml = EXCLUDED.contentHtml, excerpt = EXCLUDED.excerpt, publishedAt = EXCLUDED.publishedAt, addedAt = EXCLUDED.addedAt, editedAt = EXCLUDED.editedAt, fileName = EXCLUDED.fileName, filePath = EXCLUDED.filePath, attachmentsJson = EXCLUDED.attachmentsJson, embedJson = EXCLUDED.embedJson, tagsJson = EXCLUDED.tagsJson, prevPostId = EXCLUDED.prevPostId, nextPostId = EXCLUDED.nextPostId, favCount = EXCLUDED.favCount, previewImageUrl = EXCLUDED.previewImageUrl, videoUrl = EXCLUDED.videoUrl, thumbUrl = EXCLUDED.thumbUrl, mediaType = EXCLUDED.mediaType, authorName = EXCLUDED.authorName, rawPreviewPayload = EXCLUDED.rawPreviewPayload, rawDetailPayload = EXCLUDED.rawDetailPayload, detailLevel = EXCLUDED.detailLevel, sourceKind = EXCLUDED.sourceKind, isPopular = EXCLUDED.isPopular, primaryPopularPeriod = EXCLUDED.primaryPopularPeriod, primaryPopularDate = EXCLUDED.primaryPopularDate, primaryPopularOffset = EXCLUDED.primaryPopularOffset, primaryPopularRank = EXCLUDED.primaryPopularRank, popularContextsJson = EXCLUDED.popularContextsJson, longestVideoUrl = EXCLUDED.longestVideoUrl, longestVideoDurationSeconds = EXCLUDED.longestVideoDurationSeconds, previewStatus = EXCLUDED.previewStatus, nativeThumbnailUrl = EXCLUDED.nativeThumbnailUrl, previewThumbnailAssetPath = EXCLUDED.previewThumbnailAssetPath, previewClipAssetPath = EXCLUDED.previewClipAssetPath, previewGeneratedAt = EXCLUDED.previewGeneratedAt, previewError = EXCLUDED.previewError, previewSourceFingerprint = EXCLUDED.previewSourceFingerprint, mediaMimeType = EXCLUDED.mediaMimeType, mediaWidth = EXCLUDED.mediaWidth, mediaHeight = EXCLUDED.mediaHeight, cachedAt = EXCLUDED.cachedAt, expiresAt = EXCLUDED.expiresAt, staleUntil = EXCLUDED.staleUntil, lastSeenAt = EXCLUDED.lastSeenAt`, [post.site, post.service, post.creatorId, post.postId, post.title, post.contentHtml, post.excerpt, post.publishedAt, post.addedAt, post.editedAt, post.fileName, post.filePath, post.attachmentsJson, post.embedJson, post.tagsJson, post.prevPostId, post.nextPostId, post.favCount, post.previewImageUrl, post.videoUrl, post.thumbUrl, post.mediaType, post.authorName, post.rawPreviewPayload, post.rawDetailPayload, post.detailLevel, post.sourceKind, post.isPopular ? 1 : 0, post.primaryPopularPeriod, post.primaryPopularDate, post.primaryPopularOffset, post.primaryPopularRank, post.popularContextsJson, post.longestVideoUrl, post.longestVideoDurationSeconds, post.previewStatus, post.nativeThumbnailUrl, post.previewThumbnailAssetPath, post.previewClipAssetPath, post.previewGeneratedAt, post.previewError, post.previewSourceFingerprint, post.mediaMimeType, post.mediaWidth, post.mediaHeight, post.cachedAt, post.expiresAt, post.staleUntil, post.lastSeenAt]);
   });
 }
 
-export async function upsertPosts(conn: Connection, posts: PostRow[]): Promise<void> {
+export async function upsertPosts(conn: DbConnection, posts: PostRow[]): Promise<void> {
   for (const post of posts) {
     await upsertPost(conn, post);
   }
 }
 
-export async function getPopularPosts(conn: Connection, site: KimonoSite, period: "recent" | "day" | "week" | "month", date?: string, offset = 0, limit = 50): Promise<PostRow[]> {
+export async function getPopularPosts(conn: DbConnection, site: KimonoSite, period: "recent" | "day" | "week" | "month", date?: string, offset = 0, limit = 50): Promise<PostRow[]> {
   return withDbLog("getPopularPosts", { site, period, date: date ?? null, offset, limit }, async () => {
     const values: unknown[] = [site, period];
     let sql = "SELECT * FROM `Post` WHERE site = ? AND isPopular = 1 AND primaryPopularPeriod = ?";
@@ -435,24 +450,24 @@ export async function getPopularPosts(conn: Connection, site: KimonoSite, period
   });
 }
 
-export async function deleteExpiredPosts(conn: Connection): Promise<number> {
+export async function deleteExpiredPosts(conn: DbConnection): Promise<number> {
   return withDbLog("deleteExpiredPosts", {}, async () => executeResult(conn, "DELETE FROM `Post` WHERE expiresAt < NOW(3) AND (staleUntil IS NULL OR staleUntil < NOW(3))"));
 }
 
-export async function getMediaAsset(conn: Connection, site: KimonoSite, sourceFingerprint: string): Promise<MediaAssetRow | null> {
+export async function getMediaAsset(conn: DbConnection, site: KimonoSite, sourceFingerprint: string): Promise<MediaAssetRow | null> {
   return withDbLog("getMediaAsset", { site, sourceFingerprint }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `MediaAsset` WHERE site = ? AND sourceFingerprint = ? LIMIT 1", [site, sourceFingerprint]);
     return rows[0] ? mapMediaAssetRow(rows[0]) : null;
   });
 }
 
-export async function upsertMediaAsset(conn: Connection, asset: MediaAssetRow): Promise<void> {
+export async function upsertMediaAsset(conn: DbConnection, asset: MediaAssetRow): Promise<void> {
   return withDbLog("upsertMediaAsset", { site: asset.site, sourceFingerprint: asset.sourceFingerprint }, async () => {
-    await executeResult(conn, `INSERT INTO \`MediaAsset\` (site, sourceFingerprint, sourceUrl, sourcePath, mediaKind, mimeType, width, height, durationSeconds, nativeThumbnailUrl, thumbnailAssetPath, clipAssetPath, probeStatus, previewStatus, firstSeenAt, lastSeenAt, hotUntil, retryAfter, generationAttempts, lastError, lastObservedContext, cachedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE sourceUrl=VALUES(sourceUrl), sourcePath=VALUES(sourcePath), mediaKind=VALUES(mediaKind), mimeType=VALUES(mimeType), width=VALUES(width), height=VALUES(height), durationSeconds=VALUES(durationSeconds), nativeThumbnailUrl=VALUES(nativeThumbnailUrl), thumbnailAssetPath=VALUES(thumbnailAssetPath), clipAssetPath=VALUES(clipAssetPath), probeStatus=VALUES(probeStatus), previewStatus=VALUES(previewStatus), firstSeenAt=VALUES(firstSeenAt), lastSeenAt=VALUES(lastSeenAt), hotUntil=VALUES(hotUntil), retryAfter=VALUES(retryAfter), generationAttempts=VALUES(generationAttempts), lastError=VALUES(lastError), lastObservedContext=VALUES(lastObservedContext), cachedAt=VALUES(cachedAt), expiresAt=VALUES(expiresAt)`, [asset.site, asset.sourceFingerprint, asset.sourceUrl, asset.sourcePath, asset.mediaKind, asset.mimeType, asset.width, asset.height, asset.durationSeconds, asset.nativeThumbnailUrl, asset.thumbnailAssetPath, asset.clipAssetPath, asset.probeStatus, asset.previewStatus, asset.firstSeenAt, asset.lastSeenAt, asset.hotUntil, asset.retryAfter, asset.generationAttempts, asset.lastError, asset.lastObservedContext, asset.cachedAt, asset.expiresAt]);
+    await executeResult(conn, `INSERT INTO \`MediaAsset\` (site, sourceFingerprint, sourceUrl, sourcePath, mediaKind, mimeType, width, height, durationSeconds, nativeThumbnailUrl, thumbnailAssetPath, clipAssetPath, probeStatus, previewStatus, firstSeenAt, lastSeenAt, hotUntil, retryAfter, generationAttempts, lastError, lastObservedContext, cachedAt, expiresAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (site, sourceFingerprint) DO UPDATE SET sourceUrl = EXCLUDED.sourceUrl, sourcePath = EXCLUDED.sourcePath, mediaKind = EXCLUDED.mediaKind, mimeType = EXCLUDED.mimeType, width = EXCLUDED.width, height = EXCLUDED.height, durationSeconds = EXCLUDED.durationSeconds, nativeThumbnailUrl = EXCLUDED.nativeThumbnailUrl, thumbnailAssetPath = EXCLUDED.thumbnailAssetPath, clipAssetPath = EXCLUDED.clipAssetPath, probeStatus = EXCLUDED.probeStatus, previewStatus = EXCLUDED.previewStatus, firstSeenAt = EXCLUDED.firstSeenAt, lastSeenAt = EXCLUDED.lastSeenAt, hotUntil = EXCLUDED.hotUntil, retryAfter = EXCLUDED.retryAfter, generationAttempts = EXCLUDED.generationAttempts, lastError = EXCLUDED.lastError, lastObservedContext = EXCLUDED.lastObservedContext, cachedAt = EXCLUDED.cachedAt, expiresAt = EXCLUDED.expiresAt`, [asset.site, asset.sourceFingerprint, asset.sourceUrl, asset.sourcePath, asset.mediaKind, asset.mimeType, asset.width, asset.height, asset.durationSeconds, asset.nativeThumbnailUrl, asset.thumbnailAssetPath, asset.clipAssetPath, asset.probeStatus, asset.previewStatus, asset.firstSeenAt, asset.lastSeenAt, asset.hotUntil, asset.retryAfter, asset.generationAttempts, asset.lastError, asset.lastObservedContext, asset.cachedAt, asset.expiresAt]);
   });
 }
 
-export async function updateMediaAssetStatus(conn: Connection, site: KimonoSite, sourceFingerprint: string, data: Partial<Pick<MediaAssetRow, "probeStatus" | "previewStatus" | "thumbnailAssetPath" | "clipAssetPath" | "generationAttempts" | "lastError" | "retryAfter" | "hotUntil" | "nativeThumbnailUrl" | "mediaKind" | "mimeType" | "width" | "height" | "durationSeconds" | "lastSeenAt">>): Promise<void> {
+export async function updateMediaAssetStatus(conn: DbConnection, site: KimonoSite, sourceFingerprint: string, data: Partial<Pick<MediaAssetRow, "probeStatus" | "previewStatus" | "thumbnailAssetPath" | "clipAssetPath" | "generationAttempts" | "lastError" | "retryAfter" | "hotUntil" | "nativeThumbnailUrl" | "mediaKind" | "mimeType" | "width" | "height" | "durationSeconds" | "lastSeenAt">>): Promise<void> {
   return withDbLog("updateMediaAssetStatus", { site, sourceFingerprint }, async () => {
     const update = buildDynamicUpdate(data as Record<string, unknown>);
     if (!update.sql) return;
@@ -460,23 +475,23 @@ export async function updateMediaAssetStatus(conn: Connection, site: KimonoSite,
   });
 }
 
-export async function deleteStaleMediaAssets(conn: Connection): Promise<number> {
+export async function deleteStaleMediaAssets(conn: DbConnection): Promise<number> {
   return withDbLog("deleteStaleMediaAssets", {}, async () => executeResult(conn, "DELETE FROM `MediaAsset` WHERE lastSeenAt < ?", [new Date(Date.now() - TTL.media.preview)]));
 }
-export async function getMediaSource(conn: Connection, site: KimonoSite, sourceFingerprint: string): Promise<MediaSourceRow | null> {
+export async function getMediaSource(conn: DbConnection, site: KimonoSite, sourceFingerprint: string): Promise<MediaSourceRow | null> {
   return withDbLog("getMediaSource", { site, sourceFingerprint }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `MediaSource` WHERE site = ? AND sourceFingerprint = ? LIMIT 1", [site, sourceFingerprint]);
     return rows[0] ? mapMediaSourceRow(rows[0]) : null;
   });
 }
 
-export async function upsertMediaSource(conn: Connection, source: MediaSourceRow): Promise<void> {
+export async function upsertMediaSource(conn: DbConnection, source: MediaSourceRow): Promise<void> {
   return withDbLog("upsertMediaSource", { site: source.site, sourceFingerprint: source.sourceFingerprint }, async () => {
-    await executeResult(conn, `INSERT INTO \`MediaSource\` (site, sourceFingerprint, sourceUrl, sourcePath, localPath, downloadStatus, downloadedAt, lastSeenAt, retentionUntil, fileSizeBytes, mimeType, downloadError, downloadAttempts, lastObservedContext, priorityClass, retryAfter, firstSeenAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE sourceUrl=VALUES(sourceUrl), sourcePath=VALUES(sourcePath), localPath=VALUES(localPath), downloadStatus=VALUES(downloadStatus), downloadedAt=VALUES(downloadedAt), lastSeenAt=VALUES(lastSeenAt), retentionUntil=VALUES(retentionUntil), fileSizeBytes=VALUES(fileSizeBytes), mimeType=VALUES(mimeType), downloadError=VALUES(downloadError), downloadAttempts=VALUES(downloadAttempts), lastObservedContext=VALUES(lastObservedContext), priorityClass=VALUES(priorityClass), retryAfter=VALUES(retryAfter), firstSeenAt=VALUES(firstSeenAt)`, [source.site, source.sourceFingerprint, source.sourceUrl, source.sourcePath, source.localPath, source.downloadStatus, source.downloadedAt, source.lastSeenAt, source.retentionUntil, source.fileSizeBytes, source.mimeType, source.downloadError, source.downloadAttempts, source.lastObservedContext, source.priorityClass, source.retryAfter, source.firstSeenAt]);
+    await executeResult(conn, `INSERT INTO \`MediaSource\` (site, sourceFingerprint, sourceUrl, sourcePath, localPath, downloadStatus, downloadedAt, lastSeenAt, retentionUntil, fileSizeBytes, mimeType, downloadError, downloadAttempts, lastObservedContext, priorityClass, retryAfter, firstSeenAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (site, sourceFingerprint) DO UPDATE SET sourceUrl = EXCLUDED.sourceUrl, sourcePath = EXCLUDED.sourcePath, localPath = EXCLUDED.localPath, downloadStatus = EXCLUDED.downloadStatus, downloadedAt = EXCLUDED.downloadedAt, lastSeenAt = EXCLUDED.lastSeenAt, retentionUntil = EXCLUDED.retentionUntil, fileSizeBytes = EXCLUDED.fileSizeBytes, mimeType = EXCLUDED.mimeType, downloadError = EXCLUDED.downloadError, downloadAttempts = EXCLUDED.downloadAttempts, lastObservedContext = EXCLUDED.lastObservedContext, priorityClass = EXCLUDED.priorityClass, retryAfter = EXCLUDED.retryAfter, firstSeenAt = EXCLUDED.firstSeenAt`, [source.site, source.sourceFingerprint, source.sourceUrl, source.sourcePath, source.localPath, source.downloadStatus, source.downloadedAt, source.lastSeenAt, source.retentionUntil, source.fileSizeBytes, source.mimeType, source.downloadError, source.downloadAttempts, source.lastObservedContext, source.priorityClass, source.retryAfter, source.firstSeenAt]);
   });
 }
 
-export async function updateMediaSourceDownload(conn: Connection, site: KimonoSite, sourceFingerprint: string, data: Partial<Pick<MediaSourceRow, "downloadStatus" | "downloadedAt" | "localPath" | "fileSizeBytes" | "downloadError" | "downloadAttempts" | "retryAfter">>): Promise<void> {
+export async function updateMediaSourceDownload(conn: DbConnection, site: KimonoSite, sourceFingerprint: string, data: Partial<Pick<MediaSourceRow, "downloadStatus" | "downloadedAt" | "localPath" | "fileSizeBytes" | "downloadError" | "downloadAttempts" | "retryAfter">>): Promise<void> {
   return withDbLog("updateMediaSourceDownload", { site, sourceFingerprint }, async () => {
     const update = buildDynamicUpdate(data as Record<string, unknown>);
     if (!update.sql) return;
@@ -484,11 +499,11 @@ export async function updateMediaSourceDownload(conn: Connection, site: KimonoSi
   });
 }
 
-export async function deleteExpiredMediaSources(conn: Connection): Promise<number> {
+export async function deleteExpiredMediaSources(conn: DbConnection): Promise<number> {
   return withDbLog("deleteExpiredMediaSources", {}, async () => executeResult(conn, "DELETE FROM `MediaSource` WHERE retentionUntil IS NOT NULL AND retentionUntil < NOW(3)"));
 }
 
-export async function getFavoriteChronology(conn: Connection, kind: FavoriteKind, site: KimonoSite): Promise<FavoriteChronologyRow[]> {
+export async function getFavoriteChronology(conn: DbConnection, kind: FavoriteKind, site: KimonoSite): Promise<FavoriteChronologyRow[]> {
   return withDbLog("getFavoriteChronology", { kind, site }, async () => {
     const hasFavedSeq = await hasFavoriteChronologyFavedSeq(conn);
     const rows = await queryRows(
@@ -502,83 +517,83 @@ export async function getFavoriteChronology(conn: Connection, kind: FavoriteKind
   });
 }
 
-export async function upsertFavoriteChronologyEntry(conn: Connection, entry: FavoriteChronologyRow): Promise<void> {
+export async function upsertFavoriteChronologyEntry(conn: DbConnection, entry: FavoriteChronologyRow): Promise<void> {
   return withDbLog("upsertFavoriteChronologyEntry", { kind: entry.kind, site: entry.site, service: entry.service, creatorId: entry.creatorId }, async () => {
     const hasFavedSeq = await hasFavoriteChronologyFavedSeq(conn);
     if (hasFavedSeq) {
-      await executeResult(conn, "INSERT INTO `FavoriteChronology` (kind, site, service, creatorId, postId, favoritedAt, lastConfirmedAt, favedSeq) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE favoritedAt = COALESCE(`FavoriteChronology`.favoritedAt, VALUES(favoritedAt)), lastConfirmedAt = VALUES(lastConfirmedAt), favedSeq = COALESCE(`FavoriteChronology`.favedSeq, VALUES(favedSeq))", [entry.kind, entry.site, entry.service, entry.creatorId, entry.postId ?? "", entry.favoritedAt, entry.lastConfirmedAt, entry.favedSeq]);
+      await executeResult(conn, "INSERT INTO `FavoriteChronology` (kind, site, service, creatorId, postId, favoritedAt, lastConfirmedAt, favedSeq) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (kind, site, service, creatorId, postId) DO UPDATE SET favoritedAt = COALESCE(FavoriteChronology.favoritedAt, EXCLUDED.favoritedAt), lastConfirmedAt = EXCLUDED.lastConfirmedAt, favedSeq = COALESCE(FavoriteChronology.favedSeq, EXCLUDED.favedSeq)", [entry.kind, entry.site, entry.service, entry.creatorId, entry.postId ?? "", entry.favoritedAt, entry.lastConfirmedAt, entry.favedSeq]);
       return;
     }
 
-    await executeResult(conn, "INSERT INTO `FavoriteChronology` (kind, site, service, creatorId, postId, favoritedAt, lastConfirmedAt) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE favoritedAt = COALESCE(`FavoriteChronology`.favoritedAt, VALUES(favoritedAt)), lastConfirmedAt = VALUES(lastConfirmedAt)", [entry.kind, entry.site, entry.service, entry.creatorId, entry.postId ?? "", entry.favoritedAt, entry.lastConfirmedAt]);
+    await executeResult(conn, "INSERT INTO `FavoriteChronology` (kind, site, service, creatorId, postId, favoritedAt, lastConfirmedAt) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (kind, site, service, creatorId, postId) DO UPDATE SET favoritedAt = COALESCE(FavoriteChronology.favoritedAt, EXCLUDED.favoritedAt), lastConfirmedAt = EXCLUDED.lastConfirmedAt", [entry.kind, entry.site, entry.service, entry.creatorId, entry.postId ?? "", entry.favoritedAt, entry.lastConfirmedAt]);
   });
 }
 
-export async function deleteFavoriteChronologyEntry(conn: Connection, kind: FavoriteKind, site: KimonoSite, service: string, creatorId: string, postId = ""): Promise<void> {
+export async function deleteFavoriteChronologyEntry(conn: DbConnection, kind: FavoriteKind, site: KimonoSite, service: string, creatorId: string, postId = ""): Promise<void> {
   return withDbLog("deleteFavoriteChronologyEntry", { kind, site, service, creatorId, postId }, async () => {
     await executeResult(conn, "DELETE FROM `FavoriteChronology` WHERE kind = ? AND site = ? AND service = ? AND creatorId = ? AND postId = ?", [kind, site, service, creatorId, postId]);
   });
 }
 
-export async function getFavoriteCache(conn: Connection, kind: FavoriteKind, site: KimonoSite): Promise<FavoriteCacheRow | null> {
+export async function getFavoriteCache(conn: DbConnection, kind: FavoriteKind, site: KimonoSite): Promise<FavoriteCacheRow | null> {
   return withDbLog("getFavoriteCache", { kind, site }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `FavoriteCache` WHERE kind = ? AND site = ? LIMIT 1", [kind, site]);
     return rows[0] ? mapFavoriteCacheRow(rows[0]) : null;
   });
 }
 
-export async function upsertFavoriteCache(conn: Connection, entry: FavoriteCacheRow): Promise<void> {
+export async function upsertFavoriteCache(conn: DbConnection, entry: FavoriteCacheRow): Promise<void> {
   return withDbLog("upsertFavoriteCache", { kind: entry.kind, site: entry.site }, async () => {
-    await executeResult(conn, "INSERT INTO `FavoriteCache` (kind, site, payloadJson, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE payloadJson = VALUES(payloadJson), updatedAt = VALUES(updatedAt), expiresAt = VALUES(expiresAt)", [entry.kind, entry.site, entry.payloadJson, entry.updatedAt, entry.expiresAt]);
+    await executeResult(conn, "INSERT INTO `FavoriteCache` (kind, site, payloadJson, updatedAt, expiresAt) VALUES (?, ?, ?, ?, ?) ON CONFLICT (kind, site) DO UPDATE SET payloadJson = EXCLUDED.payloadJson, updatedAt = EXCLUDED.updatedAt, expiresAt = EXCLUDED.expiresAt", [entry.kind, entry.site, entry.payloadJson, entry.updatedAt, entry.expiresAt]);
   });
 }
 
-export async function getDiscoveryCache(conn: Connection, site: KimonoSite | "global"): Promise<DiscoveryCacheRow | null> {
+export async function getDiscoveryCache(conn: DbConnection, site: KimonoSite | "global"): Promise<DiscoveryCacheRow | null> {
   return withDbLog("getDiscoveryCache", { site }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `DiscoveryCache` WHERE site = ? LIMIT 1", [site]);
     return rows[0] ? mapDiscoveryCacheRow(rows[0]) : null;
   });
 }
 
-export async function upsertDiscoveryCache(conn: Connection, entry: DiscoveryCacheRow): Promise<void> {
+export async function upsertDiscoveryCache(conn: DbConnection, entry: DiscoveryCacheRow): Promise<void> {
   return withDbLog("upsertDiscoveryCache", { site: entry.site }, async () => {
-    await executeResult(conn, "INSERT INTO `DiscoveryCache` (site, payloadJson, updatedAt, expiresAt) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE payloadJson = VALUES(payloadJson), updatedAt = VALUES(updatedAt), expiresAt = VALUES(expiresAt)", [entry.site, entry.payloadJson, entry.updatedAt, entry.expiresAt]);
+    await executeResult(conn, "INSERT INTO `DiscoveryCache` (site, payloadJson, updatedAt, expiresAt) VALUES (?, ?, ?, ?) ON CONFLICT (site) DO UPDATE SET payloadJson = EXCLUDED.payloadJson, updatedAt = EXCLUDED.updatedAt, expiresAt = EXCLUDED.expiresAt", [entry.site, entry.payloadJson, entry.updatedAt, entry.expiresAt]);
   });
 }
 
-export async function getDiscoveryBlocks(conn: Connection, site: KimonoSite): Promise<DiscoveryBlockRow[]> {
+export async function getDiscoveryBlocks(conn: DbConnection, site: KimonoSite): Promise<DiscoveryBlockRow[]> {
   return withDbLog("getDiscoveryBlocks", { site }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `DiscoveryBlock` WHERE site = ? ORDER BY blockedAt DESC", [site]);
     return rows.map((row) => mapDiscoveryBlockRow(row));
   });
 }
 
-export async function upsertDiscoveryBlock(conn: Connection, block: DiscoveryBlockRow): Promise<void> {
+export async function upsertDiscoveryBlock(conn: DbConnection, block: DiscoveryBlockRow): Promise<void> {
   return withDbLog("upsertDiscoveryBlock", { site: block.site, service: block.service, creatorId: block.creatorId }, async () => {
-    await executeResult(conn, "INSERT INTO `DiscoveryBlock` (site, service, creatorId, blockedAt) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE blockedAt = VALUES(blockedAt)", [block.site, block.service, block.creatorId, block.blockedAt]);
+    await executeResult(conn, "INSERT INTO `DiscoveryBlock` (site, service, creatorId, blockedAt) VALUES (?, ?, ?, ?) ON CONFLICT (site, service, creatorId) DO UPDATE SET blockedAt = EXCLUDED.blockedAt", [block.site, block.service, block.creatorId, block.blockedAt]);
   });
 }
 
-export async function deleteDiscoveryBlock(conn: Connection, site: KimonoSite, service: string, creatorId: string): Promise<void> {
+export async function deleteDiscoveryBlock(conn: DbConnection, site: KimonoSite, service: string, creatorId: string): Promise<void> {
   return withDbLog("deleteDiscoveryBlock", { site, service, creatorId }, async () => {
     await executeResult(conn, "DELETE FROM `DiscoveryBlock` WHERE site = ? AND service = ? AND creatorId = ?", [site, service, creatorId]);
   });
 }
 
-export async function getLatestKimonoSession(conn: Connection, site: KimonoSite): Promise<KimonoSessionRow | null> {
+export async function getLatestKimonoSession(conn: DbConnection, site: KimonoSite): Promise<KimonoSessionRow | null> {
   return withDbLog("getLatestKimonoSession", { site }, async () => {
     const rows = await queryRows(conn, "SELECT * FROM `KimonoSession` WHERE site = ? ORDER BY savedAt DESC LIMIT 1", [site]);
     return rows[0] ? mapKimonoSessionRow(rows[0]) : null;
   });
 }
 
-export async function upsertKimonoSession(conn: Connection, session: KimonoSessionRow): Promise<void> {
+export async function upsertKimonoSession(conn: DbConnection, session: KimonoSessionRow): Promise<void> {
   return withDbLog("upsertKimonoSession", { site: session.site, username: session.username }, async () => {
-    await executeResult(conn, "INSERT INTO `KimonoSession` (id, site, cookie, username, savedAt) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE id = VALUES(id), cookie = VALUES(cookie), username = VALUES(username), savedAt = VALUES(savedAt)", [session.id, session.site, session.cookie, session.username, session.savedAt]);
+    await executeResult(conn, "INSERT INTO `KimonoSession` (id, site, cookie, username, savedAt) VALUES (?, ?, ?, ?, ?) ON CONFLICT (site) DO UPDATE SET id = EXCLUDED.id, cookie = EXCLUDED.cookie, username = EXCLUDED.username, savedAt = EXCLUDED.savedAt", [session.id, session.site, session.cookie, session.username, session.savedAt]);
   });
 }
 
-export async function deleteKimonoSession(conn: Connection, site: KimonoSite): Promise<void> {
+export async function deleteKimonoSession(conn: DbConnection, site: KimonoSite): Promise<void> {
   return withDbLog("deleteKimonoSession", { site }, async () => {
     await executeResult(conn, "DELETE FROM `KimonoSession` WHERE site = ?", [site]);
   });

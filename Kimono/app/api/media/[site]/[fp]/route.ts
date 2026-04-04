@@ -3,7 +3,7 @@ import { promises as fs, createReadStream } from "node:fs";
 
 import { NextRequest, NextResponse } from "next/server";
 
-import { getPerformanceRepository } from "@/lib/db/index";
+import { db, withDbConnection } from "@/lib/db/index";
 import { resolveMediaSourceCacheDir } from "@/lib/popular-preview-assets";
 
 export const dynamic = "force-dynamic";
@@ -52,18 +52,17 @@ export async function GET(
     return NextResponse.json({ error: "Invalid media source" }, { status: 400, headers: { "x-kimono-source": "stale" } });
   }
 
-  const repository = await getPerformanceRepository();
-  const sourceRecord = await repository.getMediaSourceCache({ site, sourceFingerprint: fp });
-  if (!sourceRecord?.localVideoPath || sourceRecord.downloadStatus !== "source-ready") {
+  const sourceRecord = await withDbConnection((conn) => db.getMediaSource(conn as never, site, fp));
+  if (!sourceRecord?.localPath || sourceRecord.downloadStatus !== "ready") {
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: { "x-kimono-source": "stale" } });
   }
 
-  if (!isSafeAssetPath(sourceRecord.localVideoPath)) {
+  if (!isSafeAssetPath(sourceRecord.localPath)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: { "x-kimono-source": "stale" } });
   }
 
   const assetRoot = resolveMediaSourceCacheDir();
-  const absolutePath = path.resolve(assetRoot, sourceRecord.localVideoPath);
+  const absolutePath = path.resolve(assetRoot, sourceRecord.localPath);
   if (!absolutePath.startsWith(path.resolve(assetRoot) + path.sep)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: { "x-kimono-source": "stale" } });
   }
@@ -139,3 +138,4 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404, headers: { "x-kimono-source": "stale" } });
   }
 }
+

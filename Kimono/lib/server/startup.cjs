@@ -95,14 +95,8 @@ function parseDatabaseDriver(databaseUrl) {
   if (!normalized) {
     return null;
   }
-  if (normalized.startsWith("mysql://")) {
-    return "mysql";
-  }
   if (normalized.startsWith("postgres://") || normalized.startsWith("postgresql://")) {
     return "postgres";
-  }
-  if (normalized.startsWith("file:") || normalized.startsWith("sqlite:")) {
-    return "sqlite";
   }
   return "unknown";
 }

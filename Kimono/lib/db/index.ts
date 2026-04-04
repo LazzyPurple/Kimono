@@ -1,61 +1,23 @@
-import type { Connection } from "mysql2/promise";
-
 import * as prodRepo from "./repository.ts";
-import { pool } from "../db.ts";
+import { reserveConnection, type DbConnection } from "../db.ts";
 
-const isProd = process.env.DATABASE_URL?.startsWith("mysql");
+export const db = prodRepo;
 
-type RepositoryModule = typeof prodRepo;
-
-let localRepoPromise: Promise<RepositoryModule> | null = null;
-
-async function getRepositoryModule(): Promise<RepositoryModule> {
-  if (isProd) {
-    return prodRepo;
-  }
-
-  if (!localRepoPromise) {
-    localRepoPromise = import("./local-repository.ts") as Promise<RepositoryModule>;
-  }
-
-  return localRepoPromise;
-}
-
-export const db: RepositoryModule = new Proxy({} as RepositoryModule, {
-  get(_target, property) {
-    return async (...args: unknown[]) => {
-      const repository = await getRepositoryModule();
-      const value = Reflect.get(repository, property);
-      if (typeof value !== "function") {
-        return value;
-      }
-      return Reflect.apply(value, repository, args);
-    };
-  },
-});
-
-export async function withDbConnection<T>(
-  work: (conn: Connection | undefined) => Promise<T>
-): Promise<T> {
-  if (!isProd) {
-    return work(undefined);
-  }
-
-  const conn = await pool.getConnection();
+export async function withDbConnection<T>(work: (conn: DbConnection) => Promise<T>): Promise<T> {
+  const conn = await reserveConnection();
   try {
     return await work(conn);
   } finally {
-    conn.release();
+    await conn.release();
   }
 }
 
 export function isProductionDb(): boolean {
-  return Boolean(isProd);
+  return true;
 }
 
+export type Connection = DbConnection;
 export type DB = typeof db;
 
-export * from "./app-store.ts";
-export * from "./performance.ts";
-export * from "./performance-cache.ts";
+export * from "./auth-store.ts";
 export * from "./types.ts";

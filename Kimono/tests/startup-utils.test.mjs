@@ -50,7 +50,7 @@ test("collectStartupDiagnostics reports file and env readiness for the app root"
       AUTH_SECRET: "secret",
       AUTH_URL: "https://kimono.paracosm.fr",
       ADMIN_PASSWORD: "admin",
-      DATABASE_URL: "mysql://db",
+      DATABASE_URL: "postgres://db",
     },
   });
 

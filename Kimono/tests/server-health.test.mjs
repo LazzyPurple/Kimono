@@ -7,7 +7,7 @@ test("server health service aggregates runtime, cooldowns and local snapshot sta
   const service = createServerHealthService({
     collectStartupDiagnostics: () => ({
       runtime: {
-        database: { configured: true, driver: "mysql" },
+        database: { configured: true, driver: "postgres" },
         sessionStore: { configured: true, mode: "database" },
         previewTools: {
           ffmpeg: { status: "configured", resolvedPath: "/usr/bin/ffmpeg", source: "env" },
@@ -60,7 +60,7 @@ test("server health service aggregates runtime, cooldowns and local snapshot sta
 
   const snapshot = await service.getSnapshot();
 
-  assert.equal(snapshot.runtime.database.driver, "mysql");
+  assert.equal(snapshot.runtime.database.driver, "postgres");
   assert.equal(snapshot.upstreamCooldowns.length, 1);
   assert.equal(snapshot.favorites.kemono.creators, 1);
   assert.equal(snapshot.favorites.coomer.posts, 2);

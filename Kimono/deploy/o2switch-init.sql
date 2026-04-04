@@ -1,240 +1,240 @@
-﻿-- ============================================
--- Kimono bootstrap schema (MySQL)
+-- ============================================
+-- Kimono bootstrap schema (PostgreSQL)
 -- Source de verite du schema prod
 -- ============================================
 
-CREATE TABLE
-  IF NOT EXISTS `User` (
-    id VARCHAR(191) PRIMARY KEY,
-    email VARCHAR(191) UNIQUE NOT NULL,
-    totpSecret VARCHAR(191) NULL,
-    totpEnabled BOOLEAN NOT NULL DEFAULT 0,
-    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS "User" (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  totpsecret TEXT NULL,
+  totpenabled INTEGER NOT NULL DEFAULT 0,
+  createdat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-CREATE TABLE
-  IF NOT EXISTS `Passkey` (
-    id VARCHAR(191) PRIMARY KEY,
-    userId VARCHAR(191) NOT NULL,
-    credentialId VARCHAR(191) UNIQUE NOT NULL,
-    publicKey TEXT NOT NULL,
-    counter BIGINT NOT NULL,
-    deviceName VARCHAR(191) NULL,
-    createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    FOREIGN KEY (userId) REFERENCES `User` (id) ON DELETE CASCADE ON UPDATE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS "Passkey" (
+  id TEXT PRIMARY KEY,
+  userid TEXT NOT NULL,
+  credentialid TEXT UNIQUE NOT NULL,
+  publickey TEXT NOT NULL,
+  counter BIGINT NOT NULL,
+  devicename TEXT NULL,
+  createdat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (userid) REFERENCES "User"(id) ON DELETE CASCADE
+);
 
-CREATE TABLE
-  IF NOT EXISTS `Session` (
-    id VARCHAR(191) PRIMARY KEY,
-    userId VARCHAR(191) NOT NULL,
-    token VARCHAR(191) UNIQUE NOT NULL,
-    expiresAt DATETIME(3) NOT NULL,
-    FOREIGN KEY (userId) REFERENCES `User` (id) ON DELETE CASCADE ON UPDATE CASCADE
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS "Session" (
+  id TEXT PRIMARY KEY,
+  userid TEXT NOT NULL,
+  token TEXT UNIQUE NOT NULL,
+  expiresat TIMESTAMPTZ NOT NULL,
+  FOREIGN KEY (userid) REFERENCES "User"(id) ON DELETE CASCADE
+);
 
-CREATE TABLE
-  IF NOT EXISTS `KimonoSession` (
-    id VARCHAR(191) PRIMARY KEY,
-    site VARCHAR(32) NOT NULL,
-    cookie LONGTEXT NOT NULL,
-    username VARCHAR(191) NOT NULL,
-    savedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    UNIQUE KEY `KimonoSession_site_key` (site),
-    KEY `KimonoSession_savedAt_idx` (savedAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS KimonoSession (
+  id TEXT PRIMARY KEY,
+  site TEXT NOT NULL UNIQUE,
+  cookie TEXT NOT NULL,
+  username TEXT NOT NULL,
+  savedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 
-CREATE TABLE
-  IF NOT EXISTS `Creator` (
-    site VARCHAR(32) NOT NULL,
-    service VARCHAR(191) NOT NULL,
-    creatorId VARCHAR(191) NOT NULL,
-    name VARCHAR(191) NOT NULL,
-    normalizedName VARCHAR(191) NOT NULL,
-    indexed BIGINT NULL,
-    updated BIGINT NULL,
-    favorited INT NOT NULL DEFAULT 0,
-    postCount INT NOT NULL DEFAULT 0,
-    publicId VARCHAR(191) NULL,
-    relationId BIGINT NULL,
-    dmCount INT NOT NULL DEFAULT 0,
-    shareCount INT NOT NULL DEFAULT 0,
-    hasChats BOOLEAN NOT NULL DEFAULT 0,
-    chatCount INT NOT NULL DEFAULT 0,
-    profileImageUrl TEXT NULL,
-    bannerImageUrl TEXT NULL,
-    rawIndexPayload LONGTEXT NULL,
-    rawProfilePayload LONGTEXT NULL,
-    catalogSyncedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    profileCachedAt DATETIME(3) NULL,
-    profileExpiresAt DATETIME(3) NULL,
-    archivedAt DATETIME(3) NULL,
-    PRIMARY KEY (site, service, creatorId),
-    KEY `Creator_normalizedName_idx` (normalizedName),
-    KEY `Creator_site_service_favorited_idx` (site, service, favorited),
-    KEY `Creator_site_service_updated_idx` (site, service, updated),
-    KEY `Creator_catalogSyncedAt_idx` (catalogSyncedAt),
-    KEY `Creator_profileExpiresAt_idx` (profileExpiresAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX IF NOT EXISTS kimonosession_savedat_idx ON KimonoSession (savedat);
 
-CREATE TABLE
-  IF NOT EXISTS `Post` (
-    site VARCHAR(32) NOT NULL,
-    service VARCHAR(191) NOT NULL,
-    creatorId VARCHAR(191) NOT NULL,
-    postId VARCHAR(191) NOT NULL,
-    title TEXT NULL,
-    contentHtml LONGTEXT NULL,
-    excerpt LONGTEXT NULL,
-    publishedAt DATETIME(3) NULL,
-    addedAt DATETIME(3) NULL,
-    editedAt DATETIME(3) NULL,
-    fileName VARCHAR(191) NULL,
-    filePath TEXT NULL,
-    attachmentsJson LONGTEXT NULL,
-    embedJson LONGTEXT NULL,
-    tagsJson LONGTEXT NULL,
-    prevPostId VARCHAR(191) NULL,
-    nextPostId VARCHAR(191) NULL,
-    favCount INT NOT NULL DEFAULT 0,
-    previewImageUrl TEXT NULL,
-    videoUrl TEXT NULL,
-    thumbUrl TEXT NULL,
-    mediaType VARCHAR(64) NULL,
-    authorName VARCHAR(191) NULL,
-    rawPreviewPayload LONGTEXT NULL,
-    rawDetailPayload LONGTEXT NULL,
-    detailLevel VARCHAR(32) NOT NULL DEFAULT 'preview',
-    sourceKind VARCHAR(32) NOT NULL DEFAULT 'upstream',
-    isPopular BOOLEAN NOT NULL DEFAULT 0,
-    primaryPopularPeriod VARCHAR(32) NULL,
-    primaryPopularDate VARCHAR(32) NULL,
-    primaryPopularOffset INT NULL,
-    primaryPopularRank INT NULL,
-    popularContextsJson LONGTEXT NULL,
-    longestVideoUrl TEXT NULL,
-    longestVideoDurationSeconds DOUBLE NULL,
-    previewStatus VARCHAR(64) NULL,
-    nativeThumbnailUrl TEXT NULL,
-    previewThumbnailAssetPath TEXT NULL,
-    previewClipAssetPath TEXT NULL,
-    previewGeneratedAt DATETIME(3) NULL,
-    previewError LONGTEXT NULL,
-    previewSourceFingerprint VARCHAR(191) NULL,
-    mediaMimeType VARCHAR(191) NULL,
-    mediaWidth INT NULL,
-    mediaHeight INT NULL,
-    cachedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    expiresAt DATETIME(3) NOT NULL,
-    staleUntil DATETIME(3) NULL,
-    lastSeenAt DATETIME(3) NULL,
-    PRIMARY KEY (site, service, creatorId, postId),
-    KEY `Post_creator_published_idx` (site, service, creatorId, publishedAt),
-    KEY `Post_expiresAt_idx` (expiresAt),
-    KEY `Post_previewSourceFingerprint_idx` (site, previewSourceFingerprint),
-    KEY `Post_popular_lookup_idx` (site, isPopular, primaryPopularPeriod, primaryPopularDate, primaryPopularOffset, primaryPopularRank),
-    KEY `Post_lastSeenAt_idx` (lastSeenAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS Creator (
+  site TEXT NOT NULL,
+  service TEXT NOT NULL,
+  creatorid TEXT NOT NULL,
+  name TEXT NOT NULL,
+  normalizedname TEXT NOT NULL,
+  indexed BIGINT NULL,
+  updated BIGINT NULL,
+  favorited INTEGER NOT NULL DEFAULT 0,
+  postcount INTEGER NOT NULL DEFAULT 0,
+  publicid TEXT NULL,
+  relationid BIGINT NULL,
+  dmcount INTEGER NOT NULL DEFAULT 0,
+  sharecount INTEGER NOT NULL DEFAULT 0,
+  haschats INTEGER NOT NULL DEFAULT 0,
+  chatcount INTEGER NOT NULL DEFAULT 0,
+  profileimageurl TEXT NULL,
+  bannerimageurl TEXT NULL,
+  rawindexpayload TEXT NULL,
+  rawprofilepayload TEXT NULL,
+  catalogsyncedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  profilecachedat TIMESTAMPTZ NULL,
+  profileexpiresat TIMESTAMPTZ NULL,
+  archivedat TIMESTAMPTZ NULL,
+  PRIMARY KEY (site, service, creatorid)
+);
 
-CREATE TABLE
-  IF NOT EXISTS `FavoriteChronology` (
-    kind VARCHAR(32) NOT NULL,
-    site VARCHAR(32) NOT NULL,
-    service VARCHAR(191) NOT NULL,
-    creatorId VARCHAR(191) NOT NULL,
-    postId VARCHAR(191) NOT NULL DEFAULT '',
-    favoritedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    lastConfirmedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    PRIMARY KEY (kind, site, service, creatorId, postId),
-    KEY `FavoriteChronology_lastConfirmedAt_idx` (lastConfirmedAt),
-    KEY `FavoriteChronology_kind_site_favoritedAt_idx` (kind, site, favoritedAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX IF NOT EXISTS creator_normalizedname_idx ON Creator (normalizedname);
+CREATE INDEX IF NOT EXISTS creator_name_search_tsv_idx ON Creator USING GIN (
+  to_tsvector('simple', regexp_replace(coalesce(name, '') || ' ' || coalesce(normalizedname, ''), '[_-]+', ' ', 'g'))
+);
+CREATE INDEX IF NOT EXISTS creator_site_service_favorited_idx ON Creator (site, service, favorited);
+CREATE INDEX IF NOT EXISTS creator_site_service_updated_idx ON Creator (site, service, updated);
+CREATE INDEX IF NOT EXISTS creator_catalogsyncedat_idx ON Creator (catalogsyncedat);
+CREATE INDEX IF NOT EXISTS creator_profileexpiresat_idx ON Creator (profileexpiresat);
 
-CREATE TABLE
-  IF NOT EXISTS `FavoriteCache` (
-    kind VARCHAR(32) NOT NULL,
-    site VARCHAR(32) NOT NULL,
-    payloadJson LONGTEXT NOT NULL,
-    updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    expiresAt DATETIME(3) NOT NULL,
-    PRIMARY KEY (kind, site),
-    KEY `FavoriteCache_expiresAt_idx` (expiresAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS Post (
+  site TEXT NOT NULL,
+  service TEXT NOT NULL,
+  creatorid TEXT NOT NULL,
+  postid TEXT NOT NULL,
+  title TEXT NULL,
+  contenthtml TEXT NULL,
+  excerpt TEXT NULL,
+  publishedat TIMESTAMPTZ NULL,
+  addedat TIMESTAMPTZ NULL,
+  editedat TIMESTAMPTZ NULL,
+  filename TEXT NULL,
+  filepath TEXT NULL,
+  attachmentsjson TEXT NULL,
+  embedjson TEXT NULL,
+  tagsjson TEXT NULL,
+  prevpostid TEXT NULL,
+  nextpostid TEXT NULL,
+  favcount INTEGER NOT NULL DEFAULT 0,
+  previewimageurl TEXT NULL,
+  videourl TEXT NULL,
+  thumburl TEXT NULL,
+  mediatype TEXT NULL,
+  authorname TEXT NULL,
+  rawpreviewpayload TEXT NULL,
+  rawdetailpayload TEXT NULL,
+  detaillevel TEXT NOT NULL DEFAULT 'preview',
+  sourcekind TEXT NOT NULL DEFAULT 'upstream',
+  ispopular INTEGER NOT NULL DEFAULT 0,
+  primarypopularperiod TEXT NULL,
+  primarypopulardate TEXT NULL,
+  primarypopularoffset INTEGER NULL,
+  primarypopularrank INTEGER NULL,
+  popularcontextsjson TEXT NULL,
+  longestvideourl TEXT NULL,
+  longestvideodurationseconds DOUBLE PRECISION NULL,
+  previewstatus TEXT NULL,
+  nativethumbnailurl TEXT NULL,
+  previewthumbnailassetpath TEXT NULL,
+  previewclipassetpath TEXT NULL,
+  previewgeneratedat TIMESTAMPTZ NULL,
+  previewerror TEXT NULL,
+  previewsourcefingerprint TEXT NULL,
+  mediamimetype TEXT NULL,
+  mediawidth INTEGER NULL,
+  mediaheight INTEGER NULL,
+  cachedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expiresat TIMESTAMPTZ NOT NULL,
+  staleuntil TIMESTAMPTZ NULL,
+  lastseenat TIMESTAMPTZ NULL,
+  PRIMARY KEY (site, service, creatorid, postid)
+);
 
-CREATE TABLE
-  IF NOT EXISTS `MediaAsset` (
-    site VARCHAR(32) NOT NULL,
-    sourceFingerprint VARCHAR(191) NOT NULL,
-    sourceUrl TEXT NOT NULL,
-    sourcePath TEXT NULL,
-    mediaKind VARCHAR(32) NULL,
-    mimeType VARCHAR(191) NULL,
-    width INT NULL,
-    height INT NULL,
-    durationSeconds DOUBLE NULL,
-    nativeThumbnailUrl TEXT NULL,
-    thumbnailAssetPath TEXT NULL,
-    clipAssetPath TEXT NULL,
-    probeStatus VARCHAR(64) NOT NULL DEFAULT 'pending',
-    previewStatus VARCHAR(64) NOT NULL DEFAULT 'pending',
-    firstSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    lastSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    hotUntil DATETIME(3) NULL,
-    retryAfter DATETIME(3) NULL,
-    generationAttempts INT NOT NULL DEFAULT 0,
-    lastError LONGTEXT NULL,
-    lastObservedContext VARCHAR(191) NULL,
-    cachedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    expiresAt DATETIME(3) NULL,
-    PRIMARY KEY (site, sourceFingerprint),
-    KEY `MediaAsset_lastSeenAt_idx` (lastSeenAt),
-    KEY `MediaAsset_hotUntil_idx` (hotUntil),
-    KEY `MediaAsset_retryAfter_idx` (retryAfter),
-    KEY `MediaAsset_expiresAt_idx` (expiresAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX IF NOT EXISTS post_creator_published_idx ON Post (site, service, creatorid, publishedat DESC);
+CREATE INDEX IF NOT EXISTS post_expiresat_idx ON Post (expiresat);
+CREATE INDEX IF NOT EXISTS post_previewsourcefingerprint_idx ON Post (site, previewsourcefingerprint);
+CREATE INDEX IF NOT EXISTS post_popular_lookup_idx ON Post (site, ispopular, primarypopularperiod, primarypopulardate, primarypopularoffset, primarypopularrank);
+CREATE INDEX IF NOT EXISTS post_lastseenat_idx ON Post (lastseenat);
 
-CREATE TABLE
-  IF NOT EXISTS `MediaSource` (
-    site VARCHAR(32) NOT NULL,
-    sourceFingerprint VARCHAR(191) NOT NULL,
-    sourceUrl TEXT NOT NULL,
-    sourcePath TEXT NULL,
-    localPath TEXT NULL,
-    downloadStatus VARCHAR(64) NOT NULL DEFAULT 'pending',
-    downloadedAt DATETIME(3) NULL,
-    lastSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    retentionUntil DATETIME(3) NULL,
-    fileSizeBytes BIGINT NULL,
-    mimeType VARCHAR(191) NULL,
-    downloadError LONGTEXT NULL,
-    downloadAttempts INT NOT NULL DEFAULT 0,
-    lastObservedContext VARCHAR(191) NULL,
-    priorityClass VARCHAR(32) NULL,
-    retryAfter DATETIME(3) NULL,
-    firstSeenAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    PRIMARY KEY (site, sourceFingerprint),
-    KEY `MediaSource_lastSeenAt_idx` (lastSeenAt),
-    KEY `MediaSource_retentionUntil_idx` (retentionUntil),
-    KEY `MediaSource_priorityClass_idx` (priorityClass),
-    KEY `MediaSource_retryAfter_idx` (retryAfter)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS FavoriteChronology (
+  kind TEXT NOT NULL,
+  site TEXT NOT NULL,
+  service TEXT NOT NULL,
+  creatorid TEXT NOT NULL,
+  postid TEXT NOT NULL DEFAULT '',
+  favoritedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  lastconfirmedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  favedseq BIGINT NULL,
+  PRIMARY KEY (kind, site, service, creatorid, postid)
+);
 
-CREATE TABLE
-  IF NOT EXISTS `DiscoveryCache` (
-    site VARCHAR(32) PRIMARY KEY,
-    payloadJson LONGTEXT NOT NULL,
-    updatedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    expiresAt DATETIME(3) NOT NULL,
-    KEY `DiscoveryCache_expiresAt_idx` (expiresAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE INDEX IF NOT EXISTS favoritechronology_lastconfirmedat_idx ON FavoriteChronology (lastconfirmedat);
+CREATE INDEX IF NOT EXISTS favoritechronology_kind_site_favoritedat_idx ON FavoriteChronology (kind, site, favoritedat DESC);
+CREATE INDEX IF NOT EXISTS favoritechronology_favedseq_idx ON FavoriteChronology (favedseq DESC);
 
-CREATE TABLE
-  IF NOT EXISTS `DiscoveryBlock` (
-    site VARCHAR(32) NOT NULL,
-    service VARCHAR(191) NOT NULL,
-    creatorId VARCHAR(191) NOT NULL,
-    blockedAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-    PRIMARY KEY (site, service, creatorId),
-    KEY `DiscoveryBlock_blockedAt_idx` (blockedAt)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+CREATE TABLE IF NOT EXISTS FavoriteCache (
+  kind TEXT NOT NULL,
+  site TEXT NOT NULL,
+  payloadjson TEXT NOT NULL,
+  updatedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expiresat TIMESTAMPTZ NOT NULL,
+  PRIMARY KEY (kind, site)
+);
 
+CREATE INDEX IF NOT EXISTS favoritecache_expiresat_idx ON FavoriteCache (expiresat);
+
+CREATE TABLE IF NOT EXISTS MediaAsset (
+  site TEXT NOT NULL,
+  sourcefingerprint TEXT NOT NULL,
+  sourceurl TEXT NOT NULL,
+  sourcepath TEXT NULL,
+  mediakind TEXT NULL,
+  mimetype TEXT NULL,
+  width INTEGER NULL,
+  height INTEGER NULL,
+  durationseconds DOUBLE PRECISION NULL,
+  nativethumbnailurl TEXT NULL,
+  thumbnailassetpath TEXT NULL,
+  clipassetpath TEXT NULL,
+  probestatus TEXT NOT NULL DEFAULT 'pending',
+  previewstatus TEXT NOT NULL DEFAULT 'pending',
+  firstseenat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  lastseenat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  hotuntil TIMESTAMPTZ NULL,
+  retryafter TIMESTAMPTZ NULL,
+  generationattempts INTEGER NOT NULL DEFAULT 0,
+  lasterror TEXT NULL,
+  lastobservedcontext TEXT NULL,
+  cachedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expiresat TIMESTAMPTZ NULL,
+  PRIMARY KEY (site, sourcefingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS mediaasset_lastseenat_idx ON MediaAsset (lastseenat);
+CREATE INDEX IF NOT EXISTS mediaasset_hotuntil_idx ON MediaAsset (hotuntil);
+CREATE INDEX IF NOT EXISTS mediaasset_retryafter_idx ON MediaAsset (retryafter);
+CREATE INDEX IF NOT EXISTS mediaasset_expiresat_idx ON MediaAsset (expiresat);
+
+CREATE TABLE IF NOT EXISTS MediaSource (
+  site TEXT NOT NULL,
+  sourcefingerprint TEXT NOT NULL,
+  sourceurl TEXT NOT NULL,
+  sourcepath TEXT NULL,
+  localpath TEXT NULL,
+  downloadstatus TEXT NOT NULL DEFAULT 'pending',
+  downloadedat TIMESTAMPTZ NULL,
+  lastseenat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  retentionuntil TIMESTAMPTZ NULL,
+  filesizebytes BIGINT NULL,
+  mimetype TEXT NULL,
+  downloaderror TEXT NULL,
+  downloadattempts INTEGER NOT NULL DEFAULT 0,
+  lastobservedcontext TEXT NULL,
+  priorityclass TEXT NULL,
+  retryafter TIMESTAMPTZ NULL,
+  firstseenat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (site, sourcefingerprint)
+);
+
+CREATE INDEX IF NOT EXISTS mediasource_lastseenat_idx ON MediaSource (lastseenat);
+CREATE INDEX IF NOT EXISTS mediasource_retentionuntil_idx ON MediaSource (retentionuntil);
+CREATE INDEX IF NOT EXISTS mediasource_priorityclass_idx ON MediaSource (priorityclass);
+CREATE INDEX IF NOT EXISTS mediasource_retryafter_idx ON MediaSource (retryafter);
+
+CREATE TABLE IF NOT EXISTS DiscoveryCache (
+  site TEXT PRIMARY KEY,
+  payloadjson TEXT NOT NULL,
+  updatedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expiresat TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS discoverycache_expiresat_idx ON DiscoveryCache (expiresat);
+
+CREATE TABLE IF NOT EXISTS DiscoveryBlock (
+  site TEXT NOT NULL,
+  service TEXT NOT NULL,
+  creatorid TEXT NOT NULL,
+  blockedat TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (site, service, creatorid)
+);
+
+CREATE INDEX IF NOT EXISTS discoveryblock_blockedat_idx ON DiscoveryBlock (blockedat);

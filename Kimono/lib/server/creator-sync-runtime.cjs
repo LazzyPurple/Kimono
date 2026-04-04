@@ -1,4 +1,4 @@
-﻿const mysql = require("mysql2/promise");
+﻿const { createPostgresRuntimeClient } = require("./postgres-runtime.cjs");
 
 const SITE_BASE_URLS = {
   kemono: "https://kemono.cr",
@@ -16,9 +16,7 @@ const BROWSER_USER_AGENT =
 function parseDatabaseDriver(databaseUrl) {
   const normalized = String(databaseUrl || "").toLowerCase();
   if (!normalized) return null;
-  if (normalized.startsWith("mysql://")) return "mysql";
   if (normalized.startsWith("postgres://") || normalized.startsWith("postgresql://")) return "postgres";
-  if (normalized.startsWith("file:") || normalized.startsWith("sqlite:")) return "sqlite";
   return "unknown";
 }
 
@@ -119,11 +117,11 @@ function toCreatorRows(site, creators, syncedAt) {
 }
 
 async function getSiteStatus(connection, site) {
-  const [rows] = await connection.execute(
+  const rows = await connection.queryRows(
     "SELECT COUNT(*) AS total, MAX(catalogSyncedAt) AS syncedAt FROM Creator WHERE site = ? AND archivedAt IS NULL",
     [site]
   );
-  const row = Array.isArray(rows) ? rows[0] : null;
+  const row = rows[0] ?? null;
   const syncedAt = row?.syncedAt ? new Date(row.syncedAt) : null;
   return {
     total: Number(row?.total ?? 0),
@@ -132,11 +130,11 @@ async function getSiteStatus(connection, site) {
 }
 
 async function getLatestKimonoSession(connection, site) {
-  const [rows] = await connection.execute(
+  const rows = await connection.queryRows(
     "SELECT cookie FROM KimonoSession WHERE site = ? ORDER BY savedAt DESC LIMIT 1",
     [site]
   );
-  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+  return rows[0] ?? null;
 }
 
 async function upsertCreatorBatch(connection, rows) {
@@ -145,7 +143,7 @@ async function upsertCreatorBatch(connection, rows) {
   }
 
   const site = rows[0].site;
-  const [existingRows] = await connection.execute(
+  const existingRows = await connection.queryRows(
     `SELECT service, creatorId FROM Creator WHERE site = ? AND (${rows.map(() => "(service = ? AND creatorId = ?)").join(" OR ")})`,
     [site, ...rows.flatMap((row) => [row.service, row.creatorId])]
   );
@@ -176,25 +174,25 @@ async function upsertCreatorBatch(connection, rows) {
     null,
   ]);
 
-  await connection.execute(
+  await connection.executeResult(
     `INSERT INTO Creator (site, service, creatorId, name, normalizedName, indexed, updated, favorited, postCount, publicId, relationId, dmCount, shareCount, hasChats, chatCount, profileImageUrl, bannerImageUrl, rawIndexPayload, catalogSyncedAt, archivedAt) VALUES ${valuesSql}
-     ON DUPLICATE KEY UPDATE
-       name = VALUES(name),
-       normalizedName = VALUES(normalizedName),
-       indexed = VALUES(indexed),
-       updated = VALUES(updated),
-       favorited = VALUES(favorited),
-       postCount = VALUES(postCount),
-       publicId = VALUES(publicId),
-       relationId = VALUES(relationId),
-       dmCount = VALUES(dmCount),
-       shareCount = VALUES(shareCount),
-       hasChats = VALUES(hasChats),
-       chatCount = VALUES(chatCount),
-       profileImageUrl = COALESCE(VALUES(profileImageUrl), profileImageUrl),
-       bannerImageUrl = COALESCE(VALUES(bannerImageUrl), bannerImageUrl),
-       rawIndexPayload = VALUES(rawIndexPayload),
-       catalogSyncedAt = VALUES(catalogSyncedAt),
+     ON CONFLICT (site, service, creatorId) DO UPDATE SET
+       name = EXCLUDED.name,
+       normalizedName = EXCLUDED.normalizedName,
+       indexed = EXCLUDED.indexed,
+       updated = EXCLUDED.updated,
+       favorited = EXCLUDED.favorited,
+       postCount = EXCLUDED.postCount,
+       publicId = EXCLUDED.publicId,
+       relationId = EXCLUDED.relationId,
+       dmCount = EXCLUDED.dmCount,
+       shareCount = EXCLUDED.shareCount,
+       hasChats = EXCLUDED.hasChats,
+       chatCount = EXCLUDED.chatCount,
+       profileImageUrl = COALESCE(EXCLUDED.profileImageUrl, Creator.profileImageUrl),
+       bannerImageUrl = COALESCE(EXCLUDED.bannerImageUrl, Creator.bannerImageUrl),
+       rawIndexPayload = EXCLUDED.rawIndexPayload,
+       catalogSyncedAt = EXCLUDED.catalogSyncedAt,
        archivedAt = NULL`,
     values
   );
@@ -204,15 +202,13 @@ async function upsertCreatorBatch(connection, rows) {
 
 async function archiveStaleCreators(connection, site, activeIds) {
   if (!activeIds.length) {
-    const [result] = await connection.execute("UPDATE Creator SET archivedAt = NOW(3) WHERE site = ? AND archivedAt IS NULL", [site]);
-    return Number(result?.affectedRows ?? 0);
+    return connection.executeResult("UPDATE Creator SET archivedAt = NOW(3) WHERE site = ? AND archivedAt IS NULL", [site]);
   }
 
-  const [result] = await connection.execute(
+  return connection.executeResult(
     `UPDATE Creator SET archivedAt = NOW(3) WHERE site = ? AND archivedAt IS NULL AND NOT (${activeIds.map(() => "(service = ? AND creatorId = ?)").join(" OR ")})`,
     [site, ...activeIds.flatMap((entry) => [entry.service, entry.creatorId])]
   );
-  return Number(result?.affectedRows ?? 0);
 }
 
 async function runCreatorSync(options = {}) {
@@ -222,7 +218,7 @@ async function runCreatorSync(options = {}) {
   const sites = Array.isArray(options.sites) && options.sites.length > 0 ? options.sites : CREATOR_SYNC_SITES;
   const driver = parseDatabaseDriver(env.DATABASE_URL);
 
-  if (driver !== "mysql") {
+  if (driver !== "postgres") {
     logger.info?.(`[BOOT] Creator sync skipped (driver=${driver ?? "none"}).`);
     return {
       skipped: true,
@@ -241,7 +237,7 @@ async function runCreatorSync(options = {}) {
     failedSites: [],
   };
 
-  const connection = await mysql.createConnection(env.DATABASE_URL);
+  const connection = createPostgresRuntimeClient(env.DATABASE_URL);
   try {
     for (const site of sites) {
       const now = new Date();
@@ -286,13 +282,13 @@ async function runCreatorSync(options = {}) {
     logger.info?.(`[BOOT] Creator sync complete: refreshed=${summary.refreshedSites.length}, reused=${summary.reusedSites.length}, failed=${summary.failedSites.length}`);
     return summary;
   } finally {
-    await connection.end();
+    await connection.close();
   }
 }
 
 function scheduleCreatorSyncRefresh({ env = process.env, logger = console, intervalMs = CREATOR_SYNC_INTERVAL_MS } = {}) {
   const driver = parseDatabaseDriver(env.DATABASE_URL);
-  if (driver !== "mysql") {
+  if (driver !== "postgres") {
     return { skipped: true, driver, intervalMs };
   }
 

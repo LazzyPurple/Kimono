@@ -23,7 +23,7 @@ test("startup DB maintenance preserves creator catalog tables while purging rebu
 
   const summary = await purgeRebuildableDataOnStartup({
     env: {
-      DATABASE_URL: "mysql://user:pass@localhost:3306/kimono",
+      DATABASE_URL: "postgres://user:pass@localhost:5432/kimono",
       PREVIEW_ASSET_DIR: "tmp/custom-preview-assets",
       MEDIA_SOURCE_CACHE_DIR: "tmp/custom-media-source-cache",
     },
@@ -37,10 +37,10 @@ test("startup DB maintenance preserves creator catalog tables while purging rebu
     logger: { info() {}, warn() {} },
   });
 
-  assert.equal(REBUILDABLE_DB_TABLES.includes("CreatorIndex"), false);
-  assert.equal(REBUILDABLE_DB_TABLES.includes("CreatorsCache"), false);
-  assert.equal(PRESERVED_DB_TABLES.includes("CreatorIndex"), true);
-  assert.equal(PRESERVED_DB_TABLES.includes("CreatorsCache"), true);
+  assert.equal(REBUILDABLE_DB_TABLES.includes("Creator"), false);
+  assert.equal(REBUILDABLE_DB_TABLES.includes("KimonoSession"), false);
+  assert.equal(PRESERVED_DB_TABLES.includes("Creator"), true);
+  assert.equal(PRESERVED_DB_TABLES.includes("KimonoSession"), true);
   assert.deepEqual(summary.tablesPurged, REBUILDABLE_DB_TABLES);
   assert.deepEqual(summary.directoriesReset, [
     path.resolve(root, "tmp/custom-preview-assets"),
@@ -72,16 +72,16 @@ test("startup DB maintenance ignores missing tables and cache directories", asyn
 
   const summary = await purgeRebuildableDataOnStartup({
     env: {
-      DATABASE_URL: "mysql://user:pass@localhost:3306/kimono",
+      DATABASE_URL: "postgres://user:pass@localhost:5432/kimono",
     },
-    executeSql: async (sql) => {
-      executedSql.push(sql);
-      if (sql.includes("MediaSourceCache")) {
-        const error = new Error("missing table");
-        error.code = "ER_NO_SUCH_TABLE";
-        throw error;
-      }
-    },
+      executeSql: async (sql) => {
+        executedSql.push(sql);
+        if (sql.includes("MediaSource")) {
+          const error = new Error("missing table");
+          error.code = "42P01";
+          throw error;
+        }
+      },
     resetDirectory: async (directoryPath) => {
       resetDirs.push(directoryPath);
       if (directoryPath.endsWith(path.join("tmp", "preview-assets"))) {
@@ -94,8 +94,8 @@ test("startup DB maintenance ignores missing tables and cache directories", asyn
     logger: { info() {}, warn() {} },
   });
 
-  assert.equal(summary.tablesPurged.includes("PostCache"), true);
-  assert.equal(summary.tablesPurged.includes("MediaSourceCache"), false);
+  assert.equal(summary.tablesPurged.includes("Post"), true);
+  assert.equal(summary.tablesPurged.includes("MediaSource"), false);
   assert.equal(summary.directoriesReset.includes(path.resolve(root, "tmp", "media-source-cache")), true);
   assert.equal(resetDirs.length >= 1, true);
 });
@@ -104,10 +104,10 @@ test("startup DB maintenance fails fast on unexpected SQL errors", async () => {
   await assert.rejects(
     purgeRebuildableDataOnStartup({
       env: {
-        DATABASE_URL: "mysql://user:pass@localhost:3306/kimono",
+        DATABASE_URL: "postgres://user:pass@localhost:5432/kimono",
       },
       executeSql: async (sql) => {
-        if (sql.includes("PostCache")) {
+        if (sql.includes("Post")) {
           throw new Error("boom");
         }
       },

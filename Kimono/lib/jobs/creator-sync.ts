@@ -1,4 +1,4 @@
-﻿import type { Connection } from "mysql2/promise";
+import type { DbConnection } from "../db.ts";
 
 import { appendAppLog, logAppError } from "../app-logger.ts";
 import { TTL } from "../config/ttl.ts";
@@ -64,7 +64,7 @@ function normalizeCreatorName(value: string): string {
     .trim();
 }
 
-async function fetchCreatorCatalog(conn: Connection, site: KimonoSite): Promise<UpstreamCreator[]> {
+async function fetchCreatorCatalog(conn: DbConnection, site: KimonoSite): Promise<UpstreamCreator[]> {
   const decision = rateGuard.canRequest(site, "discover");
   if (!decision.allowed) {
     throw new Error(`Creator sync blocked by cooldown for ${site}:discover (${decision.retryAfterMs}ms)`);
@@ -132,7 +132,7 @@ function toCreatorInsertRows(site: KimonoSite, creators: UpstreamCreator[], sync
     }));
 }
 
-export async function runCreatorSync(conn: Connection, opts: CreatorSyncOptions = {}): Promise<CreatorSyncResult[]> {
+export async function runCreatorSync(conn: DbConnection, opts: CreatorSyncOptions = {}): Promise<CreatorSyncResult[]> {
   const sites = opts.sites?.length ? opts.sites : DEFAULT_SITES;
   const results: CreatorSyncResult[] = [];
 

@@ -1,11 +1,9 @@
-﻿import { createRequire } from "node:module";
+import startupModule from "./server/startup.cjs";
 
 import { db, withDbConnection, type KimonoSite } from "./db/index.ts";
 import { getGlobalUpstreamRateGuard, type UpstreamCooldownSnapshotEntry } from "./api/upstream-rate-guard.ts";
-import { getLocalPrismaClient } from "./prisma.ts";
 
-const require = createRequire(import.meta.url);
-const { collectStartupDiagnostics } = require("./server/startup.cjs");
+const { collectStartupDiagnostics } = startupModule;
 
 const SITES = ["kemono", "coomer"] as const satisfies KimonoSite[];
 
@@ -52,15 +50,8 @@ function toIso(value: Date | null | undefined): string | null {
 
 async function queryRows<T = RawRecord>(sql: string, values: unknown[] = []): Promise<T[]> {
   return withDbConnection(async (conn) => {
-    if (conn) {
-      const [rows] = await conn.query(sql, values as never[]);
-      return rows as T[];
-    }
-
-    const prisma = getLocalPrismaClient() as unknown as {
-      $queryRawUnsafe<R = T[]>(statement: string, ...args: unknown[]): Promise<R>;
-    };
-    return prisma.$queryRawUnsafe<T[]>(sql, ...values);
+    const [rows] = await conn.query(sql, values as never[]);
+    return rows as T[];
   });
 }
 
@@ -151,7 +142,7 @@ async function getPreviewStats() {
 }
 
 export function createServerHealthService(dependencies: ServerHealthDependencies = {}) {
-  const collectDiagnostics = dependencies.collectStartupDiagnostics ?? (() => collectStartupDiagnostics({ appDir: process.cwd(), cwd: process.cwd(), env: process.env }));
+  const collectDiagnostics = dependencies.collectStartupDiagnostics ?? (() => collectStartupDiagnostics({ cwd: process.cwd(), env: process.env }));
   const getRateGuardSnapshot = dependencies.getRateGuardSnapshot ?? (() => getGlobalUpstreamRateGuard().snapshot());
 
   return {

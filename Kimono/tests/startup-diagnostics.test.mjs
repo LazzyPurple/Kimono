@@ -18,7 +18,7 @@ test("collectStartupDiagnostics reports runtime readiness for database, session 
     cwd: tempDir,
     env: {
       PORT: "3001",
-      DATABASE_URL: "mysql://user:pass@localhost:3306/kimono",
+      DATABASE_URL: "postgres://user:pass@localhost:5432/kimono",
       AUTH_SECRET: "secret",
       AUTH_URL: "https://kimono.example",
       ADMIN_PASSWORD: "admin",
@@ -31,7 +31,7 @@ test("collectStartupDiagnostics reports runtime readiness for database, session 
   });
 
   assert.equal(diagnostics.runtime.database.configured, true);
-  assert.equal(diagnostics.runtime.database.driver, "mysql");
+  assert.equal(diagnostics.runtime.database.driver, "postgres");
   assert.equal(diagnostics.runtime.sessionStore.configured, true);
   assert.equal(diagnostics.runtime.previewTools.ffmpeg.status, "configured");
   assert.equal(diagnostics.runtime.previewTools.ffprobe.status, "missing");

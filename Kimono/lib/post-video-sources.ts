@@ -7,9 +7,14 @@ import {
   buildMediaSourcePublicUrl,
   createPreviewSourceFingerprint,
 } from "./popular-preview-assets.ts";
-import type { PerformanceRepository } from "./db/index.ts";
+type MediaSourceCacheRecord = {
+  localVideoPath?: string | null;
+  downloadStatus?: string | null;
+};
 
-type MediaSourceLookupRepository = Pick<PerformanceRepository, "getMediaSourceCache">;
+type MediaSourceLookupRepository = {
+  getMediaSourceCache(input: { site: UnifiedPost["site"]; sourceFingerprint: string }): Promise<MediaSourceCacheRecord | null>;
+};
 
 export interface RequestedPostVideoSource {
   path: string;
@@ -63,4 +68,5 @@ export async function hydratePostVideoSources(
     })
   );
 }
+
 

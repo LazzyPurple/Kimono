@@ -27,7 +27,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Sea
   }
 
   const payload = await getServerHealthPayload();
-  const dbOk = Boolean(payload.runtime?.database?.configured) && payload.runtime?.database?.driver === "mysql";
+  const dbOk = Boolean(payload.runtime?.database?.configured) && payload.runtime?.database?.driver === "postgres";
 
   return (
     <DiagnosticsPageShell

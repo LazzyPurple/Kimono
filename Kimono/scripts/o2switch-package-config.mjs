@@ -7,10 +7,10 @@ const BASE_RUNTIME_DEPENDENCIES = [
   "ffmpeg-static",
   "fluent-ffmpeg",
   "lucide-react",
-  "mysql2",
   "next",
   "next-auth",
   "otplib",
+  "postgres",
   "qrcode",
   "radix-ui",
   "react",
@@ -50,7 +50,6 @@ export const EXCLUDED_SOURCE_PATHS = [
   "init-error.log",
   "next_error.log",
   "node_modules",
-  "prisma/dev.db",
   "test_*.js",
   "test_*.json",
   "test_*.log",
@@ -60,11 +59,7 @@ export const EXCLUDED_SOURCE_PATHS = [
 ];
 
 export const LOCAL_ONLY_DEPENDENCIES = [
-  "@prisma/adapter-better-sqlite3",
-  "@prisma/client",
-  "better-sqlite3",
   "dotenv",
-  "prisma",
   "shadcn",
 ];
 
@@ -111,4 +106,3 @@ export function createRuntimePackageManifest(sourcePackage, sourceLock = null) {
     dependencies: runtimeDependencies,
   };
 }
-

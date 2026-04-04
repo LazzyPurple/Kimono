@@ -1,4 +1,4 @@
-﻿import test from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
@@ -28,7 +28,7 @@ function withEnv(overrides, fn) {
     });
 }
 
-test("logs dashboard data includes auth runtime snapshot and recent logs", async () => {
+test("logs dashboard data includes auth snapshot and recent logs", async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "kimono-logs-dashboard-"));
   const logPath = path.join(tempRoot, "tmp", "app-debug.log");
 
@@ -79,12 +79,12 @@ test("logs dashboard data includes auth runtime snapshot and recent logs", async
 
       assert.equal(dashboard.logs.logs.length, 1);
       assert.equal(dashboard.logs.logs[0].source, "api");
-      assert.equal(dashboard.auth.runtime.env.adminPasswordConfigured, true);
-      assert.equal(dashboard.auth.auth.database.ok, true);
-      assert.equal(dashboard.auth.auth.database.adminUser?.exists, true);
-      assert.equal(dashboard.auth.auth.database.adminUser?.totpEnabled, false);
-      assert.equal("passwordProbe" in dashboard.auth, false);
-      assert.equal("authorizationProbe" in dashboard.auth, false);
+      assert.equal(dashboard.auth.env.adminPasswordConfigured, true);
+      assert.equal(dashboard.auth.database.ok, true);
+      assert.equal(dashboard.auth.database.adminUser?.exists, true);
+      assert.equal(dashboard.auth.database.adminUser?.totpEnabled, false);
+      assert.equal("passwordProbe" in dashboard, false);
+      assert.equal("authorizationProbe" in dashboard, false);
     }
   );
 });
@@ -118,10 +118,10 @@ test("logs dashboard skips live auth and database probes during build", async ()
       });
 
       assert.equal(storeTouched, false);
-      assert.equal(dashboard.auth.auth.database.ok, false);
-      assert.equal(dashboard.auth.auth.database.error?.errorName, "BuildProbeSkipped");
+      assert.equal(dashboard.auth.database.ok, false);
+      assert.equal(dashboard.auth.database.error?.errorName, "BuildProbeSkipped");
       assert.equal(
-        dashboard.auth.auth.database.error?.errorMessage,
+        dashboard.auth.database.error?.errorMessage,
         "Runtime auth/database probe skipped during build."
       );
     }
